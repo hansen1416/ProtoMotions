@@ -18,3 +18,5 @@ data/amass/*.pkl
 !.claude/commands/
 .cursor/
 renders/
+
+isaacgym/
