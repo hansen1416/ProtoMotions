@@ -174,6 +174,15 @@ python data/scripts/convert_amass_to_motionlib.py \
     --force-remake \
     --device cuda
 
+python data/scripts/convert_amass_to_motionlib_with_morphology.py \
+  /home/hlz/datasets/humos_proto/ \
+  /home/hlz/datasets/humos_proto_motionlib/ \
+  --humanoid-type smpl \
+  --output-fps 30 \
+  --motion-config /home/hlz/datasets/humos_proto/humos_8.yaml \
+  --force-remake \
+  --device cuda
+
 python examples/motion_libs_visualizer.py \
     --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
     --robot smpl \
