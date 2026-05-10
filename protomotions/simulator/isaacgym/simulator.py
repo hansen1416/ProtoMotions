@@ -18,6 +18,7 @@ import sys
 from dataclasses import asdict
 from isaacgym import gymapi, gymtorch, gymutil  # type: ignore[misc]
 import torch
+import yaml
 
 log = logging.getLogger(__name__)
 from torch import Tensor
@@ -109,6 +110,16 @@ class IsaacGymSimulator(Simulator):
         # Projectile storage (populated during env creation)
         self._projectile_handles: list = [[] for _ in range(self.num_envs)]
         self._projectile_sim_indices: list = []
+
+        # morphology =======
+        self.morphology = False
+        if robot_config.asset.asset_folder_name and robot_config.asset.asset_info_file:
+            self.morphology = True
+
+        # self.env_id_to_asset_id
+        # self.env_id_to_asset_name
+        # self.env_morphology
+        # morphology =======
 
     def _create_simulation(self) -> None:
         """Create the IsaacGym simulation environment.
@@ -371,6 +382,167 @@ class IsaacGymSimulator(Simulator):
         asset_options = self._create_humanoid_asset_options()
         return self._gym.load_asset(self._sim, asset_root, asset_file, asset_options)
 
+    # morphology =======
+    def _load_humanoid_assets(self):
+        """Load all morphology humanoid XML assets and aligned metadata."""
+
+        asset_root = self.robot_config.asset.asset_root
+        asset_folder = self.robot_config.asset.asset_folder_name
+        asset_dir = os.path.join(asset_root, asset_folder)
+
+        asset_info_file = os.path.join(asset_root, self.robot_config.asset.asset_info_file)
+
+        if not os.path.isdir(asset_dir):
+            raise ValueError(f"Asset folder is not a directory: {asset_dir}")
+
+        if not os.path.exists(asset_info_file):
+            raise ValueError(f"Asset info YAML does not exist: {asset_info_file}")
+
+        with open(asset_info_file, "r") as f:
+            asset_infos = yaml.safe_load(f)
+
+        if not isinstance(asset_infos, list):
+            raise ValueError(
+                f"Expected asset info YAML to be a top-level list, got {type(asset_infos)}"
+            )
+
+        assets = []
+
+        self._humanoid_asset_files = []
+        self._humanoid_asset_ids = []
+        self._humanoid_assets_info = []
+
+        asset_options = self._create_humanoid_asset_options()
+
+        for info in asset_infos:
+            gender = info["gender"]
+            beta_key = info["beta_key"]
+            asset_id = info["asset_id"]
+
+            expected_asset_id = f"{gender}_{beta_key}"
+            if asset_id != expected_asset_id:
+                raise ValueError(
+                    f"asset_id mismatch: got {asset_id}, expected {expected_asset_id}"
+                )
+
+            file_name = f"{asset_id}_smpl.xml"
+            xml_file = os.path.join(asset_dir, file_name)
+
+            if not os.path.exists(xml_file):
+                raise FileNotFoundError(f"Missing morphology XML: {xml_file}")
+
+            asset = self._gym.load_asset(self._sim, asset_dir, file_name, asset_options)
+
+            if asset is None:
+                raise RuntimeError(f"Failed to load humanoid asset: {xml_file}")
+
+            assets.append(asset)
+
+            self._humanoid_asset_files.append(file_name)
+            self._humanoid_asset_ids.append(asset_id)
+            self._humanoid_assets_info.append(info)
+
+        if len(assets) == 0:
+            raise RuntimeError(f"No morphology humanoid assets loaded from {asset_dir}")
+
+        print(f"Loaded {len(assets)} morphology humanoid assets from {asset_dir}")
+        
+        return assets
+    
+    def _build_humanoid_asset_assignment(self):
+        """Assign one morphology asset to each environment."""
+
+        num_assets = len(self._humanoid_assets)
+
+        if num_assets == 0:
+            raise RuntimeError("No humanoid assets loaded.")
+
+        # env_id -> asset index
+        self.env_id_to_asset_id = (
+            torch.arange(self.num_envs, device=self.device, dtype=torch.long)
+            % num_assets
+        )
+
+        # # env_id -> asset name, e.g. "male_fb454239"
+        # self.env_id_to_asset_name = [
+        #     self._humanoid_asset_ids[int(asset_idx)]
+        #     for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+        # ]
+
+        # # env_id -> full metadata dict
+        # self.env_id_to_asset_info = [
+        #     self._humanoid_assets_info[int(asset_idx)]
+        #     for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+        # ]
+
+        # env_id -> betas tensor, shape [num_envs, 10]
+        self.env_id_beta = torch.tensor(
+            [
+                self._humanoid_assets_info[int(asset_idx)]["betas"]
+                for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+            ],
+            device=self.device,
+            dtype=torch.float32,
+        )
+
+        # env_id -> root height tensor, shape [num_envs]
+        self.env_root_height = torch.tensor(
+            [
+                self._humanoid_assets_info[int(asset_idx)]["root_height"]
+                for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+            ],
+            device=self.device,
+            dtype=torch.float32,
+        )
+
+        # env_id -> gender string list
+        self.env_gender = [
+            self._humanoid_assets_info[int(asset_idx)]["gender"]
+            for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+        ]
+
+        # env_id -> beta_key string list
+        self.env_beta_key = [
+            self._humanoid_assets_info[int(asset_idx)]["beta_key"]
+            for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+        ]
+
+        print(f"Assigned {self.num_envs} envs over {num_assets} morphology assets")
+
+    def _validate_humanoid_asset_topology(self, humanoid_asset, asset_id: str):
+        num_bodies = self._gym.get_asset_rigid_body_count(humanoid_asset)
+        num_dof = self._gym.get_asset_dof_count(humanoid_asset)
+        # num_joints = self._gym.get_asset_joint_count(humanoid_asset)
+
+        body_names = self._gym.get_asset_rigid_body_names(humanoid_asset)
+        dof_names = self._gym.get_asset_dof_names(humanoid_asset)
+
+        assert num_bodies == self._num_bodies, (
+            f"{asset_id}: num_bodies={num_bodies}, expected={self._num_bodies}"
+        )
+
+        assert num_dof == self._num_dof, (
+            f"{asset_id}: num_dof={num_dof}, expected={self._num_dof}"
+        )
+
+        assert body_names == self._body_names, (
+            f"{asset_id}: body names/order mismatch"
+        )
+
+        assert dof_names == self._dof_names, (
+            f"{asset_id}: DOF names/order mismatch"
+        )
+
+    def get_default_robot_reset_state(self) -> ResetState:
+        reset_state = super().get_default_robot_reset_state()
+
+        if self.morphology:
+            reset_state.root_pos[:, 2] = self.env_root_height
+
+        return reset_state
+
+    # morphology =======
+
     def _load_marker_asset(self) -> None:
         asset_root = "protomotions/data/assets/urdf/"
         asset_file = "traj_marker.urdf"
@@ -492,14 +664,31 @@ class IsaacGymSimulator(Simulator):
     ) -> None:
         lower = gymapi.Vec3(0.0, 0.0, 0.0)
         upper = gymapi.Vec3(spacing, spacing, spacing)
+        
+        # morphology =======
+        # if its passed, load all assets
+        if self.morphology:
+            self._humanoid_assets = self._load_humanoid_assets()
 
-        # Load the base humanoid asset
-        self._humanoid_asset = humanoid_asset = self._load_humanoid_asset()
+            self._build_humanoid_asset_assignment()
 
-        # Create multiple asset variants for friction domain randomization if needed
-        self._humanoid_assets_for_friction = self._create_friction_randomized_assets(
-            humanoid_asset
-        )
+            for asset, asset_id in zip(self._humanoid_assets, self._humanoid_asset_ids):
+                self._validate_humanoid_asset_topology(asset, asset_id)
+
+            self._humanoid_assets_for_friction = None
+
+            # Use first asset as canonical asset for simulator body ordering.
+            humanoid_asset = self._humanoid_assets[0]
+            self._humanoid_asset = humanoid_asset
+        # morphology =======
+        else:
+            # Load the base humanoid asset
+            self._humanoid_asset = humanoid_asset = self._load_humanoid_asset()
+
+            # Create multiple asset variants for friction domain randomization if needed
+            self._humanoid_assets_for_friction = self._create_friction_randomized_assets(
+                humanoid_asset
+            )
 
         robot_num_bodies = self._gym.get_asset_rigid_body_count(humanoid_asset)
         assert (
@@ -527,8 +716,16 @@ class IsaacGymSimulator(Simulator):
             )
             for env_id in range(self.num_envs):
                 env_ptr = self._gym.create_env(self._sim, lower, upper, num_per_row)
-                # Get the appropriate asset for this environment (for friction domain randomization)
-                env_asset = self._get_asset_for_env(env_id)
+                
+                # morphology =======
+                if self.morphology:
+                    asset_idx = int(self.env_id_to_asset_id[env_id].item())
+                    env_asset = self._humanoid_assets[asset_idx]
+                # morphology =======
+                else:
+                    # Get the appropriate asset for this environment (for friction domain randomization)
+                    env_asset = self._get_asset_for_env(env_id)
+
                 self._build_env(env_id, env_ptr, env_asset, visualization_markers)
                 self._envs.append(env_ptr)
                 progress.update(task, advance=1)

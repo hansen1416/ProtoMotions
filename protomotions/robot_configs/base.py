@@ -47,6 +47,7 @@ from enum import Enum
 import os
 import re
 import torch
+from pathlib import Path
 
 
 @dataclass
@@ -114,8 +115,49 @@ class RobotAssetConfig:
     disable_gravity: Optional[bool] = None
     fix_base_link: Optional[bool] = None
 
+    # morphology =======
+    # folder to all asset files
+    asset_folder_name: Optional[str] = None
+    # yaml file include asset file name and its gender, beta, init height
+    asset_info_file: Optional[str] = None
+    # morphology =======
+
     def __post_init__(self):
         """Validate that asset_file_name is set."""
+
+        # morphology =======
+        if self.asset_folder_name is not None and self.asset_file_name is None:
+            
+            asset_dir = Path(self.asset_root) / self.asset_folder_name
+
+            if not asset_dir.exists():
+                raise ValueError(
+                    f"RobotAssetConfig.asset_folder_name ('{self.asset_folder_name}') "
+                    f"does not exist under asset_root ('{self.asset_root}')."
+                )
+
+            if not asset_dir.is_dir():
+                raise ValueError(
+                    f"RobotAssetConfig.asset_folder_name ('{self.asset_folder_name}') "
+                    f"is not a directory."
+                )
+
+            xml_files = sorted(asset_dir.glob("*.xml"))
+
+            if len(xml_files) == 0:
+                raise ValueError(
+                    f"RobotAssetConfig.asset_folder_name ('{self.asset_folder_name}') "
+                    f"must contain at least one .xml MJCF file."
+                )
+
+            # Pick deterministic canonical XML.
+            # This is only used to extract kinematic_info for `RobotConfig.__post_init__`
+            canonical_xml = xml_files[0]
+
+            self.asset_file_name = str(
+                Path(self.asset_folder_name) / canonical_xml.name
+            )
+        # morphology =======
 
         if not self.asset_file_name or not self.asset_file_name.endswith(".xml"):
             raise ValueError(
@@ -123,7 +165,6 @@ class RobotAssetConfig:
                 f"must be a valid path to an .xml MJCF file to extract kinematic info. "
                 "if you are using URDF, convert it to MJCF first"
             )
-
 
 @dataclass
 class ControlConfig:
