@@ -49,8 +49,10 @@ def main():
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--genders", nargs="+", default=["male", "female"])
     parser.add_argument("--apply-offset-height", action="store_true")
-    parser.add_argument("--yaml-name", default="humos_8.yaml")
+    
     args = parser.parse_args()
+
+    yaml_name = f"humos_{args.num}.yaml"
 
     src = Path(args.input)
     out_root = Path(args.out_root)
@@ -143,11 +145,11 @@ def main():
 
         print(f"[{idx}] saved {npz_path} | gender={gender} | beta_key={beta_key}")
 
-    yaml_path = out_root / args.yaml_name
+    yaml_path = out_root / yaml_name
     with open(yaml_path, "w") as f:
         yaml.safe_dump({"motions": yaml_motions}, f, sort_keys=False)
 
-    manifest_path = out_root / "humos_8_manifest.yaml"
+    manifest_path = out_root / f"humos_{args.num}_manifest.yaml"
     with open(manifest_path, "w") as f:
         yaml.safe_dump({"variants": manifest}, f, sort_keys=False)
 
@@ -185,6 +187,11 @@ python data/scripts/convert_amass_to_motionlib_with_morphology.py \
 
 python examples/motion_libs_visualizer.py \
     --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
+    --robot smpl \
+    --simulator isaacgym
+
+python examples/motion_libs_visualizer.py \
+    --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_128.pt \
     --robot smpl \
     --simulator isaacgym
 

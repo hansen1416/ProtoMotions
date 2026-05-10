@@ -33,7 +33,7 @@ Key Features:
 import logging
 import os
 import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, List
 from easydict import EasyDict
 from pathlib import Path
 
@@ -130,6 +130,16 @@ class MotionLib:
         None  # maybe also has local_rigid_body_rot for interpolation, see hack below
     )
 
+    # morphology =======
+    # Optional morphology metadata.
+    # These are static per motion, not per frame.
+    motion_betas: Optional[torch.Tensor] = None          # [num_motions, 10]
+    motion_gender_ids: Optional[torch.Tensor] = None     # [num_motions], female=-1, neutral=0, male=1
+    motion_genders: Optional[Tuple[str, ...]] = None
+    motion_beta_keys: Optional[Tuple[str, ...]] = None
+    motion_asset_ids: Optional[Tuple[str, ...]] = None   # e.g. "male_0e26b88d"
+    # morphology =======
+
     # Get all field names defined at class level
     _fields = list(__annotations__.keys())
 
@@ -197,6 +207,14 @@ class MotionLib:
         self.motion_files = ()
         self.lrs = None
 
+        # morphology =======
+        self.motion_betas = None
+        self.motion_gender_ids = None
+        self.motion_genders = None
+        self.motion_beta_keys = None
+        self.motion_asset_ids = None
+        # morphology =======
+
     @classmethod
     def empty(cls, device: str = "cpu"):
         """Create an empty MotionLib with no motion data.
@@ -258,6 +276,66 @@ class MotionLib:
             return self.motion_num_frames
         else:
             return self.motion_num_frames[motion_ids]
+        
+    # morphology =======
+    def has_morphology_metadata(self) -> bool:
+        """Return True if this MotionLib contains per-motion morphology metadata."""
+        return (
+            self.motion_betas is not None
+            and self.motion_gender_ids is not None
+            and self.motion_asset_ids is not None
+        )
+
+    def get_motion_betas(self, motion_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Get beta vectors for selected motion ids."""
+        if self.motion_betas is None:
+            raise RuntimeError("MotionLib does not contain motion_betas.")
+
+        if motion_ids is None:
+            return self.motion_betas
+
+        return self.motion_betas[motion_ids]
+
+    def get_motion_gender_ids(
+        self, motion_ids: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """Get gender ids for selected motion ids: female=-1, neutral=0, male=1."""
+        if self.motion_gender_ids is None:
+            raise RuntimeError("MotionLib does not contain motion_gender_ids.")
+
+        if motion_ids is None:
+            return self.motion_gender_ids
+
+        return self.motion_gender_ids[motion_ids]
+
+    def get_motion_asset_ids(
+        self, motion_ids: Optional[torch.Tensor] = None
+    ) -> Tuple[str, ...]:
+        """Get asset ids for selected motion ids, e.g. 'male_0e26b88d'."""
+        if self.motion_asset_ids is None:
+            raise RuntimeError("MotionLib does not contain motion_asset_ids.")
+
+        if motion_ids is None:
+            return tuple(self.motion_asset_ids)
+
+        ids = motion_ids.detach().cpu().tolist()
+        return tuple(self.motion_asset_ids[int(i)] for i in ids)
+
+    def build_asset_id_to_motion_ids(self) -> Dict[str, torch.Tensor]:
+        """Build mapping: asset_id -> compatible motion ids."""
+        if self.motion_asset_ids is None:
+            raise RuntimeError("MotionLib does not contain motion_asset_ids.")
+
+        mapping: Dict[str, List[int]] = {}
+
+        for motion_id, asset_id in enumerate(self.motion_asset_ids):
+            mapping.setdefault(asset_id, []).append(motion_id)
+
+        return {
+            asset_id: torch.tensor(ids, device=self.device, dtype=torch.long)
+            for asset_id, ids in mapping.items()
+        }
+    # morphology =======
 
     def process_packaged_motion_file_name_multi_gpu(self, motion_file):
         if "slurmrank" not in motion_file:
@@ -615,6 +693,17 @@ class MotionLib:
             assert loaded_data[field] is not None, f"Field {field} is None"
             setattr(self, field, loaded_data[field])
 
+        # morphology =======
+        # Normalize optional string metadata.
+        for field in [
+            "motion_genders",
+            "motion_beta_keys",
+            "motion_asset_ids",
+        ]:
+            if hasattr(self, field) and getattr(self, field) is not None:
+                setattr(self, field, tuple(getattr(self, field)))
+        # morphology =======
+
         if (
             self.contacts is not None
             and self.contacts.numel() > 0
@@ -760,7 +849,54 @@ class MotionLib:
             translation[:2] = translation_xy
 
             self.gts[start_idx:end_idx, :, :] += translation.reshape(1, 1, 3)
+    
+    # morphology =======
+    def sample_motions_for_asset_ids(
+        self,
+        asset_ids: List[str],
+        deterministic: bool = False,
+    ) -> torch.Tensor:
+        """
+        Sample one compatible motion for each asset_id.
 
+        Args:
+            asset_ids: list of asset ids, e.g. ["male_0e26b88d", "female_0e26b88d"]
+            deterministic: if True, always pick the first compatible motion.
+
+        Returns:
+            motion_ids: LongTensor [len(asset_ids)]
+        """
+        if self.motion_asset_ids is None:
+            raise RuntimeError("MotionLib does not contain motion_asset_ids.")
+
+        asset_id_to_motion_ids = self.build_asset_id_to_motion_ids()
+
+        sampled_motion_ids = []
+
+        for asset_id in asset_ids:
+            if asset_id not in asset_id_to_motion_ids:
+                raise RuntimeError(
+                    f"No compatible motions found for asset_id='{asset_id}'. "
+                    f"Available asset_ids include: {list(asset_id_to_motion_ids.keys())[:10]}"
+                )
+
+            candidate_ids = asset_id_to_motion_ids[asset_id]
+
+            if deterministic:
+                motion_id = candidate_ids[0]
+            else:
+                weights = self.motion_weights[candidate_ids]
+                probs = weights / weights.sum()
+                sampled_idx = torch.multinomial(probs, num_samples=1)[0]
+                motion_id = candidate_ids[sampled_idx]
+
+            sampled_motion_ids.append(motion_id)
+
+        return torch.stack(sampled_motion_ids).to(
+            device=self.device,
+            dtype=torch.long,
+        )
+    # morphology =======
 
 if __name__ == "__main__":
     import argparse
