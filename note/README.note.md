@@ -11,7 +11,6 @@ python examples/motion_libs_visualizer.py \
   --robot smpl_mor \
   --simulator isaacgym
 
-
 robot_config: RobotConfig in `protomotions/robot_configs/factory.py` defines all robot config, SMPL, SMPLX, etc
 
 
@@ -21,5 +20,56 @@ The `robot_config` typically passed to one of `SimulatorConfig` and `SimulatorCl
 `SimulatorClass` (protomotions/simulator/isaacgym/simulator.py) 
 includes IsaacGym, IsaacLab, Genesis, Newton and MuJoCo (CPU-only)
 
+--------
 
-SimulatorConfig
+```text
+MotionLib .pt
+  -> each motion has motion_asset_id = "{gender}_{beta_key}"
+  -> build asset_id -> compatible motion_ids
+
+Visualizer
+  -> collect unique asset_ids
+  -> create one env per unique body shape
+  -> pass requested_morphology_asset_ids to simulator
+  -> sample env_motion_ids only from the matching asset_id group
+
+Simulator
+  -> load all morphology XMLs
+  -> assign each env the requested XML asset
+  -> assert visualizer env_asset_ids == simulator env_id_to_asset_name
+```
+
+Concretely:
+
+1. `motion_lib.py` now stores morphology metadata: `motion_betas`, `motion_gender_ids`, `motion_genders`, `motion_beta_keys`, and `motion_asset_ids`, and it has `build_asset_id_to_motion_ids()` plus `sample_motions_for_asset_ids(...)`. That is the required motion-side matching logic. 
+
+2. `simulator.py` accepts `morphology_asset_ids`, validates their length against `num_envs`, loads all XML assets from the morphology folder, and assigns each env using the requested asset id. That is the required multi-body-shape humanoid loading logic. 
+
+3. `motion_libs_visualizer_mor.py` now creates one env per unique `asset_id`, samples one compatible motion per env through `sample_motions_for_asset_ids(self.env_asset_ids, ...)`, and passes `morphology_asset_ids` into the simulator. It also checks:
+
+```python
+assert self.simulator.env_id_to_asset_name == self.env_asset_ids
+```
+
+So the visualizer verifies that the simulator asset assignment matches the visualizer’s morphology assignment. 
+
+4. `base.py`, `factory.py`, and `smpl_mor.py` support the new robot type: `RobotAssetConfig` can resolve a canonical XML from `asset_folder_name`, `factory.py` registers `"smpl_mor"`, and `SmplMorRobotConfig` points to `mjcf/smpl_mor/assets.yaml`.   
+
+So the visualizer-side goal is satisfied:
+
+```text
+multiple body-shape humanoids loaded
+each env has one morphology
+each env only samples motions with the same gender/beta_key
+```
+
+```text
+env_id -> env_asset_id -> compatible motion_ids -> sampled motion_id
+```
+
+```
+python examples/motion_libs_visualizer_mor.py \
+    --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
+    --robot smpl_mor \
+    --simulator isaacgym
+```

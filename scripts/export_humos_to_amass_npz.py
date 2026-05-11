@@ -185,7 +185,7 @@ python data/scripts/convert_amass_to_motionlib_with_morphology.py \
   --force-remake \
   --device cuda
 
-python examples/motion_libs_visualizer.py \
+python examples/motion_libs_visualizer_mor.py \
     --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
     --robot smpl \
     --simulator isaacgym

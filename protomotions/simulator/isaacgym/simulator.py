@@ -66,6 +66,7 @@ class IsaacGymSimulator(Simulator):
         device: torch.device,
         scene_lib: SceneLib,
         custom_key_handlers: Optional[Dict[str, callable]] = None,
+        morphology_asset_ids: Optional[List[str]] = None,
     ) -> None:
         super().__init__(
             config=config,
@@ -116,9 +117,22 @@ class IsaacGymSimulator(Simulator):
         if robot_config.asset.asset_folder_name and robot_config.asset.asset_info_file:
             self.morphology = True
 
-        # self.env_id_to_asset_id
-        # self.env_id_to_asset_name
-        # self.env_morphology
+        # Optional external request:
+        # env_id -> requested asset_id, e.g. ["male_0e26b88d", "female_0e26b88d", ...]
+        # This is used by the visualizer/training task to force shape-matched env creation.
+        self.requested_morphology_asset_ids = morphology_asset_ids
+
+        if self.requested_morphology_asset_ids is not None:
+            if not self.morphology:
+                raise ValueError(
+                    "morphology_asset_ids was provided, but robot_config is not a morphology robot."
+                )
+
+            if len(self.requested_morphology_asset_ids) != self.num_envs:
+                raise ValueError(
+                    f"Expected len(morphology_asset_ids) == num_envs, got "
+                    f"{len(self.requested_morphology_asset_ids)} vs {self.num_envs}"
+                )
         # morphology =======
 
     def _create_simulation(self) -> None:
@@ -457,57 +471,117 @@ class IsaacGymSimulator(Simulator):
         if num_assets == 0:
             raise RuntimeError("No humanoid assets loaded.")
 
+        asset_id_to_asset_idx = {
+            asset_id: asset_idx
+            for asset_idx, asset_id in enumerate(self._humanoid_asset_ids)
+        }
+        
+        # ------------------------------------------------------------
+        # Mode A: explicit env -> asset_id assignment.
+        # Used for shape-matched visualizer/training.
+        # ------------------------------------------------------------
+        if self.requested_morphology_asset_ids is not None:
+            missing_asset_ids = [
+                asset_id
+                for asset_id in self.requested_morphology_asset_ids
+                if asset_id not in asset_id_to_asset_idx
+            ]
+
+            if len(missing_asset_ids) > 0:
+                raise RuntimeError(
+                    "Some requested morphology assets are missing from loaded XML assets. "
+                    f"Missing examples: {missing_asset_ids[:10]}. "
+                    f"Available examples: {self._humanoid_asset_ids[:10]}"
+                )
+
+            env_asset_indices = [
+                asset_id_to_asset_idx[asset_id]
+                for asset_id in self.requested_morphology_asset_ids
+            ]
+
+            assignment_mode = "requested asset ids"
+
+        # ------------------------------------------------------------
+        # Mode B: default round-robin assignment.
+        # Used for simple morphology visual tests.
+        # ------------------------------------------------------------
+        else:
+            env_asset_indices = [
+                env_id % num_assets
+                for env_id in range(self.num_envs)
+            ]
+
+            assignment_mode = "round-robin"
+
         # env_id -> asset index
-        self.env_id_to_asset_id = (
-            torch.arange(self.num_envs, device=self.device, dtype=torch.long)
-            % num_assets
+        self.env_id_to_asset_idx = torch.tensor(
+            env_asset_indices,
+            device=self.device,
+            dtype=torch.long,
         )
 
-        # # env_id -> asset name, e.g. "male_fb454239"
-        # self.env_id_to_asset_name = [
-        #     self._humanoid_asset_ids[int(asset_idx)]
-        #     for asset_idx in self.env_id_to_asset_id.cpu().numpy()
-        # ]
+        # env_id -> asset name, e.g. "male_fb454239"
+        self.env_id_to_asset_name = [
+            self._humanoid_asset_ids[int(asset_idx)]
+            for asset_idx in self.env_id_to_asset_idx.cpu().numpy()
+        ]
 
-        # # env_id -> full metadata dict
-        # self.env_id_to_asset_info = [
-        #     self._humanoid_assets_info[int(asset_idx)]
-        #     for asset_idx in self.env_id_to_asset_id.cpu().numpy()
-        # ]
+        # env_id -> full metadata dict
+        self.env_id_to_asset_info = [
+            self._humanoid_assets_info[int(asset_idx)]
+            for asset_idx in self.env_id_to_asset_idx.cpu().numpy()
+        ]
 
         # env_id -> betas tensor, shape [num_envs, 10]
         self.env_id_beta = torch.tensor(
             [
-                self._humanoid_assets_info[int(asset_idx)]["betas"]
-                for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+                asset_info["betas"]
+                for asset_info in self.env_id_to_asset_info
             ],
             device=self.device,
             dtype=torch.float32,
         )
 
-        # env_id -> root height tensor, shape [num_envs]
+        gender_id_map = {
+            "female": -1.0,
+            # "neutral": 0.0,
+            "male": 1.0,
+        }
+
+        self.env_gender_id = torch.tensor(
+            [
+                gender_id_map[asset_info["gender"]]
+                for asset_info in self.env_id_to_asset_info
+            ],
+            device=self.device,
+            dtype=torch.float32,
+        ).unsqueeze(-1)
+
+        self.env_morphology = torch.cat(
+            [self.env_gender_id, self.env_id_beta],
+            dim=-1,
+        )
+
         self.env_root_height = torch.tensor(
             [
-                self._humanoid_assets_info[int(asset_idx)]["root_height"]
-                for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+                asset_info["root_height"]
+                for asset_info in self.env_id_to_asset_info
             ],
             device=self.device,
             dtype=torch.float32,
         )
 
-        # env_id -> gender string list
-        self.env_gender = [
-            self._humanoid_assets_info[int(asset_idx)]["gender"]
-            for asset_idx in self.env_id_to_asset_id.cpu().numpy()
-        ]
 
-        # env_id -> beta_key string list
+
         self.env_beta_key = [
-            self._humanoid_assets_info[int(asset_idx)]["beta_key"]
-            for asset_idx in self.env_id_to_asset_id.cpu().numpy()
+            asset_info["beta_key"]
+            for asset_info in self.env_id_to_asset_info
         ]
 
-        print(f"Assigned {self.num_envs} envs over {num_assets} morphology assets")
+        print(
+            f"Assigned {self.num_envs} envs over {num_assets} morphology assets "
+            f"using {assignment_mode}"
+        )
 
     def _validate_humanoid_asset_topology(self, humanoid_asset, asset_id: str):
         num_bodies = self._gym.get_asset_rigid_body_count(humanoid_asset)
@@ -719,7 +793,7 @@ class IsaacGymSimulator(Simulator):
                 
                 # morphology =======
                 if self.morphology:
-                    asset_idx = int(self.env_id_to_asset_id[env_id].item())
+                    asset_idx = int(self.env_id_to_asset_idx[env_id].item())
                     env_asset = self._humanoid_assets[asset_idx]
                 # morphology =======
                 else:
