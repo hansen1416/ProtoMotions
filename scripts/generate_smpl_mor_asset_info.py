@@ -5,7 +5,8 @@ import torch
 import yaml
 
 
-FILENAME_RE = re.compile(r"^(male|female|neutral)_(.+)_smpl\.xml$")
+# FILENAME_RE = re.compile(r"^(male|female|neutral)_(.+)_smpl\.xml$")
+FILENAME_RE = re.compile(r"^(male|female|neutral)_(.+)_smplx\.xml$")
 
 
 def to_float_list(x):
@@ -119,4 +120,11 @@ if __name__ == "__main__":
     --asset-folder mjcf/smpl_mor \
     --betas-file protomotions/data/assets/all_betas.pt \
     --out protomotions/data/assets/mjcf/smpl_mor/assets.yaml
+    """
+
+    """
+    python scripts/generate_smpl_mor_asset_info.py \
+    --asset-folder mjcf/smplx_mor \
+    --betas-file protomotions/data/assets/all_betas.pt \
+    --out protomotions/data/assets/mjcf/smplx_mor/assets.yaml
     """

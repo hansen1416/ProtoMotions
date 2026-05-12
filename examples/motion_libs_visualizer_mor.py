@@ -94,6 +94,11 @@ parser.add_argument(
     default=[0.0, 0.0],
     help="Target x,y position to move all motions to (default: 0.0 0.0)",
 )
+parser.add_argument(
+    "--debug_morphology_log",
+    action="store_true",
+    help="Print humanoid/motion gender-beta consistency logs.",
+)
 args = parser.parse_args()
 
 # Import simulator before torch - isaacgym/isaaclab must be imported before torch
@@ -501,6 +506,8 @@ class MotionVisualizerSmoothness:
 
         assert self.simulator.env_id_to_asset_name == self.env_asset_ids
 
+        self._log_morphology_assignment("INIT")
+
         print(f"Loaded {robot_name} robot using {simulator_type}")
         print(f"Visualizing bodies: {self.robot_spec.viz_bodies}")
         vel_source = "data_vel" if self.use_data_vel else "finite_diff"
@@ -586,6 +593,96 @@ class MotionVisualizerSmoothness:
             markers=contact_marker_configs,
         )
 
+    def _gender_to_str(self, gender_id):
+        gender_id = int(gender_id.item()) if torch.is_tensor(gender_id) else int(gender_id)
+        return {
+            -1: "female",
+            0: "neutral",
+            1: "male",
+        }.get(gender_id, f"unknown({gender_id})")
+
+    def _format_betas(self, betas):
+        betas = betas.detach().cpu().tolist()
+        return "[" + ", ".join(f"{x:.4f}" for x in betas) + "]"
+
+    def _get_asset_morphology(self, asset_id: str):
+        """
+        Infer humanoid morphology metadata from asset_id by using the first
+        compatible motion belonging to that asset_id.
+        """
+        candidate_motion_ids = self.asset_id_to_motion_ids[asset_id]
+        ref_motion_id = candidate_motion_ids[:1]
+
+        gender_id = self.motion_lib.get_motion_gender_ids(ref_motion_id)[0]
+        betas = self.motion_lib.get_motion_betas(ref_motion_id)[0]
+
+        return gender_id, betas
+
+    def _log_morphology_assignment(self, tag: str):
+        """
+        Log whether each visualized humanoid morphology matches its assigned motion.
+        This should be called after env_motion_ids are sampled.
+        """
+
+        if not args.debug_morphology_log:
+            return
+
+        motion_asset_ids = self.motion_lib.get_motion_asset_ids(self.env_motion_ids)
+        motion_gender_ids = self.motion_lib.get_motion_gender_ids(self.env_motion_ids)
+        motion_betas = self.motion_lib.get_motion_betas(self.env_motion_ids)
+
+        sim_asset_ids = getattr(self, "simulator", None)
+        if sim_asset_ids is not None:
+            sim_asset_ids = getattr(self.simulator, "env_id_to_asset_name", None)
+
+        print(f"\n[MORPH-CHECK::{tag}] num_envs={self.num_envs}")
+
+        for env_id, motion_id in enumerate(self.env_motion_ids.detach().cpu().tolist()):
+            humanoid_asset_id = self.env_asset_ids[env_id]
+            motion_asset_id = motion_asset_ids[env_id]
+
+            humanoid_gender_id, humanoid_betas = self._get_asset_morphology(
+                humanoid_asset_id
+            )
+
+            motion_gender_id = motion_gender_ids[env_id]
+            motion_beta = motion_betas[env_id]
+
+            beta_max_err = torch.max(
+                torch.abs(humanoid_betas - motion_beta)
+            ).item()
+
+            asset_match = humanoid_asset_id == motion_asset_id
+            gender_match = int(humanoid_gender_id.item()) == int(motion_gender_id.item())
+            beta_match = beta_max_err < 1e-5
+            all_match = asset_match and gender_match and beta_match
+
+            if sim_asset_ids is not None:
+                simulator_asset_id = sim_asset_ids[env_id]
+            else:
+                simulator_asset_id = "<simulator-not-created-yet>"
+
+            print(
+                f"[MORPH-CHECK] "
+                f"env={env_id:03d} "
+                f"motion_id={motion_id:05d} "
+                f"humanoid_asset={humanoid_asset_id} "
+                f"sim_asset={simulator_asset_id} "
+                f"motion_asset={motion_asset_id} "
+                f"h_gender={self._gender_to_str(humanoid_gender_id)} "
+                f"m_gender={self._gender_to_str(motion_gender_id)} "
+                f"beta_max_err={beta_max_err:.8f} "
+                f"asset_match={asset_match} "
+                f"gender_match={gender_match} "
+                f"beta_match={beta_match} "
+                f"ALL_MATCH={all_match}"
+            )
+
+            print(
+                f"    h_betas={self._format_betas(humanoid_betas)}\n"
+                f"    m_betas={self._format_betas(motion_beta)}"
+            )
+
     def _switch_to_next_motion(self):
 
         self.current_frame = 0
@@ -601,10 +698,9 @@ class MotionVisualizerSmoothness:
 
         self.current_motion_length = int(self.env_motion_lengths.max().item())
 
-        self._translate_morphology_motions_to_grid()
+        self._log_morphology_assignment("RESAMPLE")
 
-        print("Morphology mode: resampled one compatible motion per env.")
-        print(self.motion_lib.get_motion_asset_ids(self.env_motion_ids))
+        self._translate_morphology_motions_to_grid()
 
         print("Pre-computing smoothness metrics for resampled motions...")
         self._precompute_motion_smoothness()

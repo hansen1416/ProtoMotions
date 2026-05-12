@@ -1,3 +1,28 @@
+Use SMPLSim runpy to generate all_betas.pt and .xml files for sml and smplx.
+
+use `scripts/generate_smpl_mor_asset_info.py` to geenrtae the asset information .yaml files:
+protomotions/data/assets/mjcf/smpl_mor/assets.yaml
+protomotions/data/assets/mjcf/smplx_mor/assets.yaml
+
+They are used in `protomotions/robot_configs/smpl_mor.py`
+
+```
+asset: RobotAssetConfig = field(
+        default_factory=lambda: RobotAssetConfig(
+            # morphology asset set
+            asset_folder_name="mjcf/smpl_mor/",
+            asset_info_file="mjcf/smpl_mor/assets.yaml",
+            ...
+        )
+    )
+```
+
+------
+
+`scripts/export_humos_to_amass_npz.py` for prepare the morphology dataset
+
+------
+
 python examples/motion_libs_visualizer.py \
   --motion_files \
   /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
