@@ -61,6 +61,10 @@ def robot_config(robot_name: str, **updates) -> RobotConfig:
         from protomotions.robot_configs.smpl_mor import SmplMorRobotConfig
 
         config = SmplMorRobotConfig()
+    elif robot_name == "hhi_smpl_single":
+        from protomotions.robot_configs.hhi_smpl_single import HHISmplSingleRobotConfig
+        
+        config = HHISmplSingleRobotConfig()
     else:
         raise ValueError(f"Invalid robot name: {robot_name}")
 

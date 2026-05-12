@@ -195,4 +195,23 @@ python examples/motion_libs_visualizer.py \
     --robot smpl \
     --simulator isaacgym
 
+python scripts/export_humos_to_amass_npz.py \
+    --input /home/hlz/datasets/humos_output/000005.pt \
+    --out-root /home/hlz/datasets/humos_proto_single/ \
+    --num 1
+
+python data/scripts/convert_amass_to_motionlib.py \
+    /home/hlz/datasets/humos_proto_single/ \
+    /home/hlz/datasets/humos_proto_motionlib/ \
+    --humanoid-type smpl \
+    --output-fps 30 \
+    --motion-config /home/hlz/datasets/humos_proto_single/humos_1.yaml \
+    --force-remake \
+    --device cuda
+
+python examples/motion_libs_visualizer.py \
+    --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_1.pt \
+    --robot hhi_smpl_single \
+    --simulator isaacgym
+    
 """
