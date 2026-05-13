@@ -266,6 +266,30 @@ def create_parser():
         "Useful for migrating old policy checkpoints when config system API changes - "
         "generate new configs that are compatible with current code, then load old weights.",
     )
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default=os.environ.get("WANDB_PROJECT", "physical_animation"),
+        help="Weights & Biases project name",
+    )
+    parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=os.environ.get("WANDB_ENTITY", None),
+        help="Weights & Biases entity/team name",
+    )
+    parser.add_argument(
+        "--wandb-group",
+        type=str,
+        default=None,
+        help="Weights & Biases group name",
+    )
+    parser.add_argument(
+        "--wandb-tags",
+        nargs="*",
+        default=None,
+        help="Weights & Biases tags",
+    )
 
     return parser
 
@@ -659,11 +683,11 @@ def main():
                 "_target_": "lightning.pytorch.loggers.WandbLogger",
                 "name": args.experiment_name,
                 "save_dir": save_dir,
-                "project": "physical_animation",
-                "tags": None,
-                "group": None,
+                "project": args.wandb_project,
+                "tags": args.wandb_tags,
+                "group": args.wandb_group,
                 "id": wandb_id,
-                "entity": None,
+                "entity": args.wandb_entity,
                 "resume": "allow",
             }
         )
