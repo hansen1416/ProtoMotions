@@ -200,7 +200,7 @@ python scripts/export_humos_to_amass_npz.py \
     --out-root /home/hlz/datasets/humos_proto_single/ \
     --num 1
 
-python data/scripts/convert_amass_to_motionlib.py \
+python data/scripts/convert_amass_to_motionlib_with_morphology.py \
     /home/hlz/datasets/humos_proto_single/ \
     /home/hlz/datasets/humos_proto_motionlib/ \
     --humanoid-type smpl \

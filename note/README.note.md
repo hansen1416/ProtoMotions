@@ -1,4 +1,4 @@
-Use SMPLSim runpy to generate all_betas.pt and .xml files for sml and smplx.
+Use SMPLSim run.py to generate all_betas.pt and .xml files for sml and smplx.
 
 use `scripts/generate_smpl_mor_asset_info.py` to geenrtae the asset information .yaml files:
 protomotions/data/assets/mjcf/smpl_mor/assets.yaml
@@ -97,4 +97,9 @@ python examples/motion_libs_visualizer_mor.py \
     --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
     --robot smpl_mor \
     --simulator isaacgym
+
+python examples/motion_libs_visualizer.py \
+  --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_1.pt \
+  --robot hhi_smpl_single \
+  --simulator isaacgym
 ```
