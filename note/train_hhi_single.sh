@@ -14,14 +14,14 @@ python protomotions/train_agent.py \
     --headless True
 
 python protomotions/train_agent.py \
-    --robot-name smpl \
+    --robot-name smpl_mor \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
     --experiment-name hhi_single_male_0e26b88d_lowmem \
-    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_1.pt \
+    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
     --num-envs 16 \
     --batch-size 32 \
-    --headless True
+    --headless False
 
 python protomotions/train_agent.py \
     --robot-name hhi_smpl_single \
