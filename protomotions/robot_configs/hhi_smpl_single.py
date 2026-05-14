@@ -7,7 +7,7 @@ from protomotions.robot_configs.base import RobotAssetConfig
 class HHISmplSingleRobotConfig(SmplRobotConfig):
     asset: RobotAssetConfig = field(
         default_factory=lambda: RobotAssetConfig(
-            asset_file_name="mjcf/male_0e26b88d_smpl_ig.xml",
+            asset_file_name="mjcf/male_0e26b88d_smpl_test.xml",
             usd_asset_file_name=None,
             usd_bodies_root_prim_path=None,
             max_linear_velocity=1000.0,
