@@ -103,3 +103,24 @@ python examples/motion_libs_visualizer.py \
   --robot hhi_smpl_single \
   --simulator isaacgym
 ```
+
+----
+
+# 1. Install rclone
+curl https://rclone.org/install.sh | bash
+
+# 2. Configure Google Drive (follow the prompts)
+rclone config
+# choose: n (new remote) → name it "gdrive" → choose Google Drive
+# it will give you an auth URL → open in browser → paste the code back
+
+# 3. Upload your checkpoint folder
+rclone copy results.zip gdrive:ckpt --progress
+
+----
+
+python protomotions/inference_agent.py \
+    --checkpoint results/hhi_single_male_0e26b88d_cloud_smoke/score_based.ckpt \
+    --simulator isaacgym \
+    --num-envs 1 \
+    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_1.pt
