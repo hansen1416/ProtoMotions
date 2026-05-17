@@ -147,6 +147,7 @@ def agent_config(
                 "max_coords_obs",
                 "mimic_target_poses",
                 "previous_actions",
+                "morphology_obs",
             ],
             normalize_obs=True,
             norm_clamp_value=5,
@@ -157,7 +158,7 @@ def agent_config(
     )
 
     critic_config = MLPWithConcatConfig(
-        in_keys=["max_coords_obs", "mimic_target_poses", "previous_actions"],
+        in_keys=["max_coords_obs", "mimic_target_poses", "previous_actions", "morphology_obs",],
         out_keys=["value"],
         normalize_obs=True,
         norm_clamp_value=5,
@@ -171,6 +172,7 @@ def agent_config(
                 "max_coords_obs",
                 "mimic_target_poses",
                 "previous_actions",
+                "morphology_obs",
             ],
             out_keys=["action", "mean_action", "neglogp", "value"],
             actor=actor_config,
