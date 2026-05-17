@@ -17,7 +17,7 @@ python protomotions/train_agent.py \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
     --experiment-name hhi_single_male_0e26b88d_lowmem \
-    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
+    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_128.pt \
     --num-envs 16 \
     --batch-size 32
 

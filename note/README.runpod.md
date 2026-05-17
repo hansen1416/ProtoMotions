@@ -16,18 +16,17 @@ tmux kill-session -t hhi
 
 
 python protomotions/train_agent.py \
-    --robot-name hhi_smpl_single \
+    --robot-name smpl_mor \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name hhi_single_male_0e26b88d_cloud_smoke \
-    --motion-file ./humos_1.pt \
+    --experiment-name hhi_single_motion_multi_shape \
+    --motion-file ./humos_128.pt \
     --num-envs 1024 \
     --batch-size 4096 \
     --use-wandb \
     --wandb-project hhi-protomotions \
     --wandb-entity yugoamaryl \
-    --wandb-group single_shape_smoke \
-    --wandb-tags local lowmem single_motion male_0e26b88d
+    --wandb-group hhi_single_motion_multi_shape
 
 
   docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --ipc=host --shm-size=16g hansen1416/hhi-protomotions-isaacgym:v1 /bin/bash
