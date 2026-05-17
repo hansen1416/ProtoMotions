@@ -1,6 +1,10 @@
 cd /workspace && git clone -b feature/hhi https://github.com/hansen1416/ProtoMotions.git && cd ProtoMotions
 
+<!-- humos_1.pt -->
 pip install gdown && gdown 1eDoIKUGs8VYXQY1RJskSEJk5WSLUBNhN
+
+<!-- humos_128.pt -->
+pip install gdown && gdown 1RqxXCyjXcIo9WrtSKtT9NCWoWr_nmDIU
 
 pip install -e .
 
