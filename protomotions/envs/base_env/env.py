@@ -281,6 +281,23 @@ class BaseEnv:
         )
         self.simulator._initialize_with_markers(visualization_markers)
 
+        # Inject per-env asset IDs into the motion manager for morphology-consistent
+        # motion sampling on reset. Must be done here — after _initialize_with_markers —
+        # because env_id_to_asset_name is built during _create_envs inside that call.
+        if (
+            self.motion_manager is not None
+            and getattr(self.simulator, "morphology", False)
+            and self.motion_lib.has_morphology_metadata()
+        ):
+            self.motion_manager.env_asset_ids = self.simulator.env_id_to_asset_name
+            # ['female_093098f0', 'female_09a0fcbd', ...] length of num_env, env_id -> gender_beta_key
+            # env_id_beta_keys_mapping
+            print(
+                f"[MotionManager] Morphology-consistent sampling enabled: "
+                f"{self.num_envs} envs, "
+                f"{len(set(self.simulator.env_id_to_asset_name))} unique shapes."
+            )
+
         # Component infrastructure for MdpComponent
         self._component_manager = ComponentManager(self.device)
         self._observation_buffer: Dict[str, Tensor] = {}

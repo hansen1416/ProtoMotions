@@ -869,6 +869,8 @@ class MotionLib:
         if self.motion_asset_ids is None:
             raise RuntimeError("MotionLib does not contain motion_asset_ids.")
 
+        # {'male_0e26b88d': tensor([0], device='cuda:0'), 'female_0e26b88d': tensor([1], device='cuda:0'), ...}
+        # beta_key_motion_id_mapping
         asset_id_to_motion_ids = self.build_asset_id_to_motion_ids()
 
         sampled_motion_ids = []

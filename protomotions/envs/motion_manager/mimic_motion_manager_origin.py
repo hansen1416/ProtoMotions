@@ -78,37 +78,24 @@ class MimicMotionManager(MotionManager):
     ):
         """Sample new motions for environments.
 
-        Extends base class with two behaviours:
-        1. Mimic-specific: only resample envs whose clip has finished when
-           resample_on_reset is False.
-        2. Morphology-consistent: when env_asset_ids is set and the motion lib
-           contains morphology metadata, restrict sampling to motions that share
-           the same gender/betas as each env's humanoid asset.
+        Extends base class to handle mimic-specific resample_on_reset logic:
+        only resample motions that have finished playing.
 
         Args:
-            env_ids: Indices of the environments to reset.
-            new_motion_ids: Force specific motion IDs (bypasses morphology sampling).
+            env_ids (Tensor): Indices of the environments to reset.
+            new_motion_ids (Tensor, optional):
+                Force new motion IDs for the reset environments.
+                If provided, this overrides fixed motion IDs.
         """
-        # Mimic-specific: only resample envs whose clip has finished
+        # Mimic-specific: Only resample motions that have finished if resample_on_reset is False
         reset_env_ids = env_ids
         if not self.config.resample_on_reset:
             done_tracks = self.get_done_tracks(env_ids)
             reset_env_ids = env_ids[done_tracks]
 
+        # Only proceed if there are environments to reset
         if len(reset_env_ids) == 0:
             return
 
-        # Morphology-consistent sampling: when the caller hasn't forced specific
-        # motion IDs, and we know each env's body shape asset, only sample
-        # motions that are compatible with that env's gender/betas.
-        if (
-            new_motion_ids is None
-            and self.env_asset_ids is not None
-            and self.motion_lib.has_morphology_metadata()
-        ):
-            asset_ids = [self.env_asset_ids[i.item()] for i in reset_env_ids]
-            new_motion_ids = self.motion_lib.sample_motions_for_asset_ids(asset_ids)
-
-        # tensor([ 0,  1,  2,  3,  4,  5,  ...], device='cuda:0') 
-        # tensor([65, 27,  1,  3, 61, 33, ...], device='cuda:0')
+        # Call parent sample_motions (handles fixed motion IDs)
         super().sample_motions(reset_env_ids, new_motion_ids)

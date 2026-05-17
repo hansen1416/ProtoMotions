@@ -116,6 +116,11 @@ class MotionManager:
         # Handle fixed motion IDs for scene-motion correspondence
         self._setup_fixed_motion_ids(fixed_motion_ids_per_env)
 
+        # Injected externally after simulator init when using multi-shape
+        # morphology assets. Maps env index → asset_id string, e.g. "male_0e26b88d".
+        # Set to None by default; MimicMotionManager uses it for shape-consistent sampling.
+        self.env_asset_ids = None
+
     def _setup_motion_subset(self):
         """
         Setup motion subset based on config.subset_method
