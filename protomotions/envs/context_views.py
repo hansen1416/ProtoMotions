@@ -531,6 +531,9 @@ class EnvContext:
     # Contact tracking
     contact_body_ids: Optional[Tensor] = FieldPath()
 
+    # Morphology (optional — only present with smpl_mor multi-shape assets)
+    env_morphology: Optional[Tensor] = FieldPath()
+
     # Control-specific contexts (populated by controllers via populate_context)
     mimic: Optional[MimicContext] = NestedField(MimicContext)
     masked_mimic: Optional[MaskedMimicContext] = NestedField(MaskedMimicContext)
@@ -553,6 +556,7 @@ class EnvContext:
         current_contact_force_magnitudes: Optional[Tensor] = None,
         prev_contact_force_magnitudes: Optional[Tensor] = None,
         contact_body_ids: Optional[Tensor] = None,
+        env_morphology: Optional[Tensor] = None,
         mimic: Optional[MimicContext] = None,
         masked_mimic: Optional[MaskedMimicContext] = None,
         steering: Optional[SteeringContext] = None,
@@ -603,6 +607,8 @@ class EnvContext:
 
         # Contact tracking
         self.contact_body_ids = contact_body_ids
+
+        self.env_morphology = env_morphology
 
         # Control-specific views
         self.mimic = mimic

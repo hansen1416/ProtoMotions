@@ -59,6 +59,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
         pow_rew_factory,
         contact_match_rew_factory,
         tracking_error_term_factory,
+        morphology_obs_factory,
     )
     from protomotions.envs.action import make_pd_action_config
 
@@ -72,6 +73,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
         "max_coords_obs": max_coords_obs_factory(),
         "previous_actions": previous_actions_factory(history_steps=1),
         "mimic_target_poses": mimic_target_poses_max_coords_factory(with_velocities=True),
+        "morphology_obs": morphology_obs_factory(),
     }
 
     termination_components = {
@@ -138,7 +140,7 @@ def agent_config(
     actor_config = PPOActorConfig(
         num_out=robot_config.kinematic_info.num_dofs,
         actor_logstd=-2.9,
-        in_keys=["max_coords_obs", "mimic_target_poses", "previous_actions"],
+        in_keys=["max_coords_obs", "mimic_target_poses", "previous_actions", "morphology_obs"],
         mu_key="actor_trunk_out",
         mu_model=MLPWithConcatConfig(
             in_keys=[

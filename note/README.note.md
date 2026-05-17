@@ -124,3 +124,32 @@ python protomotions/inference_agent.py \
     --simulator isaacgym \
     --num-envs 1 \
     --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_1.pt
+
+
+-----
+
+## Expand the obs space
+
+simulator._create_envs()
+  → reads assets.yaml per env
+  → self.env_morphology = torch.cat([gender_id, betas], dim=-1)  # [num_envs, 11]
+
+          ↓  (built once at startup, static for the whole run)
+
+_build_global_context()   ← called every step
+  → ctx.env_morphology = self.simulator.env_morphology   # same tensor, no copy
+
+          ↓
+
+ComponentManager.execute_all(observation_components)
+  → resolves EnvContext.env_morphology → gets the [num_envs, 11] tensor
+  → calls compute_morphology_obs(morphology=tensor)
+  → returns tensor unchanged
+
+          ↓
+
+_observation_buffer["morphology_obs"]   # [num_envs, 11]
+
+          ↓
+
+get_obs() → network reads it by key

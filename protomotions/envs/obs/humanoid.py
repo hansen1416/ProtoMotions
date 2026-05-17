@@ -348,3 +348,6 @@ def compute_humanoid_max_coords_observations(
 
 
 # Context mapping for ONNX export (maps params to context keys)
+def compute_morphology_obs(morphology: torch.Tensor) -> torch.Tensor:
+    """Pass-through morphology observation [gender_id, betas] — shape [num_envs, 11]."""
+    return morphology

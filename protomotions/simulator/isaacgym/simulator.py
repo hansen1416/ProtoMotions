@@ -558,7 +558,7 @@ class IsaacGymSimulator(Simulator):
         ).unsqueeze(-1)
 
         self.env_morphology = torch.cat(
-            [self.env_gender_id, self.env_id_beta],
+            [self.env_gender_id, self.env_id_beta / 3.0],
             dim=-1,
         )
 

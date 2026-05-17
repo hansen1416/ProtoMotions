@@ -944,6 +944,8 @@ class BaseEnv:
             dt=self.dt,
             # Contact tracking
             contact_body_ids=self.contact_body_ids,
+
+            env_morphology=self.simulator.env_morphology if getattr(self.simulator, "morphology", False) else None,
         )
 
         # Controllers populate their task-specific views

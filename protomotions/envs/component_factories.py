@@ -1262,6 +1262,21 @@ def steering_velocity_error_factory(
         },
     )
 
+def morphology_obs_factory() -> MdpComponent:
+    """Factory for morphology observation (gender_id + betas).
+
+    Passes through env_morphology from context — shape [num_envs, 11].
+    Only valid when using smpl_mor multi-shape assets.
+
+    Returns:
+        MdpComponent configured for morphology observations.
+    """
+    from protomotions.envs.obs.humanoid import compute_morphology_obs
+
+    return MdpComponent(
+        compute_func=compute_morphology_obs,
+        dynamic_vars={"morphology": EnvContext.env_morphology},
+    )
 
 __all__ = [
     # Observation factories
@@ -1308,4 +1323,5 @@ __all__ = [
     "relative_body_pos_metric_factory",
     "path_distance_error_factory",
     "steering_velocity_error_factory",
+    "morphology_obs_factory",
 ]
