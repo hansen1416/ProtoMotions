@@ -105,7 +105,7 @@ python examples/motion_libs_visualizer.py \
 ```
 
 ----
-
+apt install curl zip -y
 # 1. Install rclone
 curl https://rclone.org/install.sh | bash
 
@@ -124,6 +124,12 @@ python protomotions/inference_agent.py \
     --simulator isaacgym \
     --num-envs 1 \
     --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_1.pt
+
+python protomotions/inference_agent.py \
+    --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
+    --simulator isaacgym \
+    --num-envs 8 \
+    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_128.pt
 
 
 -----

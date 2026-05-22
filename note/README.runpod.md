@@ -31,10 +31,40 @@ python protomotions/train_agent.py \
     --wandb-project hhi-protomotions \
     --wandb-entity yugoamaryl \
     --wandb-group hhi_single_motion_multi_shape
-
+    
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_single_motion_multi_shape \
+    --motion-file ./humos_128.pt \
+    --num-envs 4096 \
+    --batch-size 16384 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_single_motion_multi_shape \
+    simulator.sim.physx.default_buffer_size_multiplier=25.0
 
   docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --ipc=host --shm-size=16g hansen1416/hhi-protomotions-isaacgym:v1 /bin/bash
 
+----
+
+
+  docker pull hansen1416/hhi-protomotions-isaacgym:v1
+
+  docker run -d \
+  --name proto \
+  --network=host \
+  --gpus=all \
+  --ipc=host \
+  --ulimit memlock=-1 \
+  --ulimit stack=67108864 \
+  -v /mnt:/mnt \
+  hansen1416/hhi-protomotions-isaacgym:v1 \
+  tail -f /dev/null
+
+docker exec -it proto /bin/bash
 
 ----------
 
@@ -140,4 +170,3 @@ sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 
 
-docker pull hansen1416/hhi-protomotions-isaacgym:v1

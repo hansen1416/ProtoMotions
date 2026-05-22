@@ -99,6 +99,12 @@ parser.add_argument(
     action="store_true",
     help="Print humanoid/motion gender-beta consistency logs.",
 )
+parser.add_argument(
+    "--frame0_offset_file",
+    type=str,
+    default="/home/hlz/datasets/humos_frame0_offsets.pt",
+    help="Precomputed frame-0 offset file.",
+)
 args = parser.parse_args()
 
 # Import simulator before torch - isaacgym/isaaclab must be imported before torch
@@ -131,6 +137,49 @@ from protomotions.components.scene_lib import (  # noqa: E402
 )
 import os  # noqa: E402
 
+
+def prepare_frame0_offset_dict(offset_file: str):
+    """
+    Load and flatten:
+
+        offset_db[clip_id][gender][beta_key] = offset
+
+    into:
+
+        offset_dict[(clip_id, gender, beta_key)] = offset
+    """
+
+    if offset_file is None:
+        return {}
+
+    offset_path = Path(offset_file)
+
+    if not offset_path.exists():
+        print(f"[FRAME0-OFFSET] file not found, use zero offsets: {offset_path}")
+        return {}
+
+    offset_db = torch.load(offset_path, map_location="cpu", weights_only=False)
+
+    offset_dict = {}
+
+    for clip_id, gender_dict in offset_db.items():
+        for gender, beta_dict in gender_dict.items():
+            for beta_key, offset in beta_dict.items():
+                key = (str(clip_id), str(gender), str(beta_key))
+                offset_dict[key] = float(offset)
+
+    print(f"[FRAME0-OFFSET] loaded {len(offset_dict)} offsets from {offset_path}")
+    # {('000000', 'male', 'd6f908ec'): 0.7920000600814819, ,,,}
+    return offset_dict
+
+
+def get_frame0_offset(offset_dict, clip_id: str, gender: str, beta_key: str) -> float:
+    """
+    Return offset if found, otherwise return 0.
+    """
+
+    key = (str(clip_id), str(gender), str(beta_key))
+    return float(offset_dict.get(key, 0.0))
 
 @dataclass
 class RobotSpec:
@@ -375,6 +424,9 @@ class MotionVisualizerSmoothness:
             exit()
 
         self.motion_lib = self.motion_libs[0]
+
+        # Apply precomputed frame-0 Z alignment once.
+        self._apply_frame0_offsets_to_all_motions()
 
         # motion_id -> asset_id
         all_motion_ids = torch.arange(
@@ -1064,6 +1116,50 @@ class MotionVisualizerSmoothness:
             sleep_time = target_dt / max(self.playback_speed, 0.01) - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
+
+    def _apply_frame0_offsets_to_all_motions(self):
+        """
+        Apply frame-0 Z offset to all frames of each motion.
+
+        This modifies:
+            self.motion_lib.gts[start:end, :, 2]
+
+        So all rigid bodies of the motion are shifted consistently.
+        """
+
+        offset_dict = prepare_frame0_offset_dict(args.frame0_offset_file)
+
+        if len(offset_dict) == 0:
+            print("[FRAME0-OFFSET] no offsets applied")
+            return
+
+        applied = 0
+        total = self.motion_lib.num_motions()
+
+        for motion_id in range(total):
+            motion_file_stem = Path(self.motion_lib.motion_files[motion_id]).stem
+            gender = self.motion_lib.motion_genders[motion_id]
+            beta_key = self.motion_lib.motion_beta_keys[motion_id]
+
+            # clip_id = motion_file_stem.split("_")[0]
+
+            offset = get_frame0_offset(
+                offset_dict=offset_dict,
+                clip_id=motion_file_stem,
+                gender=gender,
+                beta_key=beta_key,
+            )
+
+            start = int(self.motion_lib.length_starts[motion_id].item())
+            num_frames = int(self.motion_lib.motion_num_frames[motion_id].item())
+            end = start + num_frames
+
+            self.motion_lib.gts[start:end, :, 2] += offset
+
+            if offset != 0.0:
+                applied += 1
+
+        print(f"[FRAME0-OFFSET] applied non-zero offsets to {applied}/{total} motions")
 
 
 def main():
