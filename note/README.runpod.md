@@ -1,10 +1,10 @@
 cd /workspace && git clone -b feature/hhi https://github.com/hansen1416/ProtoMotions.git && cd ProtoMotions
 
-<!-- humos_1.pt -->
-pip install gdown && gdown 1eDoIKUGs8VYXQY1RJskSEJk5WSLUBNhN
+<!-- humos_128_offset.pt -->
+pip install gdown && gdown 1iO5sTFrY41Lj2UQwVR_g5yU_t6Wgw5-K
 
-<!-- humos_128.pt -->
-pip install gdown && gdown 1RqxXCyjXcIo9WrtSKtT9NCWoWr_nmDIU
+<!-- results/hhi_single_motion_multi_shape -->
+gdown 1pEyPYHXyavXIR7d2W27XySFhWXkhq3iY
 
 pip install -e .
 

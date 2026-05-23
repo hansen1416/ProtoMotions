@@ -169,7 +169,7 @@ python protomotions/inference_agent.py \
     --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
     --simulator isaacgym \
     --num-envs 8 \
-    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_128.pt
+    --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt
 
 
 -----

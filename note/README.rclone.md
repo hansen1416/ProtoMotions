@@ -45,3 +45,8 @@ nohup rclone copy gdrive:humos_output /media/hlz/R/humos_output \
     --drive-chunk-size 64M \
     --log-file rclone_download.log \
     --log-level INFO > rclone_stdout.log 2>&1 &
+
+## Upload remote to gdrive
+
+rclone copy hhi_single_motion_multi_shape.zip gdrive:/ckpt/
+
