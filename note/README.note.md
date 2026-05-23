@@ -1,3 +1,5 @@
+# Generate SMPL humanoid robto templates
+
 Use SMPLSim run.py to generate all_betas.pt and .xml files for sml and smplx.
 
 use `scripts/generate_smpl_mor_asset_info.py` to geenrtae the asset information .yaml files:
@@ -19,22 +21,77 @@ asset: RobotAssetConfig = field(
 
 ------
 
-`scripts/export_humos_to_amass_npz.py` for prepare the morphology dataset
+# Data Preprocessing
+
+## 1. Convert HUMOS output to AMASS-style `.npz` files
+
+```bash
+python scripts/export_humos_to_amass_npz.py \
+    --input /home/hlz/datasets/humos_output/000005.pt \
+    --out-root /home/hlz/datasets/humos_proto_interm/
+```
+
+or for testing
+
+```bash
+python scripts/export_humos_to_amass_npz.py \
+    --input /home/hlz/datasets/humos_output/000005.pt \
+    --out-root /home/hlz/datasets/humos_proto_interm_8/ --num 8
+```
+
+This command converts the HUMOS output file 000005.pt into AMASS-style .npz motion files under /home/hlz/datasets/humos_proto/.
+
+## 2. generate the .pt files used in protomotions from the intermediate .npz and .yaml config. It will save a motion file in /home/hlz/datasets/humos_proto, eg. /home/hlz/datasets/humos_proto/humos_128.pt
+```bash
+python data/scripts/convert_amass_to_motionlib_with_morphology.py \
+    /home/hlz/datasets/humos_proto_interm/ \
+    /home/hlz/datasets/humos_proto/ \
+    --motion-config /home/hlz/datasets/humos_proto_interm/humos_128.yaml \
+    --humanoid-type smpl \
+    --output-fps 30 \
+    --device cuda \
+    --force-remake
+```
+or for testing
+```bash
+python data/scripts/convert_amass_to_motionlib_with_morphology.py \
+    /home/hlz/datasets/humos_proto_interm_8/ \
+    /home/hlz/datasets/humos_proto/ \
+    --motion-config /home/hlz/datasets/humos_proto_interm_8/humos_8.yaml \
+    --humanoid-type smpl \
+    --output-fps 30 \
+    --device cuda \
+    --force-remake
+```
+
+## 3. Align the 1st frame with ground. save the offseted file to a copy, eg. /home/hlz/datasets/humos_proto/humos_128_offset.pt
+```bash
+python scripts/compute_humos_frame0_offsets.py \
+    --motion-file /home/hlz/datasets/humos_proto/humos_128.pt \
+    --asset-root /home/hlz/repos/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
+    --out-motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
+    --limit -1 \
+    --overwrite
+```
+or for testing
+```bash
+python scripts/compute_humos_frame0_offsets.py \
+    --motion-file /home/hlz/datasets/humos_proto/humos_8.pt \
+    --asset-root /home/hlz/repos/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
+    --out-motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --limit -1 \
+    --overwrite
+```
+
+## 4. visualize it
+```bash
+python examples/motion_libs_visualizer_mor.py \
+    --motion_files /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --robot smpl_mor \
+    --simulator isaacgym
+```
 
 ------
-
-python examples/motion_libs_visualizer.py \
-  --motion_files \
-  /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-  /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-  /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-  /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-  /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-  /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-  /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-  /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-  --robot smpl_mor \
-  --simulator isaacgym
 
 robot_config: RobotConfig in `protomotions/robot_configs/factory.py` defines all robot config, SMPL, SMPLX, etc
 
@@ -98,26 +155,9 @@ python examples/motion_libs_visualizer_mor.py \
     --robot smpl_mor \
     --simulator isaacgym
 
-python examples/motion_libs_visualizer.py \
-  --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_1.pt \
-  --robot hhi_smpl_single \
-  --simulator isaacgym
 ```
 
-----
-apt install curl zip -y
-# 1. Install rclone
-curl https://rclone.org/install.sh | bash
-
-# 2. Configure Google Drive (follow the prompts)
-rclone config
-# choose: n (new remote) → name it "gdrive" → choose Google Drive
-# it will give you an auth URL → open in browser → paste the code back
-
-# 3. Upload your checkpoint folder
-rclone copy results.zip gdrive:ckpt --progress
-
-----
+--------
 
 python protomotions/inference_agent.py \
     --checkpoint results/hhi_single_male_0e26b88d_cloud_smoke/score_based.ckpt \

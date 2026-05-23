@@ -46,7 +46,7 @@ parser.add_argument(
 parser.add_argument(
     "--robot",
     type=str,
-    choices=["g1", "rigv1", "h1_2", "smpl", "soma23", "smpl_mor", "hhi_smpl_single"],
+    choices=["g1", "rigv1", "h1_2", "smpl", "soma23", "smpl_mor"],
     default="g1",
     help="Robot to load (g1, rigv1, h1_2, smpl, or soma23)",
 )
@@ -154,10 +154,7 @@ ROBOT_SPECS = {
     ),
     "smpl_mor": RobotSpec(
         viz_bodies=[],
-    ),
-    "hhi_smpl_single": RobotSpec(
-        viz_bodies=[],
-    ),
+    )
 }
 
 

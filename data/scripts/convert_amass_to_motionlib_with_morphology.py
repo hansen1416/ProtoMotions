@@ -71,6 +71,7 @@ def load_morphology_metadata_for_config(
     motion_beta_keys = []
     motion_asset_ids = []
     motion_npz_files = []
+    motion_clip_ids = []
 
     for motion in motions:
         motion_file = motion["file"]
@@ -105,11 +106,17 @@ def load_morphology_metadata_for_config(
         beta_key = infer_beta_key_from_stem(npz_path.stem, gender)
         asset_id = f"{gender}_{beta_key}"
 
+        if "clip_id" in data:
+            clip_id = read_npz_scalar_string(data["clip_id"])
+        else:
+            clip_id = infer_clip_id_from_stem(npz_path.stem, gender)
+
         motion_betas.append(betas)
         motion_gender_ids.append(GENDER_TO_ID[gender])
         motion_genders.append(gender)
         motion_beta_keys.append(beta_key)
         motion_asset_ids.append(asset_id)
+        motion_clip_ids.append(clip_id)
         motion_npz_files.append(str(npz_path))
 
     return {
@@ -118,6 +125,7 @@ def load_morphology_metadata_for_config(
         "motion_genders": tuple(motion_genders),
         "motion_beta_keys": tuple(motion_beta_keys),
         "motion_asset_ids": tuple(motion_asset_ids),
+        "motion_clip_ids": tuple(motion_clip_ids),
         "motion_npz_files": tuple(motion_npz_files),
     }
 
@@ -143,6 +151,25 @@ def inject_morphology_metadata(
     print(f"  num_motions: {num_motions}")
     print(f"  motion_betas: {tuple(metadata['motion_betas'].shape)}")
     print(f"  first asset_id: {metadata['motion_asset_ids'][0]}")
+
+
+def infer_clip_id_from_stem(stem: str, gender: str) -> str:
+    """
+    Expected HUMOS variant name:
+        {clip_id}_v00_{gender}_{beta_key}
+
+    Example:
+        000005_v00_male_0e26b88d -> 000005
+    """
+
+    marker = f"_{gender}_"
+    if marker not in stem:
+        raise ValueError(
+            f"Cannot infer clip_id from filename stem='{stem}' with gender='{gender}'"
+        )
+
+    prefix = stem.rsplit(marker, 1)[0]  # 000005_v00
+    return prefix.rsplit("_v", 1)[0]    # 000005
 
 
 def main():

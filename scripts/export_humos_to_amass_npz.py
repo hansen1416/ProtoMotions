@@ -45,7 +45,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--out-root", required=True)
-    parser.add_argument("--num", type=int, default=8)
+    parser.add_argument("--num", type=int, default=128)
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--genders", nargs="+", default=["male", "female"])
     parser.add_argument("--apply-offset-height", action="store_true")
@@ -109,6 +109,7 @@ def main():
             trans=trans,
             betas=betas,
             gender=np.array(gender),
+            clip_id=np.array(src.stem), # src.stem is motion id from humos, like 000005
             mocap_framerate=np.array(args.fps, dtype=np.float32),
         )
 
@@ -134,6 +135,7 @@ def main():
         manifest.append(
             {
                 "index": idx,
+                "clip_id": src.stem,
                 "gender": gender,
                 "beta_key": str(beta_key),
                 "npz": str(npz_path),
@@ -161,57 +163,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-"""
-python scripts/export_humos_to_amass_npz.py \
-    --input /home/hlz/datasets/humos_output/000005.pt \
-    --out-root /home/hlz/datasets/humos_proto/ \
-    --num 8
-
-python data/scripts/convert_amass_to_motionlib.py \
-    /home/hlz/datasets/humos_proto/ \
-    /home/hlz/datasets/humos_proto_motionlib/ \
-    --humanoid-type smpl \
-    --output-fps 30 \
-    --motion-config /home/hlz/datasets/humos_proto/humos_8.yaml \
-    --force-remake \
-    --device cuda
-
-python data/scripts/convert_amass_to_motionlib_with_morphology.py \
-  /home/hlz/datasets/humos_proto/ \
-  /home/hlz/datasets/humos_proto_motionlib/ \
-  --humanoid-type smpl \
-  --output-fps 30 \
-  --motion-config /home/hlz/datasets/humos_proto/humos_8.yaml \
-  --force-remake \
-  --device cuda
-
-python examples/motion_libs_visualizer_mor.py \
-    --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-    --robot smpl \
-    --simulator isaacgym
-
-python examples/motion_libs_visualizer.py \
-    --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_128.pt \
-    --robot smpl \
-    --simulator isaacgym
-
-python scripts/export_humos_to_amass_npz.py \
-    --input /home/hlz/datasets/humos_output/000005.pt \
-    --out-root /home/hlz/datasets/humos_proto_single/ \
-    --num 1
-
-python data/scripts/convert_amass_to_motionlib_with_morphology.py \
-    /home/hlz/datasets/humos_proto_single/ \
-    /home/hlz/datasets/humos_proto_motionlib/ \
-    --humanoid-type smpl \
-    --output-fps 30 \
-    --motion-config /home/hlz/datasets/humos_proto_single/humos_1.yaml \
-    --force-remake \
-    --device cuda
-
-python examples/motion_libs_visualizer.py \
-    --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_1.pt \
-    --robot hhi_smpl_single \
-    --simulator isaacgym
-    
-"""

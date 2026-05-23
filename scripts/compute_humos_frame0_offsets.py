@@ -2,25 +2,21 @@
 # scripts/compute_humos_frame0_offsets.py
 
 """
+Apply IsaacGym-computed frame-0 grounding offsets directly to a packaged MotionLib.
+
+Example:
 python scripts/compute_humos_frame0_offsets.py \
-    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_128.pt \
+    --motion-file /home/hlz/datasets/humos_proto/humos_128.pt \
     --asset-root /home/hlz/repos/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
-    --out /home/hlz/datasets/humos_frame0_offsets.pt \
-    --limit 128 \
+    --out-motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
+    --limit -1 \
     --overwrite
 
-Compute frame-0 Z offsets in IsaacGym / MotionLib space.
-
 Input:
-    packaged MotionLib .pt file, e.g.
-    /home/hlz/datasets/humos_proto_motionlib/humos_8.pt
+    packaged MotionLib .pt file
 
 Output:
-    offset_db[clip_id][gender][beta_key] = offset
-
-The offset is designed to be applied later as:
-
-    self.motion_lib.gts[start:end, :, 2] += offset
+    corrected MotionLib .pt file with shifted gts[:, :, 2]
 """
 
 from __future__ import annotations
@@ -69,21 +65,6 @@ class MotionEntry:
     beta_key: str
     asset_id: str
     xml_path: Path
-
-
-def load_offset_db(out_path: Path) -> dict:
-    if out_path.exists():
-        print(f"[LOAD] existing offset db: {out_path}")
-        return torch.load(out_path, map_location="cpu", weights_only=False)
-    return {}
-
-
-def save_offset_db(offset_db: dict, out_path: Path):
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-    torch.save(offset_db, tmp_path)
-    tmp_path.replace(out_path)
 
 
 def parse_floats(text: str) -> np.ndarray:
@@ -560,21 +541,97 @@ class IsaacGymOffsetComputer:
         return offsets
 
 
+def default_offset_motion_file(motion_file: Path) -> Path:
+    return motion_file.with_name(f"{motion_file.stem}_offset{motion_file.suffix}")
+
+def save_corrected_motion_file(
+    source_motion_file: Path,
+    motion_lib: MotionLib,
+    output_motion_file: Path,
+    overwrite: bool,
+):
+    if output_motion_file.exists() and not overwrite:
+        raise FileExistsError(
+            f"Output motion file already exists: {output_motion_file}\n"
+            f"Use --overwrite to replace it."
+        )
+
+    output_motion_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load original dict to preserve all metadata fields, including custom ones
+    # e.g. motion_clip_ids, motion_asset_ids, motion_npz_files.
+    data = torch.load(source_motion_file, map_location="cpu", weights_only=False)
+
+    # Only gts changes. Velocities do not change because this is a constant Z shift.
+    data["gts"] = motion_lib.gts.detach().cpu()
+
+    tmp_path = output_motion_file.with_suffix(output_motion_file.suffix + ".tmp")
+    torch.save(data, tmp_path)
+    tmp_path.replace(output_motion_file)
+
+    print(f"[SAVE] corrected MotionLib: {output_motion_file}")
+
+def apply_offsets_to_motion_lib(
+    motion_lib: MotionLib,
+    motion_entries: List[MotionEntry],
+    offsets: Dict[int, float],
+):
+    for entry in motion_entries:
+        motion_id = entry.motion_id
+        offset = float(offsets[motion_id])
+
+        start = int(motion_lib.length_starts[motion_id].item())
+        num_frames = int(motion_lib.motion_num_frames[motion_id].item())
+        end = start + num_frames
+
+        motion_lib.gts[start:end, :, 2] += offset
+
+        print(
+            f"[APPLY] motion_id={motion_id:04d} "
+            f"clip={entry.clip_id} "
+            f"asset={entry.asset_id} "
+            f"offset={offset:.6f}"
+        )
+
+def infer_clip_id_from_variant_stem(stem: str, gender: str) -> str:
+    """
+    Expected variant stem:
+        000005_v00_male_0e26b88d
+
+    Desired clip_id:
+        000005
+    """
+
+    marker = f"_{gender}_"
+
+    if marker not in stem:
+        return stem
+
+    prefix = stem.rsplit(marker, 1)[0]  # 000005_v00
+
+    if "_v" not in prefix:
+        return prefix
+
+    return prefix.rsplit("_v", 1)[0]    # 000005
+
+
 def get_clip_id(motion_lib: MotionLib, motion_id: int) -> str:
-    if not hasattr(motion_lib, "motion_files"):
-        return f"{motion_id:06d}"
+    # Preferred: explicit semantic clip id saved during conversion.
+    if hasattr(motion_lib, "motion_clip_ids"):
+        return str(motion_lib.motion_clip_ids[motion_id])
 
-    if len(motion_lib.motion_files) <= motion_id:
-        return f"{motion_id:06d}"
+    # Fallback: infer from variant filename.
+    if hasattr(motion_lib, "motion_files") and len(motion_lib.motion_files) > motion_id:
+        stem = Path(motion_lib.motion_files[motion_id]).stem
+        gender = str(motion_lib.motion_genders[motion_id])
+        return infer_clip_id_from_variant_stem(stem, gender)
 
-    return Path(motion_lib.motion_files[motion_id]).stem
+    return f"{motion_id:06d}"
 
 
 def build_motion_entries(
     motion_lib: MotionLib,
     asset_index: Dict[Tuple[str, str], AssetEntry],
-    offset_db: dict,
-    overwrite: bool,
     limit: int,
 ) -> List[MotionEntry]:
     entries: List[MotionEntry] = []
@@ -587,15 +644,6 @@ def build_motion_entries(
         gender = str(motion_lib.motion_genders[motion_id])
         beta_key = str(motion_lib.motion_beta_keys[motion_id])
         asset_id = f"{gender}_{beta_key}"
-
-        if (
-            not overwrite
-            and clip_id in offset_db
-            and gender in offset_db[clip_id]
-            and beta_key in offset_db[clip_id][gender]
-        ):
-            print(f"[SKIP] {clip_id} {asset_id}: already exists")
-            continue
 
         asset_key = (gender, beta_key)
 
@@ -622,19 +670,6 @@ def build_motion_entries(
     return entries
 
 
-def write_offsets_to_db(
-    offset_db: dict,
-    motion_entries: List[MotionEntry],
-    offsets: Dict[int, float],
-):
-    for entry in motion_entries:
-        offset = float(offsets[entry.motion_id])
-
-        offset_db.setdefault(entry.clip_id, {})
-        offset_db[entry.clip_id].setdefault(entry.gender, {})
-        offset_db[entry.clip_id][entry.gender][entry.beta_key] = offset
-
-
 def main():
     parser = argparse.ArgumentParser()
 
@@ -652,9 +687,10 @@ def main():
         ),
     )
     parser.add_argument(
-        "--out",
+        "--out-motion-file",
         type=Path,
-        default=Path("/home/hlz/datasets/humos_frame0_offsets.pt"),
+        default=None,
+        help="Output corrected MotionLib .pt file. Default: <motion-file>_offset.pt",
     )
     parser.add_argument(
         "--device",
@@ -664,8 +700,8 @@ def main():
     parser.add_argument(
         "--limit",
         type=int,
-        default=10,
-        help="Limit newly processed motions. Default: 10. Use -1 for all.",
+        default=-1,
+        help="Limit processed motions. Use -1 for all. For final preprocessing, use -1.",
     )
     parser.add_argument(
         "--target-z",
@@ -700,13 +736,15 @@ def main():
     print(f"[MOTION] num_motions={motion_lib.num_motions()}")
 
     asset_index = discover_assets(args.asset_root)
-    offset_db = load_offset_db(args.out)
+    output_motion_file = (
+        args.out_motion_file
+        if args.out_motion_file is not None
+        else default_offset_motion_file(args.motion_file)
+    )
 
     motion_entries = build_motion_entries(
         motion_lib=motion_lib,
         asset_index=asset_index,
-        offset_db=offset_db,
-        overwrite=args.overwrite,
         limit=args.limit,
     )
 
@@ -728,15 +766,19 @@ def main():
 
         offsets = computer.compute_offsets()
 
-        write_offsets_to_db(
-            offset_db=offset_db,
+        apply_offsets_to_motion_lib(
+            motion_lib=motion_lib,
             motion_entries=motion_entries,
             offsets=offsets,
         )
 
-        save_offset_db(offset_db, args.out)
+        save_corrected_motion_file(
+            source_motion_file=args.motion_file,
+            motion_lib=motion_lib,
+            output_motion_file=output_motion_file,
+            overwrite=args.overwrite,
+        )
 
-        print(f"[SAVE] {args.out}")
         print("[DONE]")
 
     except Exception:
