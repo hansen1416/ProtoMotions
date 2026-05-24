@@ -159,17 +159,14 @@ python examples/motion_libs_visualizer_mor.py \
 
 --------
 
-python protomotions/inference_agent.py \
-    --checkpoint results/hhi_single_male_0e26b88d_cloud_smoke/score_based.ckpt \
-    --simulator isaacgym \
-    --num-envs 1 \
-    --motion-file /home/hlz/datasets/humos_proto_motionlib/humos_1.pt
+## inference motion
 
-python protomotions/inference_agent.py \
+python protomotions/inference_agent_mor.py \
     --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
     --simulator isaacgym \
-    --num-envs 8 \
-    --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt
+    --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
+    --compact-spawn-spacing 1.5 \
+    --num-envs 8
 
 
 -----

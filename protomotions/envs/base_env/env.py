@@ -58,6 +58,7 @@ Key Features:
 """
 
 from functools import cached_property
+import math
 from typing import Any, Dict, Optional, TYPE_CHECKING, Tuple
 
 import torch
@@ -526,9 +527,32 @@ class BaseEnv:
 
         if non_scene_mask.any():
             num_non_scene = non_scene_mask.sum().item()
-            respawn_position_xy = self.terrain.sample_valid_locations(
-                num_envs=num_non_scene, sample_flat=sample_flat
+
+            compact_spawn_spacing = getattr(
+                self.config, "compact_spawn_spacing", None
             )
+
+            if compact_spawn_spacing is None:
+                respawn_position_xy = self.terrain.sample_valid_locations(
+                    num_envs=num_non_scene, sample_flat=sample_flat
+                )
+            else:
+                compact_env_ids = env_ids[non_scene_mask]
+
+                num_cols = math.ceil(math.sqrt(self.num_envs))
+                rows = torch.div(
+                    compact_env_ids, num_cols, rounding_mode="floor"
+                ).float()
+                cols = (compact_env_ids % num_cols).float()
+
+                base_x = self.terrain.border_size + 0.5 * self.terrain.env_length
+                base_y = self.terrain.border_size + 0.5 * self.terrain.env_width
+
+                respawn_position_xy = torch.zeros(
+                    (num_non_scene, 2), device=self.device
+                )
+                respawn_position_xy[:, 0] = base_x + rows * compact_spawn_spacing
+                respawn_position_xy[:, 1] = base_y + cols * compact_spawn_spacing
 
             if ref_state is None:
                 ref_root = torch.zeros((num_non_scene, 2), device=self.device)
