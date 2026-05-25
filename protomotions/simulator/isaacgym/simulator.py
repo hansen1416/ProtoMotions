@@ -428,10 +428,23 @@ class IsaacGymSimulator(Simulator):
 
         asset_options = self._create_humanoid_asset_options()
 
+        selected_asset_ids = getattr(
+            self.robot_config.asset,
+            "selected_asset_ids",
+            None,
+        )
+        selected_asset_ids = set(selected_asset_ids) if selected_asset_ids else None
+
+        if selected_asset_ids is not None:
+            print(f"Filtering morphology assets: {sorted(selected_asset_ids)}")
+
         for info in asset_infos:
             gender = info["gender"]
             beta_key = info["beta_key"]
             asset_id = info["asset_id"]
+
+            if selected_asset_ids is not None and asset_id not in selected_asset_ids:
+                continue
 
             expected_asset_id = f"{gender}_{beta_key}"
             if asset_id != expected_asset_id:
@@ -457,7 +470,16 @@ class IsaacGymSimulator(Simulator):
             self._humanoid_assets_info.append(info)
 
         if len(assets) == 0:
-            raise RuntimeError(f"No morphology humanoid assets loaded from {asset_dir}")
+            raise RuntimeError(
+                f"No morphology humanoid assets loaded from {asset_dir}. "
+                f"selected_asset_ids={sorted(selected_asset_ids) if selected_asset_ids else None}"
+            )
+
+        if selected_asset_ids is not None:
+            loaded_asset_ids = set(self._humanoid_asset_ids)
+            skipped_requested = sorted(selected_asset_ids - loaded_asset_ids)
+            if skipped_requested:
+                print(f"Skipped missing requested morphology assets: {skipped_requested}")
 
         print(f"Loaded {len(assets)} morphology humanoid assets from {asset_dir}")
         

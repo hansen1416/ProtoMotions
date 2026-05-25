@@ -157,18 +157,6 @@ python examples/motion_libs_visualizer_mor.py \
 
 ```
 
---------
-
-## inference motion
-
-python protomotions/inference_agent_mor.py \
-    --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
-    --simulator isaacgym \
-    --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
-    --compact-spawn-spacing 1.5 \
-    --num-envs 8
-
-
 -----
 
 ## Expand the obs space
@@ -196,3 +184,83 @@ _observation_buffer["morphology_obs"]   # [num_envs, 11]
           ↓
 
 get_obs() → network reads it by key
+
+------
+
+## inference motion
+
+python protomotions/inference_agent_mor.py \
+    --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
+    --compact-spawn-spacing 1.5 \
+    --num-envs 8
+
+
+python protomotions/inference_agent_mor.py \
+    --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
+    --simulator isaacgym \
+    --num-envs 29 \
+    --motion-file /home/hlz/datasets/humos_proto/humos_128.pt \
+    --gender-beta \
+        male:0e26b88d \
+        female:0e26b88d \
+        male:0f05fd5a \
+        female:3b4a94c2 \
+        female:4de6c13b \
+        female:7f246a41 \
+        female:09a0fcbd \
+        female:9b4a6dda \
+        female:10c258c2 \
+        female:30f6048e \
+        female:36baeba5 \
+        female:71fbbe41 \
+        female:312bf810 \
+        female:371b5e94 \
+        female:1658f5d3 \
+        female:10900e9a \
+        female:093098f0 \
+        female:25247499 \
+        female:a0720cb2 \
+        male:a9143d09 \
+        female:abbf826b \
+        female:b3fd6d6b \
+        female:b928198f \
+        female:bfd4619b \
+        female:c1d2c0ef \
+        female:ca12d763 \
+        female:d1dc53df \
+        female:d495801e \
+        female:e5c9712a \
+    --compact-spawn-spacing 1.2
+
+
+
+python protomotions/inference_agent_mor.py \
+    --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
+    --simulator isaacgym \
+    --num-envs 8 \
+    --motion-file /home/hlz/datasets/humos_proto/humos_128.pt \
+    --gender-beta \
+    female:0e26b88d \
+    female:30f6048e \
+    female:e5c9712a \
+    female:1658f5d3 \
+    female:bfd4619b \
+    female:4de6c13b \
+    male:a9143d09 \
+    male:0e26b88d \
+    --compact-spawn-spacing 1.2
+
+<!-- there is actually only one is failing down, the others are fine, so the evaluation script need to change -->
+
+------
+
+## Evaluator
+
+python protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
+    --num-envs 8 \
+    --output /home/hlz/Downloads/hhi_distance_report.csv

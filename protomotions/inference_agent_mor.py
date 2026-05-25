@@ -121,6 +121,16 @@ def create_parser():
         default=None,
         help="If set, place humanoids in a compact grid during inference visualization.",
     )
+    parser.add_argument(
+        "--gender-beta",
+        nargs="*",
+        default=None,
+        help=(
+            "Optional morphology filter, e.g. "
+            "--gender-beta male:0e26b88d female:abcd1234. "
+            "Only matching morphology XML assets will be loaded."
+        ),
+    )
 
     return parser
 
@@ -152,7 +162,37 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(messag
 
 log = logging.getLogger(__name__)
 
+def parse_gender_beta_filter(gender_beta_args):
+    if not gender_beta_args:
+        return None
 
+    selected_asset_ids = []
+    valid_genders = {"male", "female", "neutral"}
+
+    for item in gender_beta_args:
+        if ":" not in item:
+            raise ValueError(
+                f"Invalid --gender-beta item '{item}'. "
+                "Expected format: gender:beta_key, e.g. male:0e26b88d"
+            )
+
+        gender, beta_key = item.split(":", 1)
+        gender = gender.strip().lower()
+        beta_key = beta_key.strip()
+
+        if gender not in valid_genders:
+            raise ValueError(
+                f"Invalid gender '{gender}'. "
+                f"Expected one of {sorted(valid_genders)}."
+            )
+
+        if beta_key == "":
+            raise ValueError(f"Empty beta_key in --gender-beta item '{item}'.")
+
+        selected_asset_ids.append(f"{gender}_{beta_key}")
+
+    # Deduplicate while preserving order.
+    return list(dict.fromkeys(selected_asset_ids))
 # def tmp_enable_domain_randomization(robot_cfg, simulator_cfg, env_cfg):
 #     """Temporary function to enable domain randomization for testing.
 
@@ -264,6 +304,13 @@ def main():
             f"CLI override: compact_spawn_spacing = {args.compact_spawn_spacing}"
         )
         env_config.compact_spawn_spacing = args.compact_spawn_spacing
+
+    selected_asset_ids = parse_gender_beta_filter(args.gender_beta)
+
+    if selected_asset_ids is not None:
+        log.info(f"CLI override: selected morphology asset ids = {selected_asset_ids}")
+        robot_config.asset.selected_asset_ids = selected_asset_ids
+
 
     # Parse and apply general CLI overrides
     from protomotions.utils.config_utils import (
