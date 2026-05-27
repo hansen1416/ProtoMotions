@@ -1919,16 +1919,30 @@ class IsaacGymSimulator(Simulator):
             .numpy()
         )
 
+        # cam_pos = gymapi.Vec3(
+        #     self._cam_prev_char_pos[0],
+        #     self._cam_prev_char_pos[1] - 3.0,
+        #     self._cam_prev_char_pos[2] + 0.4,
+        # )
+        # cam_target = gymapi.Vec3(
+        #     self._cam_prev_char_pos[0],
+        #     self._cam_prev_char_pos[1],
+        #     self._cam_prev_char_pos[2] + 0.2,
+        # )
+
+        # Fixed diagonal view of the whole grid instead of tracking a single character.
+        # Adjust these two Vec3s to taste once you see the layout.
         cam_pos = gymapi.Vec3(
-            self._cam_prev_char_pos[0],
-            self._cam_prev_char_pos[1] - 3.0,
-            self._cam_prev_char_pos[2] + 0.4,
+            self._cam_prev_char_pos[0] - 4.0,  # behind the grid on X
+            self._cam_prev_char_pos[1] - 1.0,  # slight side offset on Y
+            self._cam_prev_char_pos[2] + 2.0,  # elevated on Z
         )
         cam_target = gymapi.Vec3(
-            self._cam_prev_char_pos[0],
-            self._cam_prev_char_pos[1],
-            self._cam_prev_char_pos[2] + 0.2,
+            self._cam_prev_char_pos[0] + 2.0,  # look forward into the grid
+            self._cam_prev_char_pos[1] + 2.0,  # look toward grid center (3 cols × spacing)
+            self._cam_prev_char_pos[2] + 1.0,  # slightly above ground
         )
+
         self._gym.viewer_camera_look_at(self._viewer, None, cam_pos, cam_target)
 
     def render(self) -> None:

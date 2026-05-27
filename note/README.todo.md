@@ -97,3 +97,10 @@
    single shape + many motions
    multi shape + many motions
    AMP real/fake shape-match unit test
+
+
+-----
+
+make sure the gender-beta consistentcy, varify it in training, testing, inference
+
+study the humannoid template properly!!

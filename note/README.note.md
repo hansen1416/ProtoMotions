@@ -206,7 +206,7 @@ python protomotions/inference_agent_mor.py \
     --num-envs 8
 
 
-female:093098f0 female:09a0fcbd female:0e26b88d female:0f05fd5a female:10900e9a female:10c258c2
+female:093098f0 female:09a0fcbd female:0e26b88d female:0f05fd5a female:10900e9a female:10c258c2 #
 female:1658f5d3 female:1e5a1c90 female:2286da8c female:25247499 female:2e949ac0 female:30f6048e
 female:312bf810 female:324b2d00 female:36baeba5 female:371b5e94 female:3b4a94c2 female:3c2cfe86
 female:3faff413 female:42909c1b female:443d6b3e female:4dd55cac female:4de6c13b female:52d9e1de
@@ -214,9 +214,9 @@ female:546170ba female:653185e6 female:71fbbe41 female:724d4ad2 female:770f9e2c 
 female:7b3c6576 female:7d706ded female:7e492dfc female:7f246a41 female:82266732 female:944474c9
 female:97b473d4 female:9b4a6dda female:9d418743 female:a0720cb2 female:a2c978d0 female:a9143d09
 female:abbf826b female:ad5728e1 female:b3fd6d6b female:b8e5fb4e female:b928198f female:bd3137aa
-female:bfd4619b female:c1d2c0ef female:ca12d763 female:cf7925fd female:d1dc53df female:d495801e
+female:bfd4619b female:c1d2c0ef female:ca12d763 female:cf7925fd female:d1dc53df female:d495801e #
 female:d4c80970 female:d6f908ec female:d9dbd795 female:da7b9ae1 female:df1b853d female:dfd2d9cf
-female:e57f26a5 female:e5c9712a female:f0de7631 female:fb454239 male:093098f0 male:09a0fcbd
+female:e57f26a5 female:e5c9712a female:f0de7631 female:fb454239 male:093098f0 male:09a0fcbd #
 male:0e26b88d male:0f05fd5a male:10900e9a male:10c258c2 male:1658f5d3 male:1e5a1c90
 male:2286da8c male:25247499 male:2e949ac0 male:30f6048e male:312bf810 male:324b2d00
 male:36baeba5 male:371b5e94 male:3b4a94c2 male:3c2cfe86 male:3faff413 male:42909c1b
@@ -234,7 +234,7 @@ python protomotions/inference_agent_mor.py \
     --simulator isaacgym \
     --num-envs 6 \
     --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
-    --gender-beta female:312bf810 female:324b2d00 female:36baeba5 female:371b5e94 female:3b4a94c2 female:3c2cfe86 \
+    --gender-beta male:9d418743 male:a0720cb2 male:a2c978d0 male:a9143d09 male:abbf826b male:ad5728e1 \
     --compact-spawn-spacing 1.2
 
 
