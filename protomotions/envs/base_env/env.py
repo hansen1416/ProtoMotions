@@ -277,6 +277,25 @@ class BaseEnv:
 
         self.control_manager = ControlManager(self.config.control_components, self)
 
+        # morphology =======
+        # When the motion lib has per-motion shape metadata and the simulator is in
+        # morphology mode, restrict asset loading to only the shapes present in the
+        # motion file. Without this, round-robin would assign shapes that have no
+        # compatible motions, crashing sample_motions_for_asset_ids() on first reset.
+        if (
+            self.motion_lib is not None
+            and self.motion_lib.has_morphology_metadata()
+            and getattr(self.simulator, "morphology", False)
+            and not self.robot_config.asset.selected_asset_ids
+        ):
+            unique_asset_ids = list(dict.fromkeys(self.motion_lib.motion_asset_ids))
+            self.robot_config.asset.selected_asset_ids = unique_asset_ids
+            print(
+                f"[Morphology] Auto-selected {len(unique_asset_ids)} asset IDs "
+                f"from motion lib: {unique_asset_ids}"
+            )
+        # morphology =======
+
         visualization_markers = self.create_visualization_markers(
             self.simulator.headless
         )

@@ -137,7 +137,6 @@ The `robot_config` typically passed to one of `SimulatorConfig` and `SimulatorCl
 `SimulatorClass` (protomotions/simulator/isaacgym/simulator.py) 
 includes IsaacGym, IsaacLab, Genesis, Newton and MuJoCo (CPU-only)
 
---------
 
 ```text
 MotionLib .pt
@@ -219,6 +218,19 @@ _observation_buffer["morphology_obs"]   # [num_envs, 11]
           ↓
 
 get_obs() → network reads it by key
+
+------
+
+## Training
+
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name local_test \
+    --motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --num-envs 8 \
+    --batch-size 16
 
 ------
 

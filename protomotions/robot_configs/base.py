@@ -120,6 +120,8 @@ class RobotAssetConfig:
     asset_folder_name: Optional[str] = None
     # yaml file include asset file name and its gender, beta, init height
     asset_info_file: Optional[str] = None
+    # subset of asset_ids to load (e.g. derived from motion lib); None = load all
+    selected_asset_ids: Optional[List[str]] = None
     # morphology =======
 
     def __post_init__(self):
