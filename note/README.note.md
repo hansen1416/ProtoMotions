@@ -130,7 +130,6 @@ protomotions/simulator/base_simulator/simulator.py
 
 robot_config: RobotConfig in `protomotions/robot_configs/factory.py` defines all robot config, SMPL, SMPLX, etc
 
-
 The `robot_config` typically passed to one of `SimulatorConfig` and `SimulatorClass` 
 
 `SimulatorConfig` (protomotions/simulator/isaacgym/config.py) and 
@@ -138,58 +137,39 @@ The `robot_config` typically passed to one of `SimulatorConfig` and `SimulatorCl
 includes IsaacGym, IsaacLab, Genesis, Newton and MuJoCo (CPU-only)
 
 
-```text
-MotionLib .pt
-  -> each motion has motion_asset_id = "{gender}_{beta_key}"
-  -> build asset_id -> compatible motion_ids
+* **Training asset load**
 
-Visualizer
-  -> collect unique asset_ids
-  -> create one env per unique body shape
-  -> pass requested_morphology_asset_ids to simulator
-  -> sample env_motion_ids only from the matching asset_id group
+  * `selected_asset_ids` is auto-populated from the motion library’s unique `asset_ids` before simulator initialization.
+  * Code path: `env.py:280-297 → simulator.py:431-446`
 
-Simulator
-  -> load all morphology XMLs
-  -> assign each env the requested XML asset
-  -> assert visualizer env_asset_ids == simulator env_id_to_asset_name
-```
+* **Per-env asset assignment**
 
-Concretely:
+  * Environments are assigned assets by round-robin over the filtered asset set.
+  * This produces `env_id_to_asset_name`.
+  * The mapping is injected into the motion manager.
+  * Code path: `simulator.py:488-549`, especially round-robin logic at `530-536` and name list at `546-549`; injection at `env.py:293`
 
-1. `motion_lib.py` now stores morphology metadata: `motion_betas`, `motion_gender_ids`, `motion_genders`, `motion_beta_keys`, and `motion_asset_ids`, and it has `build_asset_id_to_motion_ids()` plus `sample_motions_for_asset_ids(...)`. That is the required motion-side matching logic. 
+* **Motion sampling**
 
-2. `simulator.py` accepts `morphology_asset_ids`, validates their length against `num_envs`, loads all XML assets from the morphology folder, and assigns each env using the requested asset id. That is the required multi-body-shape humanoid loading logic. 
+  * `sample_motions_for_asset_ids` only samples motions from the bucket matching the environment’s assigned `asset_id`.
+  * Code path: `mimic_motion_manager.py:104-114 → motion_lib.py:854-901 → motion_lib.py:324-337`
 
-3. `motion_libs_visualizer_mor.py` now creates one env per unique `asset_id`, samples one compatible motion per env through `sample_motions_for_asset_ids(self.env_asset_ids, ...)`, and passes `morphology_asset_ids` into the simulator. It also checks:
+* **Morphology observation**
 
-```python
-assert self.simulator.env_id_to_asset_name == self.env_asset_ids
-```
+  * `env_morphology = [gender_id, betas / 3.0]` is constructed from XML metadata.
+  * This morphology vector is passed into the observation pipeline each step.
+  * Code path: `simulator.py:558-585 → env.py:972 → component_factories.py:1265-1279 → obs/humanoid.py:351`
 
-So the visualizer verifies that the simulator asset assignment matches the visualizer’s morphology assignment. 
+* **Reset pose**
 
-4. `base.py`, `factory.py`, and `smpl_mor.py` support the new robot type: `RobotAssetConfig` can resolve a canonical XML from `asset_folder_name`, `factory.py` registers `"smpl_mor"`, and `SmplMorRobotConfig` points to `mjcf/smpl_mor/assets.yaml`.   
+  * `motion_lib.get_motion_state` fetches reference position, rotation, and DOF state for the environment’s current `motion_id`.
+  * Code path: `env.py:1082-1083 → env.py:1141-1164`
 
-So the visualizer-side goal is satisfied:
+* **Betas XML ↔ motion file consistency**
 
-```text
-multiple body-shape humanoids loaded
-each env has one morphology
-each env only samples motions with the same gender/beta_key
-```
-
-```text
-env_id -> env_asset_id -> compatible motion_ids -> sampled motion_id
-```
-
-```
-python examples/motion_libs_visualizer_mor.py \
-    --motion_files /home/hlz/datasets/humos_proto_motionlib/humos_8.pt \
-    --robot smpl_mor \
-    --simulator isaacgym
-
-```
+  * Consistency is currently trusted through the shared `beta_key` hash.
+  * There is no runtime check yet verifying that XML betas exactly match motion-file betas.
+  * Code path: `simulator.py:442-449 → motion_lib.py:133-141`
 
 -----
 
