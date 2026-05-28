@@ -86,10 +86,34 @@ python scripts/compute_humos_frame0_offsets.py \
 ## 4. visualize it
 ```bash
 python examples/motion_libs_visualizer_mor.py \
-    --motion_files /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --motion_files ~/datasets/humos_proto/humos_8_offset.pt \
     --robot smpl_mor \
     --simulator isaacgym
 ```
+
+## 5. data format (~/datasets/humos_proto/humos_8_offset.pt)
+
+gts: tensor [n_frames, 24, 3]
+grs: tensor [n_frames, 24, 4]
+gvs: tensor [n_frames, 24, 3]
+gavs: tensor [n_frames, 24, 3]
+dvs: tensor [n_frames, 69]
+dps: tensor [n_frames, 69]
+length_starts: tensor [n_envs]
+motion_lengths: tensor [n_envs]
+motion_dt: tensor [n_envs]
+motion_num_frames: tensor [n_envs]
+motion_weights: tensor [n_envs]
+contacts: tensor [n_frames, 24]
+motion_files: tuple [n_envs]
+lrs: tensor [n_frames, 24, 4]
+motion_betas: tensor [n_envs, 10]
+motion_gender_ids: tensor [n_envs] -1, 1
+motion_genders: tuple [n_envs] 'male', 'female'
+motion_beta_keys: tuple [n_envs] eg: '1e5a1c90'
+motion_asset_ids: tuple [n_envs] eg: 'male_0e26b88d'
+motion_clip_ids: tuple [n_envs] eg: '000005'
+motion_npz_files: tuple [n_envs] *.npz files
 
 ------
 

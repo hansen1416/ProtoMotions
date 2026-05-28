@@ -1,5 +1,6 @@
 """
-inspect_motion_pt.py  –  Pretty-print the structure of a ProtoMotions .pt motion file.
+python data/scripts/read_motion.py /home/hlz/datasets/humos_proto/humos_8_offset.pt
+Pretty-print the structure of a ProtoMotions .pt motion file.
 
 Usage:
     python inspect_motion_pt.py <path_to_motion_file.pt> [--depth N] [--sample]
