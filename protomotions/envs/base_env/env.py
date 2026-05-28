@@ -59,6 +59,7 @@ Key Features:
 
 from functools import cached_property
 import math
+import os
 from typing import Any, Dict, Optional, TYPE_CHECKING, Tuple
 
 import torch
@@ -311,15 +312,42 @@ class BaseEnv:
             and self.motion_lib.has_morphology_metadata()
         ):
             
-            # this block only called when the second time, it's env.py -> simulator.py -> env.py
             self.motion_manager.env_asset_ids = self.simulator.env_id_to_asset_name
-            # ['female_093098f0', 'female_09a0fcbd', ...] length of num_env, env_id -> gender_beta_key
-            # env_id_beta_keys_mapping
             print(
                 f"[MotionManager] Morphology-consistent sampling enabled: "
                 f"{self.num_envs} envs, "
                 f"{len(set(self.simulator.env_id_to_asset_name))} unique shapes."
             )
+
+            if os.environ.get("PROTOMOTIONS_DEBUG"):
+                # Verify that betas in assets.yaml (XML side) match betas in the motion
+                # file for each unique shape. A mismatch means the network would see
+                # different shape conditioning at training vs inference.
+                unique_checked = set()
+                mismatches = []
+                asset_id_to_motion_ids = self.motion_lib.build_asset_id_to_motion_ids()
+
+                for env_id, asset_id in enumerate(self.simulator.env_id_to_asset_name):
+                    if asset_id in unique_checked:
+                        continue
+                    unique_checked.add(asset_id)
+
+                    xml_betas = self.simulator.env_id_beta[env_id]
+                    motion_id = asset_id_to_motion_ids[asset_id][0]
+                    motion_betas = self.motion_lib.motion_betas[motion_id].to(xml_betas.device)
+
+                    max_diff = (xml_betas - motion_betas).abs().max().item()
+                    if max_diff > 1e-4:
+                        mismatches.append((asset_id, max_diff))
+
+                if mismatches:
+                    msg = "\n".join(f"  {aid}: max_diff={d:.6f}" for aid, d in mismatches)
+                    raise RuntimeError(
+                        f"[Morphology] Betas mismatch between XML assets and motion file:\n{msg}\n"
+                        "Re-check that XMLs and motion file were generated from the same SMPLSim run."
+                    )
+
+                print(f"[Morphology] Betas consistency check passed for {len(unique_checked)} unique shapes.")
 
         # Component infrastructure for MdpComponent
         self._component_manager = ComponentManager(self.device)

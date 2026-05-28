@@ -158,12 +158,12 @@ includes IsaacGym, IsaacLab, Genesis, Newton and MuJoCo (CPU-only)
 
   * `env_morphology = [gender_id, betas / 3.0]` is constructed from XML metadata.
   * This morphology vector is passed into the observation pipeline each step.
-  * Code path: `simulator.py:558-585 → env.py:972 → component_factories.py:1265-1279 → obs/humanoid.py:351`
+  * Code path: `simulator.py:_build_humanoid_asset_assignment:558-585 → env.py:_build_global_context.EnvContext:972 → component_factories.py:morphology_obs_factory:1265-1279 → obs/humanoid.py:compute_morphology_obs:351`
 
 * **Reset pose**
 
   * `motion_lib.get_motion_state` fetches reference position, rotation, and DOF state for the environment’s current `motion_id`.
-  * Code path: `env.py:1082-1083 → env.py:1141-1164`
+  * Code path: `env.py:compute_ref_reset_state → env.py:reset`
 
 * **Betas XML ↔ motion file consistency**
 
