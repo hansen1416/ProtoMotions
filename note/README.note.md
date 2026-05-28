@@ -221,7 +221,7 @@ python protomotions/train_agent.py \
 python protomotions/inference_agent_mor.py \
     --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
     --simulator isaacgym \
-    --motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
     --compact-spawn-spacing 1.5 \
     --num-envs 8
 
