@@ -168,8 +168,10 @@ includes IsaacGym, IsaacLab, Genesis, Newton and MuJoCo (CPU-only)
 * **Betas XML ↔ motion file consistency**
 
   * Consistency is currently trusted through the shared `beta_key` hash.
-  * There is no runtime check yet verifying that XML betas exactly match motion-file betas.
-  * Code path: `simulator.py:442-449 → motion_lib.py:133-141`
+  * runtime in `env.py` `if os.environ.get("PROTOMOTIONS_DEBUG"):`.
+  * Code path: `simulator.py._load_humanoid_assets`:444-456 (asset_id constructed and validated from YAML gender+beta_key) → motion_lib.py:136-140
+  (motion-side field declarations: motion_betas, motion_gender_ids, motion_genders, motion_beta_keys, motion_asset_ids) →
+  env.py:326-350 (cross-check: XML env_id_beta vs motion-file motion_betas per unique shape, raises RuntimeError on mismatch)
 
 -----
 
@@ -219,7 +221,7 @@ python protomotions/train_agent.py \
 python protomotions/inference_agent_mor.py \
     --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
     --simulator isaacgym \
-    --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
+    --motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
     --compact-spawn-spacing 1.5 \
     --num-envs 8
 
