@@ -19,6 +19,8 @@ asset: RobotAssetConfig = field(
     )
 ```
 
+All SMPL .xml templates are in protomotions/data/assets/mjcf/smpl_mor/*.xml
+
 ------
 
 # Data Preprocessing
