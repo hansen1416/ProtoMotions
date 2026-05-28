@@ -140,19 +140,18 @@ includes IsaacGym, IsaacLab, Genesis, Newton and MuJoCo (CPU-only)
 * **Training asset load**
 
   * `selected_asset_ids` is auto-populated from the motion library’s unique `asset_ids` before simulator initialization.
-  * Code path: `env.py:280-297 → simulator.py:431-446`
+  * Code path: `env.py:initialize_simulator → simulator.py:_load_humanoid_assets`
 
 * **Per-env asset assignment**
 
-  * Environments are assigned assets by round-robin over the filtered asset set.
-  * This produces `env_id_to_asset_name`.
-  * The mapping is injected into the motion manager.
-  * Code path: `simulator.py:488-549`, especially round-robin logic at `530-536` and name list at `546-549`; injection at `env.py:293`
+  * Environments are assigned assets by round-robin over the filtered asset set. in IsaacGymSimulator._build_humanoid_asset_assignment
+  * This produces `env_id_to_asset_idx`, `env_id_to_asset_name`, `env_morphology`, etc.
+  * The mapping is injected into the motion manager, also in `env.py:initialize_simulator` the of morphology block ater `_initialize_with_markers`. it's like env.py:initialize_simulator  -> simulator.py -> env.py:initialize_simulator
 
 * **Motion sampling**
 
   * `sample_motions_for_asset_ids` only samples motions from the bucket matching the environment’s assigned `asset_id`.
-  * Code path: `mimic_motion_manager.py:104-114 → motion_lib.py:854-901 → motion_lib.py:324-337`
+  * Code path: `mimic_motion_manager.py:sample_motions → motion_lib.py:sample_motions_for_asset_ids → motion_lib.py:build_asset_id_to_motion_ids`
 
 * **Morphology observation**
 

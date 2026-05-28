@@ -404,6 +404,7 @@ class IsaacGymSimulator(Simulator):
         asset_folder = self.robot_config.asset.asset_folder_name
         asset_dir = os.path.join(asset_root, asset_folder)
 
+        # protomotions/data/assets/mjcf/smpl_mor/assets.yaml
         asset_info_file = os.path.join(asset_root, self.robot_config.asset.asset_info_file)
 
         if not os.path.isdir(asset_dir):
@@ -428,6 +429,7 @@ class IsaacGymSimulator(Simulator):
 
         asset_options = self._create_humanoid_asset_options()
 
+        # these are the asset_id loaded from the motion files, assigned in env.py:initialize_simulator
         selected_asset_ids = getattr(
             self.robot_config.asset,
             "selected_asset_ids",
@@ -438,12 +440,14 @@ class IsaacGymSimulator(Simulator):
         if selected_asset_ids is not None:
             print(f"Filtering morphology assets: {sorted(selected_asset_ids)}")
 
+        # length 128 [dict_keys(['asset_id', 'gender', 'beta_key', 'betas', 'root_height']),..]
         for info in asset_infos:
             gender = info["gender"]
             beta_key = info["beta_key"]
             asset_id = info["asset_id"]
 
             if selected_asset_ids is not None and asset_id not in selected_asset_ids:
+                # only load asset loaded in motion files
                 continue
 
             expected_asset_id = f"{gender}_{beta_key}"
@@ -474,12 +478,6 @@ class IsaacGymSimulator(Simulator):
                 f"No morphology humanoid assets loaded from {asset_dir}. "
                 f"selected_asset_ids={sorted(selected_asset_ids) if selected_asset_ids else None}"
             )
-
-        if selected_asset_ids is not None:
-            loaded_asset_ids = set(self._humanoid_asset_ids)
-            skipped_requested = sorted(selected_asset_ids - loaded_asset_ids)
-            if skipped_requested:
-                print(f"Skipped missing requested morphology assets: {skipped_requested}")
 
         print(f"Loaded {len(assets)} morphology humanoid assets from {asset_dir}")
         
@@ -535,14 +533,14 @@ class IsaacGymSimulator(Simulator):
 
             assignment_mode = "round-robin"
 
-        # env_id -> asset index
+        # env_id -> asset index, tensor([0, 1, 2, 3, 4, 5, 6, 7], device='cuda:0')
         self.env_id_to_asset_idx = torch.tensor(
             env_asset_indices,
             device=self.device,
             dtype=torch.long,
         )
 
-        # env_id -> asset name, e.g. "male_fb454239"
+        # env_id -> asset name, e.g. ['female_0e26b88d', 'female_0f05fd5a',...]
         self.env_id_to_asset_name = [
             self._humanoid_asset_ids[int(asset_idx)]
             for asset_idx in self.env_id_to_asset_idx.cpu().numpy()
@@ -579,6 +577,7 @@ class IsaacGymSimulator(Simulator):
             dtype=torch.float32,
         ).unsqueeze(-1)
 
+        # # env_id -> gender+betas tensor, shape [num_envs, 11]
         self.env_morphology = torch.cat(
             [self.env_gender_id, self.env_id_beta / 3.0],
             dim=-1,
@@ -592,8 +591,6 @@ class IsaacGymSimulator(Simulator):
             device=self.device,
             dtype=torch.float32,
         )
-
-
 
         self.env_beta_key = [
             asset_info["beta_key"]

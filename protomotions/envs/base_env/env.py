@@ -290,6 +290,7 @@ class BaseEnv:
         ):
             unique_asset_ids = list(dict.fromkeys(self.motion_lib.motion_asset_ids))
             self.robot_config.asset.selected_asset_ids = unique_asset_ids
+            # read loaded asset ids from the motion files
             print(
                 f"[Morphology] Auto-selected {len(unique_asset_ids)} asset IDs "
                 f"from motion lib: {unique_asset_ids}"
@@ -309,6 +310,8 @@ class BaseEnv:
             and getattr(self.simulator, "morphology", False)
             and self.motion_lib.has_morphology_metadata()
         ):
+            
+            # this block only called when the second time, it's env.py -> simulator.py -> env.py
             self.motion_manager.env_asset_ids = self.simulator.env_id_to_asset_name
             # ['female_093098f0', 'female_09a0fcbd', ...] length of num_env, env_id -> gender_beta_key
             # env_id_beta_keys_mapping
