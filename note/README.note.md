@@ -151,7 +151,8 @@ includes IsaacGym, IsaacLab, Genesis, Newton and MuJoCo (CPU-only)
 * **Motion sampling**
 
   * `sample_motions_for_asset_ids` only samples motions from the bucket matching the environment’s assigned `asset_id`.
-  * Code path: `mimic_motion_manager.py:sample_motions → motion_lib.py:sample_motions_for_asset_ids → motion_lib.py:build_asset_id_to_motion_ids`
+  * Code path: `mimic_motion_manager.py:sample_motions → motion_lib.py:sample_motions_for_asset_ids` 
+  * the asset id to motion_ids mapping `asset_id_to_motion_ids` is built in motion_lib.py:build_asset_id_to_motion_ids`
 
 * **Morphology observation**
 

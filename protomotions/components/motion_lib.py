@@ -162,6 +162,9 @@ class MotionLib:
         self.config = config
         self.device = device
 
+        # Internal cache for the static asset_id -> motion_ids mapping.
+        self._asset_id_to_motion_ids_cache: Optional[Dict[str, torch.Tensor]] = None
+
         # Handle empty motion library (Null Object pattern)
         if config.motion_file is None:
             print("Creating empty MotionLib (no motion data)")
@@ -322,7 +325,10 @@ class MotionLib:
         return tuple(self.motion_asset_ids[int(i)] for i in ids)
 
     def build_asset_id_to_motion_ids(self) -> Dict[str, torch.Tensor]:
-        """Build mapping: asset_id -> compatible motion ids."""
+        """Return mapping: asset_id -> compatible motion ids (cached after first call)."""
+        if self._asset_id_to_motion_ids_cache is not None:
+            return self._asset_id_to_motion_ids_cache
+
         if self.motion_asset_ids is None:
             raise RuntimeError("MotionLib does not contain motion_asset_ids.")
 
@@ -330,11 +336,15 @@ class MotionLib:
 
         for motion_id, asset_id in enumerate(self.motion_asset_ids):
             mapping.setdefault(asset_id, []).append(motion_id)
+        # {'male_0e26b88d': [0], 'female_0e26b88d': [1], ...}
 
-        return {
+        self._asset_id_to_motion_ids_cache = {
             asset_id: torch.tensor(ids, device=self.device, dtype=torch.long)
             for asset_id, ids in mapping.items()
         }
+
+        # {'male_0e26b88d': tensor([0], device='cuda:0'), 'female_0e26b88d': tensor([1], device='cuda:0'), ...}
+        return self._asset_id_to_motion_ids_cache
     # morphology =======
 
     def process_packaged_motion_file_name_multi_gpu(self, motion_file):
