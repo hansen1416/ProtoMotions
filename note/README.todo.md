@@ -101,6 +101,8 @@
 
 -----
 
-make sure the gender-beta consistentcy, varify it in training, testing, inference
+~~make sure the gender-beta consistentcy, varify it in training, testing, inference~~
 
 study the humannoid template properly!!
+
+We can either tune the humanoid to align with SMPL joints exactly, or we can develop a script that perform the target motion, and record its data
