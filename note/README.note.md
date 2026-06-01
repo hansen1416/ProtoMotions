@@ -247,7 +247,7 @@ python protomotions/inference_agent_mor.py \
     --simulator isaacgym \
     --num-envs 16 \
     --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
-    --gender-beta female:093098f0 female:09a0fcbd female:0e26b88d female:0f05fd5a female:10900e9a female:10c258c2 female:1658f5d3 female:1e5a1c90 female:2286da8c female:25247499 female:2e949ac0 female:30f6048e female:312bf810 female:324b2d00 female:36baeba5 female:371b5e94 \
+    --gender-beta male:bfd4619b male:c1d2c0ef male:ca12d763 male:cf7925fd male:d1dc53df male:d495801e male:d4c80970 male:d6f908ec male:d9dbd795 male:da7b9ae1 male:df1b853d male:dfd2d9cf male:e57f26a5 male:e5c9712a male:f0de7631 male:fb454239 \
     --compact-spawn-spacing 1.2
 
 ------
