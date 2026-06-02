@@ -930,6 +930,13 @@ class IsaacLabSimulator(Simulator):
         # IsaacLab uses wxyz quaternion format
         rot_wxyz = rotations_xyzw[:, [3, 0, 1, 2]]
 
+        positions = positions.clone()
+        hidden_mask = positions[:, 2] <= self._proj_config.hide_z
+        if hidden_mask.any():
+            hidden_env_offsets = env_ids[hidden_mask].to(positions.dtype)
+            positions[hidden_mask, 0] = hidden_env_offsets
+            positions[hidden_mask, 1] = hidden_env_offsets
+
         for pid in proj_indices.unique():
             mask = proj_indices == pid
             eids = env_ids[mask]

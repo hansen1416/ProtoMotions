@@ -17,37 +17,35 @@ tmux new -t hhi
 tmux kill-session -t hhi
 
 
-
-
+```bash
 python protomotions/train_agent.py \
     --robot-name smpl_mor \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name hhi_single_motion_multi_shape \
-    --motion-file ./humos_128.pt \
+    --experiment-name hhi_1_motion_128_shape \
+    --motion-file ./humos_128_offset.pt \
     --num-envs 1024 \
     --batch-size 4096 \
     --use-wandb \
     --wandb-project hhi-protomotions \
     --wandb-entity yugoamaryl \
-    --wandb-group hhi_single_motion_multi_shape
-    
+    --wandb-group hhi_1_motion_128_shape
+```
+
+```bash
 python protomotions/train_agent.py \
     --robot-name smpl_mor \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name hhi_single_motion_multi_shape \
-    --motion-file ./humos_128.pt \
+    --experiment-name solve_memory \
+    --motion-file ./humos_128_offset.pt \
     --num-envs 4096 \
-    --batch-size 16384 \
-    --use-wandb \
-    --wandb-project hhi-protomotions \
-    --wandb-entity yugoamaryl \
-    --wandb-group hhi_single_motion_multi_shape \
-    simulator.sim.physx.default_buffer_size_multiplier=25.0
+    --batch-size 16384
+```
 
-  docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --ipc=host --shm-size=16g hansen1416/hhi-protomotions-isaacgym:v1 /bin/bash
-
+```bash
+docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --ipc=host --shm-size=16g hansen1416/hhi-protomotions-isaacgym:v1 /bin/bash
+```
 ----
 
 

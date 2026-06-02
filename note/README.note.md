@@ -260,3 +260,6 @@ python protomotions/evaluate_hhi_faults.py \
     --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
     --num-envs 8 \
     --output /home/hlz/Downloads/hhi_distance_report.csv
+
+------
+protomotions/robot_configs/smpl_mor.py
