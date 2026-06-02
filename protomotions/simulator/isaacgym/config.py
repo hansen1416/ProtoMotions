@@ -116,6 +116,6 @@ class IsaacGymSimulatorConfig(SimulatorConfig):
         # add_triangle_mesh terrain. Override via
         # --overrides simulator.projectile.num_projectiles=N to opt back into
         # more cubes (e.g. for interactive viewer throws).
-        default_factory=lambda: ProjectileConfig(num_projectiles=1),
+        default_factory=lambda: ProjectileConfig(num_projectiles=0),
         metadata={"help": "Projectile pool config (IsaacGym defaults to 1 cube)."},
     )

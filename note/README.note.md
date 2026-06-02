@@ -203,6 +203,12 @@ get_obs() → network reads it by key
 
 ------
 
+## Sampling motions
+
+Sample ~2,000–3,000 motions from the 5th–55th difficulty percentile (ranks ~1,000–11,500 in the sorted list). This skips pure static poses at the bottom and avoids hard motions at the top that won't converge within the pilot budget. Train with 8,192 envs / 32,768 batch size to make use of the 48 GB GPU. The goal is a discriminative difficulty range where good architectures clearly outperform weak ones within a reasonable training window.
+
+------
+
 ## Training
 
 python protomotions/train_agent.py \
@@ -262,4 +268,146 @@ python protomotions/evaluate_hhi_faults.py \
     --output /home/hlz/Downloads/hhi_distance_report.csv
 
 ------
-protomotions/robot_configs/smpl_mor.py
+
+## Fix: IsaacGym crash at 4096+ envs (CUDA error 700 / segfault)
+
+### Root cause
+
+`SimulatorConfig` defaults to **5 projectile cubes per env**. Each cube is a full
+dynamic rigid body that PhysX must track contact patches for against the
+`add_triangle_mesh` terrain (which has wildcard collidability).
+
+Projectiles are pre-allocated dynamic rigid body cubes (pool of 5 per env) for perturbation testing — press J to throw one at the humanoid. They park underground at hide_z = -2.0 when idle and disappear after hide_delay = 2.0s.
+  
+Why they crashed PhysX GPU at 4096 envs:
+
+The terrain is a triangle mesh, which in PhysX has wildcard broadphase coverage — it generates contact pair candidates with
+every standalone rigid body every frame. Projectile cubes (non-articulated) go through a path governed by
+maxRigidPatchCount:
+
+5 cubes × 4096 envs × ~4 patches each ≈ 80,000+ patches  ≥  limit (~80K)
+5 cubes × 1024 envs × ~4 patches each ≈ 20,000 patches   <  limit  ✓
+
+That's exactly why 1024 worked and 4096 didn't. Idle cubes at z = -2.0 are still inside the mesh AABB, so they generate
+patches every frame regardless.
+
+maxRigidPatchCount is set at PhysX compile time and is not exposed through any Python API — max_gpu_contact_pairs,
+default_buffer_size_multiplier, etc. all touch unrelated budgets.
+
+(NVlabs/ProtoMotions PR #223)
+
+#### 1. Cap IsaacGym to 1 projectile by default
+
+`protomotions/simulator/isaacgym/config.py` — override the `projectile` field on
+`IsaacGymSimulatorConfig` so IsaacGym gets 1 cube instead of the base default of 5:
+
+```python
+# Before: inherited SimulatorConfig.projectile (num_projectiles=5)
+
+# After:
+from protomotions.simulator.base_simulator.config import ProjectileConfig, ...
+
+@dataclass
+class IsaacGymSimulatorConfig(SimulatorConfig):
+    ...
+    projectile: ProjectileConfig = field(
+        default_factory=lambda: ProjectileConfig(num_projectiles=1),
+        metadata={"help": "Projectile pool config (IsaacGym defaults to 1 cube)."},
+    )
+```
+
+`1 cube × 4096 envs = 4096 rigid bodies` — well under the ~80K patch budget.
+To opt back into more cubes (e.g. for interactive viewer use):
+```
+--overrides simulator.projectile.num_projectiles=5
+```
+
+#### 2. Give each hidden cube a unique z slot
+
+Without spacing, all hidden cubes for an env stack at the same `hide_z = -2.0`,
+generating spurious contact patches between them. `hide_spacing` gives each pool
+index its own z level.
+
+`protomotions/simulator/base_simulator/config.py`:
+
+```python
+@dataclass
+class ProjectileConfig:
+    ...
+    hide_z: float = -2.0
+    hide_spacing: float = 4.0          # NEW: z-gap between hidden slots
+
+    def hidden_z_for_index(self, projectile_index: int) -> float:
+        """Return a hidden z-position that avoids projectile-projectile overlap."""
+        return self.hide_z - self.hide_spacing * projectile_index
+        # projectile 0 → z = -2.0
+        # projectile 1 → z = -6.0
+        # projectile 2 → z = -10.0  etc.
+```
+
+All spawn sites (IsaacGym `_build_projectile_actors`, IsaacLab scene, Newton, MuJoCo)
+now call `hidden_z_for_index(i)` instead of the bare `hide_z`:
+
+```python
+# IsaacGym simulator.py — _build_projectile_actors
+# Before:
+start_pose.p = gymapi.Vec3(0.0, 0.0, self._proj_config.hide_z)
+
+# After:
+start_pose.p = gymapi.Vec3(
+    env_id,
+    env_id,
+    self._proj_config.hidden_z_for_index(proj_idx),
+)
+```
+
+The `env_id` x/y spread (see point 3) is also applied at spawn time so the initial
+layout matches the runtime hide layout.
+
+#### 3. Spread hidden cubes across x/y by env_id at runtime
+
+When a cube is hidden (teleported underground), all backends previously placed it at
+`(0, 0, hide_z)`. With thousands of envs, all hidden cubes pile up at the world
+origin, regenerating contact patches every frame.
+
+`_set_projectile_root_states` in each backend now detects hidden positions
+(`z <= hide_z`) and rewrites x/y to `env_id`:
+
+```python
+# Added to IsaacGym, IsaacLab, Newton _set_projectile_root_states:
+positions = positions.clone()
+hidden_mask = positions[:, 2] <= self._proj_config.hide_z
+if hidden_mask.any():
+    hidden_env_offsets = env_ids[hidden_mask].to(positions.dtype)
+    positions[hidden_mask, 0] = hidden_env_offsets   # x = env_id
+    positions[hidden_mask, 1] = hidden_env_offsets   # y = env_id
+```
+
+This also applies inside `_update_projectiles` and `_hide_projectiles_for_envs` in
+`base_simulator/simulator.py`, which use `proj_indices` to further separate cubes
+within the same env:
+
+```python
+# _update_projectiles (expired cubes being hidden):
+hide_pos[:, 2] = self._proj_config.hide_z
+hide_pos[:, 2] -= self._proj_config.hide_spacing * proj_indices.to(hide_pos.dtype)
+
+# _hide_projectiles_for_envs (env reset):
+hide_pos[:, 2] = self._proj_config.hide_z
+hide_pos[:, 2] -= self._proj_config.hide_spacing * proj_expanded.to(hide_pos.dtype)
+```
+
+#### 4. Early-return in `_throw_projectile` when num_projectiles == 0
+
+If a backend sets `num_projectiles=0` to opt out entirely, pressing J (throw key)
+would previously crash trying to index an empty pool.
+
+`protomotions/simulator/base_simulator/simulator.py`:
+
+```python
+def _throw_projectile(self) -> None:
+    cfg = self._proj_config
+    if cfg.num_projectiles == 0:   # NEW: safe no-op
+        return
+    ...
+```
