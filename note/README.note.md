@@ -27,34 +27,47 @@ All SMPL .xml templates are in protomotions/data/assets/mjcf/smpl_mor/*.xml
 
 ## 1. Convert HUMOS output to AMASS-style `.npz` files
 
+**Batch mode — all 1024 clips, all 128 variants each:**
+```bash
+python scripts/export_humos_to_amass_npz.py \
+    --input-dir /home/hlz/datasets/humos_output/ \
+    --out-root /home/hlz/datasets/humos_proto_interm/ \
+    --skip-existing
+```
+Produces `humos_proto_interm/HUMOS/*.npz` and `humos_proto_interm/humos_131072.yaml` (1024 clips × 128 variants).
+`--skip-existing` makes re-runs safe after interruption.
+
+**Single-clip mode (testing / backward compat):**
 ```bash
 python scripts/export_humos_to_amass_npz.py \
     --input /home/hlz/datasets/humos_output/000005.pt \
-    --out-root /home/hlz/datasets/humos_proto_interm/
+    --out-root /home/hlz/datasets/humos_proto_interm_single/
 ```
 
-or for testing
-
+**Small test (8 variants from one clip):**
 ```bash
 python scripts/export_humos_to_amass_npz.py \
     --input /home/hlz/datasets/humos_output/000005.pt \
     --out-root /home/hlz/datasets/humos_proto_interm_8/ --num 8
 ```
 
-This command converts the HUMOS output file 000005.pt into AMASS-style .npz motion files under /home/hlz/datasets/humos_proto/.
+## 2. generate the .pt files used in protomotions from the intermediate .npz and .yaml config.
 
-## 2. generate the .pt files used in protomotions from the intermediate .npz and .yaml config. It will save a motion file in /home/hlz/datasets/humos_proto, eg. /home/hlz/datasets/humos_proto/humos_128.pt
+**Full dataset (131072 motions, batched to stay within RAM):**
 ```bash
 python data/scripts/convert_amass_to_motionlib_with_morphology.py \
     /home/hlz/datasets/humos_proto_interm/ \
     /home/hlz/datasets/humos_proto/ \
-    --motion-config /home/hlz/datasets/humos_proto_interm/humos_128.yaml \
+    --motion-config /home/hlz/datasets/humos_proto_interm/humos_131072.yaml \
     --humanoid-type smpl \
     --output-fps 30 \
     --device cuda \
+    --batch-size 8192 \
     --force-remake
 ```
-or for testing
+Produces `humos_proto/humos_131072_{chunk_idx:04d}.pt` per chunk (e.g. `humos_131072_0000.pt`, `humos_131072_0001.pt`, …). Each chunk ~3.6 GB. No merge step — chunks are the final output.
+
+**Single-clip / small test:**
 ```bash
 python data/scripts/convert_amass_to_motionlib_with_morphology.py \
     /home/hlz/datasets/humos_proto_interm_8/ \
@@ -69,18 +82,9 @@ python data/scripts/convert_amass_to_motionlib_with_morphology.py \
 ## 3. Align the 1st frame with ground. save the offseted file to a copy, eg. /home/hlz/datasets/humos_proto/humos_128_offset.pt
 ```bash
 python scripts/compute_humos_frame0_offsets.py \
-    --motion-file /home/hlz/datasets/humos_proto/humos_128.pt \
+    --motion-file /home/hlz/datasets/humos_proto/humos_131072_0000.pt \
     --asset-root /home/hlz/repos/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
-    --out-motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
-    --limit -1 \
-    --overwrite
-```
-or for testing
-```bash
-python scripts/compute_humos_frame0_offsets.py \
-    --motion-file /home/hlz/datasets/humos_proto/humos_8.pt \
-    --asset-root /home/hlz/repos/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
-    --out-motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --out-motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0000_offset.pt \
     --limit -1 \
     --overwrite
 ```
@@ -88,9 +92,11 @@ python scripts/compute_humos_frame0_offsets.py \
 ## 4. visualize it
 ```bash
 python examples/motion_libs_visualizer_mor.py \
-    --motion_files ~/datasets/humos_proto/humos_8_offset.pt \
+    --motion_files ~/datasets/humos_proto/offset/humos_131072_0015_offset.pt \
     --robot smpl_mor \
-    --simulator isaacgym
+    --simulator isaacgym \
+    --start 360 --batch-size 16
+
 ```
 
 ## 5. data format (~/datasets/humos_proto/humos_8_offset.pt)

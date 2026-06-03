@@ -99,6 +99,24 @@ parser.add_argument(
     action="store_true",
     help="Print humanoid/motion gender-beta consistency logs.",
 )
+parser.add_argument(
+    "--motion-device",
+    type=str,
+    default="cpu",
+    help="Device for the MotionLib tensors (default: cpu). Use 'cuda:0' only if GPU memory allows.",
+)
+parser.add_argument(
+    "--start",
+    type=int,
+    default=0,
+    help="Index of the first unique shape (env) to visualize (default: 0).",
+)
+parser.add_argument(
+    "--batch-size",
+    type=int,
+    default=0,
+    help="Number of unique shapes (envs) to visualize starting from --start. 0 = all remaining (default).",
+)
 args = parser.parse_args()
 
 # Import simulator before torch - isaacgym/isaaclab must be imported before torch
@@ -346,6 +364,7 @@ class MotionVisualizerSmoothness:
         self.headless = headless
         self.playback_speed = playback_speed
         self.device = torch.device("cuda:0" if not cpu_only else "cpu")
+        self.motion_lib_device = torch.device(args.motion_device)
         self.smoothness_threshold = args.smoothness_threshold
         self.metric = metric
         self.use_data_vel = use_data_vel
@@ -357,7 +376,7 @@ class MotionVisualizerSmoothness:
         self.motion_libs = [
             MotionLib(
                 config=MotionLibConfig(motion_file=str(motion_file)),
-                device=self.device,
+                device=self.motion_lib_device,
             )
             for motion_file in self.motion_files
         ]
@@ -375,41 +394,38 @@ class MotionVisualizerSmoothness:
 
         self.motion_lib = self.motion_libs[0]
 
-        # motion_id -> asset_id
-        all_motion_ids = torch.arange(
-            self.motion_lib.num_motions(),
-            device=self.device,
-            dtype=torch.long,
+        total_motions = self.motion_lib.num_motions()
+        motion_start = args.start
+        motion_end = (motion_start + args.batch_size) if args.batch_size > 0 else total_motions
+        motion_end = min(motion_end, total_motions)
+
+        if motion_start >= total_motions:
+            print(
+                f"[ERROR] --start {motion_start} is out of range: "
+                f"motion file has {total_motions} motions (valid: 0–{total_motions - 1})"
+            )
+            exit(1)
+
+        selected_ids = torch.arange(
+            motion_start, motion_end, device=self.motion_lib_device, dtype=torch.long
         )
 
-        all_asset_ids = list(
-            self.motion_lib.get_motion_asset_ids(all_motion_ids)
+        # One env per selected motion — each env shows exactly that motion.
+        self.requested_morphology_asset_ids = list(
+            self.motion_lib.get_motion_asset_ids(selected_ids)
         )
-
-        # Keep first-seen order.
-        # This gives one env per unique morphology asset.
-        seen = set()
-        self.requested_morphology_asset_ids = []
-        for asset_id in all_asset_ids:
-            if asset_id not in seen:
-                seen.add(asset_id)
-                self.requested_morphology_asset_ids.append(asset_id)
-
         self.env_asset_ids = self.requested_morphology_asset_ids
         self.num_envs = len(self.env_asset_ids)
 
-        # Build asset_id -> compatible motion_ids
+        # Build asset_id -> compatible motion_ids (used by _switch_to_next_motion)
         self.asset_id_to_motion_ids = self.motion_lib.build_asset_id_to_motion_ids()
 
-        # Sample one compatible motion for each env morphology.
-        self.env_motion_ids = self.motion_lib.sample_motions_for_asset_ids(
-            self.env_asset_ids,
-            deterministic=True,
-        )
+        # Direct assignment: each env shows the selected motion.
+        self.env_motion_ids = selected_ids.to(self.device)
 
         self.env_motion_lengths = self.motion_lib.get_motion_num_frames(
-            self.env_motion_ids
-        )
+            self.env_motion_ids.to(self.motion_lib_device)
+        ).to(self.device)
 
         self.current_motion_length = int(self.env_motion_lengths.max().item())
         self.total_motions = 1
@@ -626,9 +642,10 @@ class MotionVisualizerSmoothness:
         if not args.debug_morphology_log:
             return
 
-        motion_asset_ids = self.motion_lib.get_motion_asset_ids(self.env_motion_ids)
-        motion_gender_ids = self.motion_lib.get_motion_gender_ids(self.env_motion_ids)
-        motion_betas = self.motion_lib.get_motion_betas(self.env_motion_ids)
+        lib_ids = self.env_motion_ids.to(self.motion_lib_device)
+        motion_asset_ids = self.motion_lib.get_motion_asset_ids(lib_ids)
+        motion_gender_ids = self.motion_lib.get_motion_gender_ids(lib_ids)
+        motion_betas = self.motion_lib.get_motion_betas(lib_ids)
 
         sim_asset_ids = getattr(self, "simulator", None)
         if sim_asset_ids is not None:
@@ -689,11 +706,11 @@ class MotionVisualizerSmoothness:
         self.env_motion_ids = self.motion_lib.sample_motions_for_asset_ids(
             self.env_asset_ids,
             deterministic=False,
-        )
+        ).to(self.device)
 
         self.env_motion_lengths = self.motion_lib.get_motion_num_frames(
-            self.env_motion_ids
-        )
+            self.env_motion_ids.to(self.motion_lib_device)
+        ).to(self.device)
 
         self.current_motion_length = int(self.env_motion_lengths.max().item())
 
@@ -707,7 +724,7 @@ class MotionVisualizerSmoothness:
     def _translate_morphology_motions_to_grid(self):
         """Translate each motion in one MotionLib to a different x-position."""
 
-        target_origin = torch.tensor(args.origin_xy, device=self.device)
+        target_origin = torch.tensor(args.origin_xy, device=self.motion_lib_device)
 
         for env_id, motion_id in enumerate(self.env_motion_ids.detach().cpu().tolist()):
             start = int(self.motion_lib.length_starts[motion_id].item())
@@ -717,7 +734,7 @@ class MotionVisualizerSmoothness:
             current_xy = self.motion_lib.gts[start, 0, :2].clone()
             target_xy = target_origin + torch.tensor(
                 [float(env_id), 0.0],
-                device=self.device,
+                device=self.motion_lib_device,
                 dtype=torch.float32,
             )
 
@@ -730,15 +747,17 @@ class MotionVisualizerSmoothness:
         all_positions = []
         all_velocities = []
 
+        lib_motion_ids = self.env_motion_ids.to(self.motion_lib_device)
+        lib_motion_lengths = self.env_motion_lengths.to(self.motion_lib_device)
+
         for frame_idx in range(self.current_motion_length):
-            frame_indices = torch.full_like(self.env_motion_ids, frame_idx)
-            frame_indices = torch.minimum(
-                frame_indices,
-                self.env_motion_lengths - 1,
+            frame_indices = torch.clamp(
+                torch.full_like(lib_motion_ids, frame_idx),
+                max=lib_motion_lengths - 1,
             )
 
             state = self.motion_lib.get_motion_state_exact_frame(
-                self.env_motion_ids,
+                lib_motion_ids,
                 frame_indices,
             )
 
@@ -753,7 +772,7 @@ class MotionVisualizerSmoothness:
         velocities_tensor = torch.stack(all_velocities, dim=0)
 
         T, E, B, _ = positions_tensor.shape
-        smoothness_scores = torch.zeros(T, E, B, device=self.device)
+        smoothness_scores = torch.zeros(T, E, B, device=self.motion_lib_device)
 
         for frame_idx in range(T):
             window_start = max(0, frame_idx - self.window_frames // 2)
@@ -790,49 +809,43 @@ class MotionVisualizerSmoothness:
 
             smoothness_scores[frame_idx] = per_body_scores.view(E, B)
 
-        self.precomputed_smoothness = smoothness_scores
+        self.precomputed_smoothness = smoothness_scores.to(self.device)
         print(f"Smoothness pre-computed for {T} morphology frames")
         return
 
     def _get_current_pose(self):
         """Get the current pose for the selected motion and frame using MotionLib API for all environments"""
-        frame_indices = torch.full_like(self.env_motion_ids, self.current_frame)
-        frame_indices = torch.minimum(
-            frame_indices,
-            self.env_motion_lengths - 1,
+        lib_ids = self.env_motion_ids.to(self.motion_lib_device)
+        frame_indices = torch.clamp(
+            torch.full_like(lib_ids, self.current_frame),
+            max=self.env_motion_lengths.to(self.motion_lib_device) - 1,
         )
 
-        state = self.motion_lib.get_motion_state_exact_frame(
-            self.env_motion_ids,
-            frame_indices,
-        )
+        state = self.motion_lib.get_motion_state_exact_frame(lib_ids, frame_indices)
 
-        dof_pos = state.dof_pos
-        rigid_body_pos = state.rigid_body_pos
-        rigid_body_rot = state.rigid_body_rot
+        dof_pos = state.dof_pos.to(self.device)
+        rigid_body_pos = state.rigid_body_pos.to(self.device)
+        rigid_body_rot = state.rigid_body_rot.to(self.device)
 
         if state.rigid_body_vel is not None:
-            rigid_body_vel = state.rigid_body_vel
+            rigid_body_vel = state.rigid_body_vel.to(self.device)
         else:
-            rigid_body_vel = torch.zeros_like(state.rigid_body_pos)
+            rigid_body_vel = torch.zeros_like(rigid_body_pos)
 
         return dof_pos, rigid_body_pos, rigid_body_rot, rigid_body_vel
 
     def _update_contact_markers(self) -> Dict[str, MarkerState]:
         """Update contact markers to show which bodies are in contact with the ground."""
-        frame_indices = torch.full_like(self.env_motion_ids, self.current_frame)
-        frame_indices = torch.minimum(
-            frame_indices,
-            self.env_motion_lengths - 1,
+        lib_ids = self.env_motion_ids.to(self.motion_lib_device)
+        frame_indices = torch.clamp(
+            torch.full_like(lib_ids, self.current_frame),
+            max=self.env_motion_lengths.to(self.motion_lib_device) - 1,
         )
 
-        state = self.motion_lib.get_motion_state_exact_frame(
-            self.env_motion_ids,
-            frame_indices,
-        )
+        state = self.motion_lib.get_motion_state_exact_frame(lib_ids, frame_indices)
 
         if state.rigid_body_contacts is not None:
-            contact_mask = state.rigid_body_contacts
+            contact_mask = state.rigid_body_contacts.to(self.device)
         else:
             contact_mask = torch.zeros(
                 self.num_envs,

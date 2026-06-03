@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import yaml
+from tqdm import tqdm
 
 
 GENDER_TO_ID = {
@@ -45,8 +46,7 @@ def read_npz_scalar_string(x) -> str:
 
 
 def infer_beta_key_from_stem(stem: str, gender: str) -> str:
-    # Expected HUMOS name:
-    # {source_stem}_v00_{gender}_{beta_key}
+    # Expected HUMOS name: {source_stem}_v00_{gender}_{beta_key}
     marker = f"_{gender}_"
     if marker not in stem:
         raise ValueError(
@@ -130,10 +130,7 @@ def load_morphology_metadata_for_config(
     }
 
 
-def inject_morphology_metadata(
-    output_file: Path,
-    metadata: dict,
-):
+def inject_morphology_metadata(output_file: Path, metadata: dict):
     motionlib = torch.load(output_file, map_location="cpu", weights_only=False)
 
     num_motions = len(motionlib["motion_lengths"])
@@ -144,33 +141,86 @@ def inject_morphology_metadata(
         )
 
     motionlib.update(metadata)
-
     torch.save(motionlib, output_file)
-
-    print(f"Injected morphology metadata into: {output_file}")
-    print(f"  num_motions: {num_motions}")
-    print(f"  motion_betas: {tuple(metadata['motion_betas'].shape)}")
-    print(f"  first asset_id: {metadata['motion_asset_ids'][0]}")
 
 
 def infer_clip_id_from_stem(stem: str, gender: str) -> str:
     """
-    Expected HUMOS variant name:
-        {clip_id}_v00_{gender}_{beta_key}
-
-    Example:
-        000005_v00_male_0e26b88d -> 000005
+    Expected HUMOS variant name: {clip_id}_v00_{gender}_{beta_key}
+    Example: 000005_v00_male_0e26b88d -> 000005
     """
-
     marker = f"_{gender}_"
     if marker not in stem:
         raise ValueError(
             f"Cannot infer clip_id from filename stem='{stem}' with gender='{gender}'"
         )
-
     prefix = stem.rsplit(marker, 1)[0]  # 000005_v00
     return prefix.rsplit("_v", 1)[0]    # 000005
 
+
+def package_one_chunk(
+    *,
+    chunk_config: dict,
+    amass_root_dir: Path,
+    output_file: Path,
+    motionlib_script: Path,
+    device: str,
+    project_root: Path,
+    env: dict,
+):
+    """Package a single chunk config dict into a MotionLib .pt with morphology."""
+
+    abs_config = {"motions": []}
+    for motion in chunk_config.get("motions", []):
+        m = dict(motion)
+        m["file"] = str(resolve_motion_path(amass_root_dir, m["file"]))
+        abs_config["motions"].append(m)
+
+    tmp_yaml = output_file.with_suffix(".tmp.yaml")
+    with open(tmp_yaml, "w") as f:
+        yaml.safe_dump(abs_config, f, sort_keys=False)
+
+    package_cmd = [
+        sys.executable,
+        str(motionlib_script),
+        "--motion-path",
+        str(tmp_yaml),
+        "--output-file",
+        str(output_file),
+        "--device",
+        device,
+    ]
+
+    result = subprocess.run(
+        package_cmd,
+        cwd=project_root,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    tmp_yaml.unlink(missing_ok=True)
+
+    if result.returncode != 0:
+        tqdm.write(result.stdout.decode())
+        sys.exit(result.returncode)
+
+    meta_yaml = output_file.with_suffix(".meta.yaml")
+    original_config = {"motions": list(chunk_config.get("motions", []))}
+    with open(meta_yaml, "w") as f:
+        yaml.safe_dump(original_config, f, sort_keys=False)
+
+    metadata = load_morphology_metadata_for_config(
+        amass_root_dir=amass_root_dir,
+        motion_config=meta_yaml,
+    )
+    meta_yaml.unlink(missing_ok=True)
+
+    inject_morphology_metadata(output_file=output_file, metadata=metadata)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# main
+# ──────────────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
@@ -185,7 +235,7 @@ def main():
     parser.add_argument(
         "output_dir",
         type=Path,
-        help="Output directory for packaged .pt MotionLib files.",
+        help="Output directory for packaged .pt MotionLib chunk files.",
     )
     parser.add_argument(
         "--motion-config",
@@ -216,6 +266,16 @@ def main():
         default="cpu",
         choices=["cpu", "cuda"],
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4096,
+        help=(
+            "Number of motions per MotionLib packaging call. "
+            "Increase for smaller datasets, decrease if packaging OOMs. "
+            "Default: 4096."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -234,9 +294,9 @@ def main():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
 
-    # ----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────────────
     # Step 1: Convert AMASS/HUMOS .npz files to .motion files
-    # ----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────────────
     convert_script = project_root / "data" / "scripts" / "convert_amass_to_proto.py"
 
     convert_cmd = [
@@ -258,69 +318,54 @@ def main():
     print("=" * 80)
     print("Step 1: Convert AMASS/HUMOS .npz to .motion")
     print("=" * 80)
-    print("Running:", " ".join(convert_cmd))
 
     result = subprocess.run(convert_cmd, cwd=project_root, env=env)
     if result.returncode != 0:
         sys.exit(result.returncode)
 
-    # ----------------------------------------------------------------------
-    # Step 2: Package each motion config into .pt, then inject morphology info
-    # ----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────────────
+    # Step 2: Package each motion config into chunk .pt files with morphology
+    # ──────────────────────────────────────────────────────────────────────────
     motionlib_script = project_root / "protomotions" / "components" / "motion_lib.py"
 
     print("\n" + "=" * 80)
-    print("Step 2: Package MotionLib .pt and inject morphology metadata")
+    print("Step 2: Package MotionLib chunks and inject morphology metadata")
     print("=" * 80)
 
     for config_path in args.motion_configs:
         config_name = config_path.stem
-        output_file = args.output_dir / f"{config_name}.pt"
-
-        print(f"\nPackaging config: {config_path}")
-
-        # Read original config and resolve .motion paths to absolute paths.
         config = read_yaml(config_path)
+        total_motions = len(config.get("motions", []))
 
-        for motion in config.get("motions", []):
-            original_file = motion["file"]
-            motion["file"] = str(resolve_motion_path(args.amass_root_dir, original_file))
+        effective_batch = args.batch_size if args.batch_size > 0 else total_motions
+        chunks = list(split_motion_config(config, effective_batch))
+        n_chunks = len(chunks)
 
-        temp_yaml = args.output_dir / f".tmp_{config_name}.yaml"
-        with open(temp_yaml, "w") as f:
-            yaml.safe_dump(config, f, sort_keys=False)
+        print(f"\n{config_path.name}: {total_motions} motions → {n_chunks} chunk(s) of ≤{effective_batch}")
 
-        package_cmd = [
-            sys.executable,
-            str(motionlib_script),
-            "--motion-path",
-            str(temp_yaml),
-            "--output-file",
-            str(output_file),
-            "--device",
-            args.device,
-        ]
+        with tqdm(total=n_chunks, desc="Packaging chunks", unit="chunk") as pbar:
+            for chunk_idx, chunk_config in enumerate(chunks):
+                chunk_file = args.output_dir / f"{config_name}_{chunk_idx:04d}.pt"
 
-        print("Running:", " ".join(package_cmd))
+                package_one_chunk(
+                    chunk_config=chunk_config,
+                    amass_root_dir=args.amass_root_dir,
+                    output_file=chunk_file,
+                    motionlib_script=motionlib_script,
+                    device=args.device,
+                    project_root=project_root,
+                    env=env,
+                )
+                pbar.update(1)
 
-        result = subprocess.run(package_cmd, cwd=project_root, env=env)
-        temp_yaml.unlink()
+    print(f"\nDone. Output: {args.output_dir}")
 
-        if result.returncode != 0:
-            sys.exit(result.returncode)
 
-        metadata = load_morphology_metadata_for_config(
-            amass_root_dir=args.amass_root_dir,
-            motion_config=config_path,
-        )
-
-        inject_morphology_metadata(
-            output_file=output_file,
-            metadata=metadata,
-        )
-
-    print("\nDone.")
-    print(f"Output directory: {args.output_dir}")
+def split_motion_config(config: dict, batch_size: int):
+    """Yield successive chunk dicts of at most batch_size motions."""
+    motions = config.get("motions", [])
+    for i in range(0, len(motions), batch_size):
+        yield {"motions": motions[i : i + batch_size]}
 
 
 if __name__ == "__main__":

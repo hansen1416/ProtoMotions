@@ -114,9 +114,6 @@ def slice_motion_data(pose_aa, amass_trans, start_time, end_time, fps):
     start_frame = max(0, start_frame)
     end_frame = min(pose_aa.shape[0], end_frame)
 
-    print(
-        f"Slicing motion from frame {start_frame} to {end_frame} (time {start_time}s to {end_time}s)"
-    )
 
     return pose_aa[start_frame:end_frame], amass_trans[start_frame:end_frame]
 
@@ -267,7 +264,6 @@ def save_motion(motion, outpath):
     # Create output directory if it doesn't exist
     os.makedirs(outpath.parent, exist_ok=True)
 
-    print(f"Saving to {outpath}")
     torch.save(motion.to_dict(), str(outpath))
 
 
@@ -356,10 +352,8 @@ def main(
     )
 
     # Count total number of files that need processing
-    start_time = time.time()
     total_files = 0
     total_files_to_process = 0
-    processed_files = 0
     for folder_name in folder_names:
         if "smpl" in folder_name:
             continue
@@ -418,7 +412,7 @@ def main(
 
         files.sort()
 
-        for filename in tqdm(files):
+        for filename in tqdm(files, desc=folder_name, unit="file"):
             # try:
             relative_path_dir = filename.relative_to(data_dir).parent
             outpath = (
@@ -440,7 +434,6 @@ def main(
             # Create the output directory if it doesn't exist
             os.makedirs(output_dir / relative_path_dir, exist_ok=True)
 
-            print(f"Processing {filename}")
             if filename.suffix == ".npz" and "samp" not in str(filename):
                 motion_data = np.load(filename)
 
@@ -508,7 +501,7 @@ def main(
                 mocap_fr = motion_data["mocap_framerate"]
 
             else:
-                print(f"Skipping {filename} as it is not a valid file")
+                tqdm.write(f"Skipping {filename}: not a valid file")
                 continue
 
             mocap_fr = np.round(mocap_fr).astype(int)
@@ -516,7 +509,7 @@ def main(
             # Skip motions with too few frames (need at least 2 for velocity computation)
             num_frames = pose_aa.shape[0]
             if num_frames < 2:
-                print(f"Skipping {filename}: only {num_frames} frame(s), need at least 2")
+                tqdm.write(f"Skipping {filename}: only {num_frames} frame(s), need at least 2")
                 continue
 
             # Check if this motion should be sliced based on YAML configs
@@ -534,7 +527,6 @@ def main(
                 motion_key = folder_name + "/" + motion_relative_path
 
                 if motion_key in motion_timings:
-                    print(f"Found timing config for {motion_key}")
                     # Get the timing configuration
                     timing_config = motion_timings[motion_key]
                     start_time = timing_config["start"]
@@ -545,7 +537,7 @@ def main(
                         pose_aa, amass_trans, start_time, end_time, mocap_fr
                     )
                 else:
-                    print(f"No timing config found for {motion_key}")
+                    pass
 
             # Process the motion (sliced or full)
             process_motion_segment(
@@ -562,20 +554,6 @@ def main(
                 outpath,
             )
 
-            processed_files += 1
-            elapsed_time = time.time() - start_time
-            avg_time_per_file = elapsed_time / processed_files
-            remaining_files = total_files_to_process - processed_files
-            estimated_time_remaining = avg_time_per_file * remaining_files
-
-            print(f"\nProgress: {processed_files}/{total_files_to_process} files")
-            print(f"Average time per file: {timedelta(seconds=int(avg_time_per_file))}")
-            print(
-                f"Estimated time remaining: {timedelta(seconds=int(estimated_time_remaining))}"
-            )
-            print(
-                f"Estimated completion time: {time.strftime('%H:%M:%S', time.localtime(time.time() + estimated_time_remaining))}\n"
-            )
         # except Exception as e:
         #     print(f"Error processing {filename}")
         #     print(f"Error: {e}")
