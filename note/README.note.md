@@ -205,7 +205,12 @@ get_obs() → network reads it by key
 
 ## Sampling motions
 
-Sample ~2,000–3,000 motions from the 5th–55th difficulty percentile (ranks ~1,000–11,500 in the sorted list). This skips pure static poses at the bottom and avoids hard motions at the top that won't converge within the pilot budget. Train with 8,192 envs / 32,768 batch size to make use of the 48 GB GPU. The goal is a discriminative difficulty range where good architectures clearly outperform weak ones within a reasonable training window.
+Sample ~1024 motions from the 5th–55th difficulty percentile. This skips pure static poses at the bottom and avoids hard motions at the top that won't converge within the pilot budget. Train with 8,192 envs / 32,768 batch size to make use of the 48 GB GPU. The goal is a discriminative difficulty range where good architectures clearly outperform weak ones within a reasonable training window.
+
+- Start with ~1,000 motions — not for memory, but because it's much faster to diagnose convergence issues on a small set
+first
+- When it converges, jump straight to all 20,951 motions — they fit easily
+- Scale num_envs to 8192 and batch_size to 32768 to use the GPU more fully (~31 GB with full dataset, safe headroom)
 
 ------
 
@@ -225,11 +230,11 @@ python protomotions/train_agent.py \
 ## inference motion
 
 python protomotions/inference_agent_mor.py \
-    --checkpoint results/hhi_single_motion_multi_shape/score_based.ckpt \
+    --checkpoint results/hhi_1_motion_128_shape/score_based.ckpt \
     --simulator isaacgym \
     --motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \
     --compact-spawn-spacing 1.5 \
-    --num-envs 8
+    --num-envs 16
 
 
 female:093098f0 female:09a0fcbd female:0e26b88d female:0f05fd5a female:10900e9a female:10c258c2 female:1658f5d3 female:1e5a1c90 female:2286da8c female:25247499 female:2e949ac0 female:30f6048e female:312bf810 female:324b2d00 female:36baeba5 female:371b5e94
