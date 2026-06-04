@@ -38,9 +38,14 @@ python protomotions/train_agent.py \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
     --experiment-name solve_memory \
-    --motion-file ./humos_128_offset.pt \
+    --motion-file /home/hlz/datasets/humos_proto/merged4/humos_slurmrank.pt \
     --num-envs 4096 \
-    --batch-size 16384
+    --batch-size 16384 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_1024_motion \
+    --overrides agent.config.save_epoch_checkpoint_every=null
 ```
 
 ```bash

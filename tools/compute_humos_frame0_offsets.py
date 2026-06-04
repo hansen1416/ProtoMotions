@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# scripts/compute_humos_frame0_offsets.py
+# tools/compute_humos_frame0_offsets.py
 
 """
 Apply IsaacGym-computed frame-0 grounding offsets directly to a packaged MotionLib.
 
 Example:
-python scripts/compute_humos_frame0_offsets.py \
+python tools/compute_humos_frame0_offsets.py \
     --motion-file /home/hlz/datasets/humos_proto/humos_128.pt \
     --asset-root /home/hlz/repos/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
     --out-motion-file /home/hlz/datasets/humos_proto/humos_128_offset.pt \

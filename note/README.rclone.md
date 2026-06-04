@@ -50,3 +50,27 @@ nohup rclone copy gdrive:humos_output /media/hlz/R/humos_output \
 
 rclone copy hhi_single_motion_multi_shape.zip gdrive:/ckpt/
 
+# R2
+
+`rclone lsd r2:proto-data`
+
+## Copy local files to R2
+
+rclone copy /home/hlz/datasets/humos_proto/merged4/ \
+    r2:proto-data/merged4/ \
+    --transfers=2 \
+    --s3-upload-concurrency=4 \
+    --s3-chunk-size=64M \
+    --retries=10 \
+    --retries-sleep=30s \
+    --low-level-retries=20 \
+    --progress
+
+
+## Download from R2
+
+rclone copy r2:proto-data/merged4/ /workspace/datasets/merged4/ \
+    --transfers=4 \
+    --s3-download-concurrency=16 \
+    --s3-chunk-size=128M \
+    --progress
