@@ -1,4 +1,4 @@
-# scripts/export_humos_to_amass_npz.py
+# tools/export_humos_to_amass_npz.py
 
 from pathlib import Path
 import argparse

@@ -3,8 +3,13 @@ cd /workspace && git clone -b feature/hhi https://github.com/hansen1416/ProtoMot
 <!-- humos_128_offset.pt -->
 pip install gdown && gdown 1iO5sTFrY41Lj2UQwVR_g5yU_t6Wgw5-K
 
-<!-- results/hhi_single_motion_multi_shape -->
-gdown 1pEyPYHXyavXIR7d2W27XySFhWXkhq3iY
+<!-- download data from R2 -->
+<!-- todo need to update rclone first -->
+rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
+  --transfers=4 \
+  --multi-thread-streams=16 \
+  --multi-thread-chunk-size=128M \
+  --progress
 
 pip install -e .
 
@@ -33,14 +38,19 @@ python protomotions/train_agent.py \
 ```
 
 ```bash
-python protomotions/train_agent.py \
+python -u protomotions/train_agent.py \
     --robot-name smpl_mor \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name solve_memory \
-    --motion-file ./humos_128_offset.pt \
-    --num-envs 4096 \
-    --batch-size 16384
+    --experiment-name hhi_1024_motion \
+    --motion-file /workspace/merged4/humos_slurmrank.pt \
+    --num-envs 8192 \
+    --batch-size 32768 \
+    --ngpu 4 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_1024_motion
 ```
 
 ```bash

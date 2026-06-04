@@ -116,14 +116,14 @@ if __name__ == "__main__":
 
 
     """
-    python scripts/generate_smpl_mor_asset_info.py \
+    python tools/generate_smpl_mor_asset_info.py \
     --asset-folder mjcf/smpl_mor \
     --betas-file protomotions/data/assets/all_betas.pt \
     --out protomotions/data/assets/mjcf/smpl_mor/assets.yaml
     """
 
     """
-    python scripts/generate_smpl_mor_asset_info.py \
+    python tools/generate_smpl_mor_asset_info.py \
     --asset-folder mjcf/smplx_mor \
     --betas-file protomotions/data/assets/all_betas.pt \
     --out protomotions/data/assets/mjcf/smplx_mor/assets.yaml

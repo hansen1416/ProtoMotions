@@ -289,7 +289,7 @@ def main():
             raise FileNotFoundError(f"Motion config does not exist: {config}")
 
     script_dir = Path(__file__).resolve().parent
-    project_root = script_dir.parent.parent
+    project_root = script_dir.parent
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")

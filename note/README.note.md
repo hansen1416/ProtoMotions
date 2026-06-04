@@ -29,7 +29,7 @@ All SMPL .xml templates are in protomotions/data/assets/mjcf/smpl_mor/*.xml
 
 **Batch mode — all 1024 clips, all 128 variants each:**
 ```bash
-python scripts/export_humos_to_amass_npz.py \
+python tools/export_humos_to_amass_npz.py \
     --input-dir /home/hlz/datasets/humos_output/ \
     --out-root /home/hlz/datasets/humos_proto_interm/ \
     --skip-existing
@@ -39,14 +39,14 @@ Produces `humos_proto_interm/HUMOS/*.npz` and `humos_proto_interm/humos_131072.y
 
 **Single-clip mode (testing / backward compat):**
 ```bash
-python scripts/export_humos_to_amass_npz.py \
+python tools/export_humos_to_amass_npz.py \
     --input /home/hlz/datasets/humos_output/000005.pt \
     --out-root /home/hlz/datasets/humos_proto_interm_single/
 ```
 
 **Small test (8 variants from one clip):**
 ```bash
-python scripts/export_humos_to_amass_npz.py \
+python tools/export_humos_to_amass_npz.py \
     --input /home/hlz/datasets/humos_output/000005.pt \
     --out-root /home/hlz/datasets/humos_proto_interm_8/ --num 8
 ```
@@ -55,7 +55,7 @@ python scripts/export_humos_to_amass_npz.py \
 
 **Full dataset (131072 motions, batched to stay within RAM):**
 ```bash
-python data/scripts/convert_amass_to_motionlib_with_morphology.py \
+python tools/convert_amass_to_motionlib_with_morphology.py \
     /home/hlz/datasets/humos_proto_interm/ \
     /home/hlz/datasets/humos_proto/ \
     --motion-config /home/hlz/datasets/humos_proto_interm/humos_131072.yaml \
@@ -69,7 +69,7 @@ Produces `humos_proto/humos_131072_{chunk_idx:04d}.pt` per chunk (e.g. `humos_13
 
 **Single-clip / small test:**
 ```bash
-python data/scripts/convert_amass_to_motionlib_with_morphology.py \
+python tools/convert_amass_to_motionlib_with_morphology.py \
     /home/hlz/datasets/humos_proto_interm_8/ \
     /home/hlz/datasets/humos_proto/ \
     --motion-config /home/hlz/datasets/humos_proto_interm_8/humos_8.yaml \
@@ -81,12 +81,22 @@ python data/scripts/convert_amass_to_motionlib_with_morphology.py \
 
 ## 3. Align the 1st frame with ground. save the offseted file to a copy, eg. /home/hlz/datasets/humos_proto/humos_128_offset.pt
 ```bash
-python scripts/compute_humos_frame0_offsets.py \
+python tools/compute_humos_frame0_offsets.py \
     --motion-file /home/hlz/datasets/humos_proto/humos_131072_0000.pt \
     --asset-root /home/hlz/repos/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
     --out-motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0000_offset.pt \
     --limit -1 \
     --overwrite
+```
+
+run script to align all motion files
+```bash
+tools/run_frame0_offsets.sh
+```
+
+## merge the shards into n files:
+```bash
+tools/merge_motion_shards.py
 ```
 
 ## 4. visualize it
