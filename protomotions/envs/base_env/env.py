@@ -292,10 +292,7 @@ class BaseEnv:
             unique_asset_ids = list(dict.fromkeys(self.motion_lib.motion_asset_ids))
             self.robot_config.asset.selected_asset_ids = unique_asset_ids
             # read loaded asset ids from the motion files
-            print(
-                f"[Morphology] Auto-selected {len(unique_asset_ids)} asset IDs "
-                f"from motion lib: {unique_asset_ids}"
-            )
+            print(f"[Morphology] Auto-selected {len(unique_asset_ids)} asset IDs")
         # morphology =======
 
         visualization_markers = self.create_visualization_markers(

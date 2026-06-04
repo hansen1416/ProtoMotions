@@ -44,8 +44,8 @@ python -u protomotions/train_agent.py \
     --experiment-path examples/experiments/mimic/mlp.py \
     --experiment-name hhi_1024_motion \
     --motion-file /workspace/merged4/humos_slurmrank.pt \
-    --num-envs 8192 \
-    --batch-size 32768 \
+    --num-envs 4096 \
+    --batch-size 16384 \
     --ngpu 4 \
     --use-wandb \
     --wandb-project hhi-protomotions \
