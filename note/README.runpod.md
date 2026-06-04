@@ -5,6 +5,14 @@ pip install gdown && gdown 1iO5sTFrY41Lj2UQwVR_g5yU_t6Wgw5-K
 
 <!-- download data from R2 -->
 <!-- todo need to update rclone first -->
+apt update && apt install curl zip -y
+
+curl https://rclone.org/install.sh | bash
+
+rclone config
+
+4, 7
+
 rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
   --transfers=4 \
   --multi-thread-streams=16 \

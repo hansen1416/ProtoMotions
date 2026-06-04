@@ -440,7 +440,7 @@ class IsaacGymSimulator(Simulator):
         selected_asset_ids = set(selected_asset_ids) if selected_asset_ids else None
 
         if selected_asset_ids is not None:
-            print(f"Filtering morphology assets: {sorted(selected_asset_ids)}")
+            print(f"Filtering morphology assets: {len(selected_asset_ids)}")
 
         # length 128 [dict_keys(['asset_id', 'gender', 'beta_key', 'betas', 'root_height']),..]
         for info in asset_infos:
