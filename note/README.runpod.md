@@ -13,6 +13,8 @@ rclone config
 
 4, 7
 
+https://a17f581e2d142fd42fd7169cd4c48c8c.r2.cloudflarestorage.com
+
 rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
   --transfers=4 \
   --multi-thread-streams=16 \
