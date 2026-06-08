@@ -94,6 +94,11 @@ os.environ["WANDB_DISABLE_SENTRY"] = "true"  # Must be first environment variabl
 os.environ["WANDB_SILENT"] = "true"
 os.environ["WANDB_DISABLE_CODE"] = "true"
 
+# IsaacGym + NCCL: disable P2P memory access to avoid deadlocks when NCCL tries to
+# initialise its communicator while IsaacGym has already claimed the primary CUDA context.
+# Remove once the root-cause is confirmed and a cleaner fix is applied.
+os.environ.setdefault("NCCL_P2P_DISABLE", "1")
+
 """
 ## Quick Start
 
@@ -820,14 +825,24 @@ def main():
         simulator=simulator,
     )
     fabric.call("on_env_init_end")
+    print(f"[rank {fabric.global_rank}] Env created. CUDA current device: {torch.cuda.current_device()}, expected: {fabric.local_rank}", flush=True)
+
+    # IsaacGym may change torch.cuda.current_device() (e.g. to the graphics device=0
+    # in headless mode) during sim initialisation.  Re-assert the correct device so
+    # that the DDP stream / NCCL communicator are created on the right GPU.
+    torch.cuda.set_device(fabric.local_rank)
+    print(f"[rank {fabric.global_rank}] Device re-set to cuda:{fabric.local_rank}", flush=True)
 
     from protomotions.agents.base_agent.agent import BaseAgent
 
     AgentClass = get_class(agent_config._target_)
     agent: BaseAgent = AgentClass(config=agent_config, env=env, fabric=fabric)
 
+    print(f"[rank {fabric.global_rank}] Starting agent.setup() ...", flush=True)
     agent.setup()
+    print(f"[rank {fabric.global_rank}] agent.setup() done. Waiting at barrier ...", flush=True)
     agent.fabric.strategy.barrier()
+    print(f"[rank {fabric.global_rank}] Past barrier. Loading checkpoint ...", flush=True)
     agent.load(args.checkpoint)
 
     # ===================================================================
