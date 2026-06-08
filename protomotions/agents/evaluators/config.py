@@ -63,6 +63,17 @@ class MimicEvaluatorConfig(EvaluatorConfig):
     """Configuration for Mimic evaluator."""
 
     _target_: str = "protomotions.agents.evaluators.mimic_evaluator.MimicEvaluator"
+    max_eval_motions: Optional[int] = field(
+        default=2000,
+        metadata={
+            "help": (
+                "Cap the number of motions evaluated per eval run. "
+                "None = evaluate all motions. "
+                "Reduces GPU memory when the motion library is large."
+            ),
+            "min": 1,
+        },
+    )
     save_predicted_motion_lib_every: Optional[int] = field(
         default=3,
         metadata={"help": "Save pred_motion_lib every M evals. None = disabled.", "min": 1}

@@ -50,7 +50,7 @@ class MotionMetrics:
         self.num_sub_features = num_sub_features
         self.device = device
         self.dtype = dtype
-        self.motion_lens = motion_lens
+        self.motion_lens = motion_lens.to(device) if device is not None else motion_lens
         self.max_motion_len = max_motion_len
 
         # Raw data storage
@@ -85,17 +85,22 @@ class MotionMetrics:
         # assert motion_ids being non-duplicated
         assert torch.unique(motion_ids).shape[0] == motion_ids.shape[0]
 
-        if frame_indices is None:
-            # Use current counts as frame indices
-            frame_indices = self.frame_counts[motion_ids]
-        assert frame_indices.shape[0] == values.shape[0]
+        # Bring indices to self.device first so all subsequent indexing is consistent.
+        # This allows callers on GPU to write into CPU-resident MotionMetrics.
+        motion_ids_local = motion_ids.to(self.device)
 
-        # Update the data using batched operations with per-motion length checks
-        valid_mask = frame_indices < self.motion_lens[motion_ids]
+        if frame_indices is None:
+            frame_indices_local = self.frame_counts[motion_ids_local]
+        else:
+            frame_indices_local = frame_indices.to(self.device)
+        assert frame_indices_local.shape[0] == values.shape[0]
+
+        # Update the data using batched operations with per-motion length checks.
+        valid_mask = frame_indices_local < self.motion_lens[motion_ids_local]
         if valid_mask.any():
-            valid_motion_ids = motion_ids[valid_mask]
-            valid_frame_indices = frame_indices[valid_mask]
-            valid_values = values[valid_mask]
+            valid_motion_ids = motion_ids_local[valid_mask]
+            valid_frame_indices = frame_indices_local[valid_mask]
+            valid_values = values[valid_mask].to(self.device)
 
             # Use advanced indexing to update only valid entries
             self.data[valid_motion_ids, valid_frame_indices] = valid_values

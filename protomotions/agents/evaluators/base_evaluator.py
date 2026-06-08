@@ -370,6 +370,7 @@ class BaseEvaluator:
         num_motions: int,
         motion_num_frames: torch.Tensor,
         max_eval_steps: int,
+        device=None,
     ) -> None:
         """
         Add metrics for raw robot state (dof_pos, rigid_body_pos, etc.).
@@ -380,7 +381,11 @@ class BaseEvaluator:
             num_motions: Number of motions to evaluate
             motion_num_frames: Number of frames per motion
             max_eval_steps: Maximum evaluation steps
+            device: Device to store tensors on (defaults to self.device)
         """
+        if device is None:
+            device = self.device
+
         # Default implementation for humanoid robot state
         if not hasattr(self.env, "simulator"):
             return
@@ -397,7 +402,7 @@ class BaseEvaluator:
                     motion_num_frames,
                     max_eval_steps,
                     num_sub_features=shape[0],
-                    device=self.device,
+                    device=device,
                 )
         except (AttributeError, KeyError, IndexError) as e:
             log.warning("Could not add robot state metrics: %s", e)

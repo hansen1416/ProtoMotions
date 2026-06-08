@@ -491,3 +491,55 @@ def _throw_projectile(self) -> None:
 
   The diagnostic prints are noisy and should come out before merging. The NCCL_P2P_DISABLE line stays but deserves a cleaner
   placement. Let me strip the prints:
+
+------
+
+What the evaluator does every 200 epochs
+
+  It has two distinct purposes:
+
+  1. Metrics/logging (no training impact)
+  Runs the policy on motions, records per-frame robot state and actions into MotionMetrics, then computes smoothness scores,
+  jitter, success rates — logged to wandb.
+
+  2. Motion sampling weight update (directly affects training)
+  This is the part that matters for learning:
+  # In _update_motion_sampling_weights:
+  new_weights[success_motions] *= success_discount   # 0.999^200 ≈ 0.82
+  new_weights[failed_motions] /= failure_discount    # failed motions get higher weight
+  Motions the policy fails get sampled more during the next 200 training epochs. This is a curriculum: keep pushing on hard
+  motions, relax on easy ones. It's the evaluator's only feedback loop into training.
+
+  ---
+
+  Impact of my changes:
+
+  ┌──────────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────┐
+  │              Change              │                                 Affects training?                                  │
+  ├──────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ CPU storage for MotionMetrics    │ No — purely memory. Same values, different device.                                 │
+  ├──────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ motion_lens.to(device) +         │ No — correctness fix for cross-device indexing.                                    │
+  │ update() device fix              │                                                                                    │
+  ├──────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ max_eval_motions=2000            │ Yes, mildly — only the 2000 sampled motions get weight updates per eval. The other │
+  │ subsampling                      │  motions' weights are unchanged until they appear in a future eval's random        │
+  │                                  │ sample.                                                                            │
+  └──────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────┘
+
+  The last point is worth thinking about. With 25k+ motions and 2000 evaluated per cycle, each motion gets a weight update
+  roughly every 25000/2000 = 12.5 eval cycles = 2500 epochs. That's slower curriculum feedback for rare/hard motions compared
+  to evaluating everything.
+
+  If the curriculum is important to you, you have two options:
+  1. Keep max_eval_motions=2000 but accept slower weight updates (probably fine for large datasets since any single motion is
+  a small fraction of training anyway)
+  2. Set max_eval_motions=null via --overrides agent.config.evaluator.max_eval_motions=null to evaluate all motions — but then
+  you'd need the CPU-storage fix alone to be enough (it will be, since CPU metrics don't consume GPU VRAM)
+
+  The CPU storage fix alone (without subsampling) would already save the OOM — the MotionMetrics allocations just move off
+  GPU. The subsampling is an extra layer of safety. If you want to be conservative, you could increase max_eval_motions to
+  something like 10000 and see if memory holds.
+
+
+  only the 2000 sampled motions get weight updates per eval. The other motions' weights are unchanged until they appear in a future eval's random

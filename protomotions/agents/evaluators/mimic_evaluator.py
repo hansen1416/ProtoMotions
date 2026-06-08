@@ -30,8 +30,9 @@ from protomotions.envs.motion_manager.mimic_motion_manager import MimicMotionMan
 @dataclass
 class MimicEpisodeContext:
     """Per-episode-batch state for mimic evaluation."""
-    motion_ids: Tensor  # which motion each env is tracking
-    frame_limits: Tensor  # how many frames before clip ends
+    motion_ids: Tensor       # global motion library IDs (used for motion_manager / physics)
+    local_ids: Tensor        # 0-based indices into MotionMetrics buffers
+    frame_limits: Tensor     # how many frames before clip ends
 
 
 class MimicEvaluator(BaseEvaluator):
@@ -60,25 +61,44 @@ class MimicEvaluator(BaseEvaluator):
         num_motions: int,
         motion_num_frames: Tensor,
         max_eval_steps: int,
+        device=None,
     ) -> Dict[str, MotionMetrics]:
         """Create MotionMetrics buffers for trajectory collection (robot state + actions)."""
+        if device is None:
+            device = self.device
         metrics = {}
 
         self._add_robot_state_metrics(
-            metrics, num_motions, motion_num_frames, max_eval_steps
+            metrics, num_motions, motion_num_frames, max_eval_steps, device=device
         )
 
         num_dofs = self.env.robot_config.kinematic_info.num_dofs
         metrics["actions"] = MotionMetrics(
-            num_motions, motion_num_frames, max_eval_steps, num_dofs, device=self.device
+            num_motions, motion_num_frames, max_eval_steps, num_dofs, device=device
         )
 
         return metrics
 
     def initialize_eval(self) -> Dict:
         """Initialize evaluation tracking and cache env state for restoration."""
-        num_motions = self.motion_lib.num_motions()
-        motion_lengths = self.motion_lib.get_motion_length(None)
+        total_motions = self.motion_lib.num_motions()
+
+        # Subsample motions to cap GPU memory usage from MotionMetrics tensors.
+        max_eval = self.config.max_eval_motions
+        if max_eval is not None and total_motions > max_eval:
+            perm = torch.randperm(total_motions, device=self.device)[:max_eval].sort().values
+            self._eval_motion_subset = perm
+        else:
+            self._eval_motion_subset = None
+
+        if self._eval_motion_subset is not None:
+            eval_motion_ids = self._eval_motion_subset
+            motion_lengths = self.motion_lib.get_motion_length(eval_motion_ids)
+        else:
+            eval_motion_ids = None
+            motion_lengths = self.motion_lib.get_motion_length(None)
+
+        num_motions = motion_lengths.shape[0]
         motion_num_frames = (motion_lengths / self.env.dt).floor().long()
         motion_num_frames = motion_num_frames.clamp(max=self.config.max_eval_steps)
         self._init_eval_component_buffers(num_motions)
@@ -88,8 +108,9 @@ class MimicEvaluator(BaseEvaluator):
         self._cached_motion_ids = self.motion_manager.motion_ids.clone()
         self._cached_motion_times = self.motion_manager.motion_times.clone()
 
+        # Store metrics on CPU to avoid exhausting GPU memory for large motion sets.
         return self._create_metrics(
-            num_motions, motion_num_frames, self.config.max_eval_steps
+            num_motions, motion_num_frames, self.config.max_eval_steps, device="cpu"
         )
 
     def _save_failed_motions(self, failed_motions: list, epoch: int) -> None:
@@ -108,10 +129,20 @@ class MimicEvaluator(BaseEvaluator):
         if self._motion_failed is None:
             return
 
-        failed_motions = torch.nonzero(self._motion_failed).flatten().tolist()
-        success_motions = torch.nonzero(~self._motion_failed).flatten().tolist()
+        # _motion_failed is indexed by local (eval-subset) positions.
+        # Map back to global motion library IDs before updating weights.
+        subset = self._eval_motion_subset  # None if evaluating all motions
+        local_failed = torch.nonzero(self._motion_failed).flatten()
+        local_success = torch.nonzero(~self._motion_failed).flatten()
 
-        self._save_failed_motions(failed_motions, self.agent.current_epoch)
+        if subset is not None:
+            global_failed = subset[local_failed].tolist()
+            global_success = subset[local_success].tolist()
+        else:
+            global_failed = local_failed.tolist()
+            global_success = local_success.tolist()
+
+        self._save_failed_motions(global_failed, self.agent.current_epoch)
 
         success_discount = math.pow(
             self.config.motion_weights_rules.motion_weights_update_success_discount,
@@ -122,11 +153,11 @@ class MimicEvaluator(BaseEvaluator):
             self.config.eval_metrics_every,
         )
         new_weights = self.env.motion_manager.motion_weights.clone()
-        new_weights[success_motions] *= success_discount
+        new_weights[global_success] *= success_discount
         if failure_discount != 0:
-            new_weights[failed_motions] /= failure_discount
+            new_weights[global_failed] /= failure_discount
         else:
-            new_weights[failed_motions] = 1.0
+            new_weights[global_failed] = 1.0
         self.env.motion_manager.update_sampling_weights(new_weights)
 
     def evaluate_episode(self, env_ids: torch.Tensor, max_steps: int) -> None:
@@ -166,15 +197,22 @@ class MimicEvaluator(BaseEvaluator):
 
     def run_evaluation(self) -> None:
         """Run evaluation across multiple motions."""
-        for env_ids, motion_ids in self._build_eval_batches():
-            motion_lengths = self.motion_lib.get_motion_length(motion_ids)
+        for batch in self._build_eval_batches():
+            if len(batch) == 3:
+                env_ids, local_ids, actual_ids = batch
+            else:
+                # fixed-motion path: no subset, local == actual
+                env_ids, actual_ids = batch
+                local_ids = actual_ids
+            motion_lengths = self.motion_lib.get_motion_length(actual_ids)
             max_len = min(
                 (motion_lengths.max() / self.env.dt).floor().long().item(),
                 self.config.max_eval_steps,
             )
             # Build episode context before evaluate_episode so hooks can read it
             self._episode_ctx = MimicEpisodeContext(
-                motion_ids=motion_ids,
+                motion_ids=actual_ids,
+                local_ids=local_ids,
                 frame_limits=(motion_lengths / self.env.dt).floor().long().clamp(
                     max=self.config.max_eval_steps
                 ),
@@ -183,9 +221,10 @@ class MimicEvaluator(BaseEvaluator):
 
     def _build_eval_batches(self):
         """Build list of (env_ids, motion_ids) batches to evaluate.
-        
+
         Returns:
-            List of (env_ids, motion_ids) tuples
+            List of (env_ids, motion_ids) tuples where motion_ids are indices
+            into self._metrics (0-based within the eval subset).
         """
         fixed_motion_ids, first_env_indices = (
             self.motion_manager.get_unique_fixed_motions()
@@ -195,14 +234,28 @@ class MimicEvaluator(BaseEvaluator):
             print(f"Only evaluating fixed motions: {fixed_motion_ids}")
             return [(first_env_indices, fixed_motion_ids)]
 
-        num_motions = self.motion_lib.num_motions()
+        # If we're using a subset, eval_motion_ids maps local index → global motion id.
+        if self._eval_motion_subset is not None:
+            global_ids = self._eval_motion_subset
+            total_eval = global_ids.shape[0]
+        else:
+            global_ids = None
+            total_eval = self.motion_lib.num_motions()
+
         batches = []
-        for start in range(0, num_motions, self.num_envs):
-            end = min(start + self.num_envs, num_motions)
-            motion_ids = torch.arange(start, end, device=self.device)
-            env_ids = torch.arange(0, motion_ids.numel(), device=self.device)
-            print(f"Evaluating motions {start} to {end}, out of total {num_motions}")
-            batches.append((env_ids, motion_ids))
+        for start in range(0, total_eval, self.num_envs):
+            end = min(start + self.num_envs, total_eval)
+            # local_ids: 0-based index into the eval subset (used for MotionMetrics)
+            local_ids = torch.arange(start, end, device=self.device)
+            # actual_ids: real motion library IDs (used for physics/motion_manager)
+            actual_ids = global_ids[local_ids] if global_ids is not None else local_ids
+            env_ids = torch.arange(0, local_ids.numel(), device=self.device)
+            print(
+                f"Evaluating motions {start} to {end} "
+                f"(global ids {actual_ids[0].item()}..{actual_ids[-1].item()}), "
+                f"out of total eval set {total_eval}"
+            )
+            batches.append((env_ids, local_ids, actual_ids))
         return batches
 
     # --- Hook overrides ---
@@ -221,13 +274,15 @@ class MimicEvaluator(BaseEvaluator):
         still_active = self._episode_ctx.frame_limits > step_idx
         if still_active.any():
             active_env_ids = env_ids[still_active]
-            active_motion_ids = self._episode_ctx.motion_ids[still_active]
+            # Use local_ids (0-based within eval subset) for the failure buffers,
+            # which are sized to num_eval_motions, not total motion library size.
+            active_motion_ids = self._episode_ctx.local_ids[still_active]
             self._check_evaluation_failures(active_env_ids, active_motion_ids)
-    
+
     def _on_episode_step(self, env_ids: Tensor, extras: Dict, actions: Tensor) -> None:
         """Collect smoothness metrics each step."""
         self._record_trajectory_step(
-            self._metrics, extras, env_ids, self._episode_ctx.motion_ids, actions
+            self._metrics, extras, env_ids, self._episode_ctx.local_ids, actions
         )
 
     def _record_trajectory_step(
@@ -260,6 +315,7 @@ class MimicEvaluator(BaseEvaluator):
             if (
                 self.config.save_predicted_motion_lib_every is not None
                 and self.eval_count % self.config.save_predicted_motion_lib_every == 0
+                and self._eval_motion_subset is None  # requires full motion set
             ):
                 self._save_predicted_motion_lib(self._metrics, epoch=self.agent.current_epoch)
 
@@ -270,10 +326,11 @@ class MimicEvaluator(BaseEvaluator):
         self.motion_manager.motion_ids = self._cached_motion_ids
         self.motion_manager.motion_times = self._cached_motion_times
         self.env.restore_state(self._env_snapshot)
-        
+
         del self._env_snapshot
         del self._cached_motion_ids
         del self._cached_motion_times
+        self._eval_motion_subset = None
         super().cleanup_after_evaluation()
 
     def _plot_per_frame_metrics(
