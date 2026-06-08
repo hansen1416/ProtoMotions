@@ -20,5 +20,6 @@ data/amass/*.pkl
 renders/
 
 isaacgym/
+r2
 
 pilot_1024_motions.json
