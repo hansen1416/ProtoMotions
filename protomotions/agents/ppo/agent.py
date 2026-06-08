@@ -138,22 +138,18 @@ class PPO(BaseAgent):
             self.config.model.actor_optimizer,
             params=list(model._actor.parameters()),
         )
-        print(f"[rank {self.fabric.global_rank}] fabric.setup(actor) ...", flush=True)
         self.actor, self.actor_optimizer = self.fabric.setup(
             model._actor, actor_optimizer
         )
-        print(f"[rank {self.fabric.global_rank}] fabric.setup(actor) done", flush=True)
         # Actor now only has forward() method
 
         critic_optimizer = instantiate(
             self.config.model.critic_optimizer,
             params=list(model._critic.parameters()),
         )
-        print(f"[rank {self.fabric.global_rank}] fabric.setup(critic) ...", flush=True)
         self.critic, self.critic_optimizer = self.fabric.setup(
             model._critic, critic_optimizer
         )
-        print(f"[rank {self.fabric.global_rank}] fabric.setup(critic) done", flush=True)
 
         # Store initial learning rates for adaptive KL scheduling
         if self.config.adaptive_lr.enabled:

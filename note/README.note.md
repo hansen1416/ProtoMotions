@@ -432,3 +432,62 @@ def _throw_projectile(self) -> None:
         return
     ...
 ```
+
+------
+
+## Multi GPU deadlock
+
+1. NCCL_P2P_DISABLE=1 (train_agent.py top)
+  IsaacGym claims the primary CUDA context for all ranks. When NCCL first tries to create its communicator (inside the DDP
+  constructor in create_optimizers), it attempts peer-to-peer memory access across GPUs. With IsaacGym already holding CUDA
+  contexts, this P2P handshake deadlocks silently — and the 30-minute NCCL default timeout makes it look like a permanent
+  hang. NCCL_P2P_DISABLE=1 forces NCCL to use a copy-then-reduce path instead, which avoids the conflict entirely. setdefault
+  means you can still override it via env var if needed.
+
+  2. torch.cuda.set_device(fabric.local_rank) after env creation (train_agent.py)
+  In headless mode, IsaacGym hard-codes graphics_device_id = 0. Internally this triggers cudaSetDevice(0) on all ranks.
+  fabric.local_rank for ranks 1/2/3 then becomes the wrong current device for NCCL stream creation. The set_device call
+  re-asserts the correct GPU before DDP setup.
+
+  3. Print statements (train_agent.py + ppo/agent.py)
+  Show whether the hang is at fabric.setup(actor), fabric.setup(critic), the explicit barrier(), or somewhere else. The CUDA
+  device mismatch will also be visible in the first print (expected: N vs CUDA current device: 0).
+
+  To run the diagnostic:
+  NCCL_DEBUG=WARN python -u protomotions/train_agent.py \
+      --robot-name smpl_mor \
+      --simulator isaacgym \
+      --experiment-path examples/experiments/mimic/mlp.py \
+      --experiment-name hhi_1024_motion \
+      --motion-file /workspace/merged4/humos_slurmrank.pt \
+      --num-envs 1024 --batch-size 16384 --ngpu 2
+
+  If NCCL_P2P_DISABLE=1 alone fixes it, you're done. If it still hangs, check which print is the last one seen — that's
+  exactly where the deadlock is. Then set NCCL_DEBUG=INFO for more detail on that specific op.
+
+
+  The CUDA devices were already correct (0→0, 1→1), so the set_device call was a harmless no-op. The actual fix was
+  NCCL_P2P_DISABLE=1. Here's why it deadlocked:
+
+  The root cause: NCCL P2P initialization conflicts with IsaacGym's CUDA context
+
+  When NCCL does its first collective (the parameter broadcast inside DistributedDataParallel(actor)), it tries to set up
+  peer-to-peer memory access between the two GPUs. P2P means NCCL registers the GPU memory regions for cross-GPU IPC
+  (Inter-Process Communication) — direct NVLink/PCIe reads between GPU 0 and GPU 1 without going through the CPU.
+
+  To do that registration, NCCL needs the CUDA memory to be "IPC-exportable". IsaacGym allocates its own physics tensors with
+  cudaMalloc in the same CUDA context and memory space. The exact conflict is: NCCL's P2P handshake uses cudaIpcGetMemHandle()
+  on some allocations, and with IsaacGym's context already set up, the CUDA runtime returns an error internally — but NCCL
+  doesn't surface it as a Python exception. Instead it just... waits. Forever (30-minute default timeout).
+
+  With NCCL_P2P_DISABLE=1, NCCL skips the P2P path entirely and falls back to copy-through-CPU (PCIe DMA). The gradient sync
+  is somewhat slower, but for RL training where physics simulation dominates the runtime, this is negligible.
+
+  Performance impact: for gradient sync of a ~1M parameter actor-critic, PCIe bandwidth (~16 GB/s) vs NVLink (~600 GB/s) adds
+  maybe 1–2ms per backward pass. On a 16384 batch with 64-step rollouts that's well under 1% of epoch time — not worth
+  worrying about.
+
+  Two things to clean up now that it's confirmed working:
+
+  The diagnostic prints are noisy and should come out before merging. The NCCL_P2P_DISABLE line stays but deserves a cleaner
+  placement. Let me strip the prints:
