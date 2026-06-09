@@ -241,6 +241,15 @@ python protomotions/train_agent.py \
     --num-envs 8 \
     --batch-size 16
 
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_film.py \
+    --experiment-name local_test \
+    --motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --num-envs 8 \
+    --batch-size 16
+
 ------
 
 ## inference motion
@@ -543,3 +552,32 @@ What the evaluator does every 200 epochs
 
 
   only the 2000 sampled motions get weight updates per eval. The other motions' weights are unchanged until they appear in a future eval's random
+
+------
+
+protomotions/agents/common/film_mlp.py (new)
+
+  Two things in one file:
+
+  FiLMMLPConfig — a NormObsBaseConfig subclass with _target_ pointing to FiLMMLPWithCond. Fields beyond MLPWithConcatConfig:
+  - cond_keys (default ["morphology_obs"]) — the conditioning inputs, separate from in_keys
+  - cond_hidden_units (default [64, 64]) — conditioner MLP hidden sizes
+  - cond_activation (default "relu")
+  - beta_norm_scale (default 3.0) — divides beta dims before they enter the conditioner
+
+  FiLMMLPWithCond — TensorDictModuleBase that:
+  - Builds the trunk as a nn.ModuleList of blocks (one per hidden layer), keeping them separate so FiLM can be applied between
+  them cleanly
+  - Builds the output head as a standalone nn.LazyLinear
+  - Builds cond_mlp + cond_linear which map morphology → flat gamma/beta vector
+  - Normalizes morphology: [gender, betas/3] before conditioning
+  - _split_film_params uses [..., pos:pos+h] indexing so it handles both [B, D] and [T, N, D] shapes (ready for AMP rollout
+  reward paths if needed later)
+
+  examples/experiments/mimic/mlp_film.py (new)
+
+  Identical env/reward/termination to mimic/mlp.py. The only change is in agent_config():
+  - Actor mu_model: FiLMMLPConfig(in_keys=_MAIN_OBS_KEYS, cond_keys=["morphology_obs"], ...) — morphology_obs removed from the
+  flat concat
+  - Critic: same swap
+  - _MAIN_OBS_KEYS = ["max_coords_obs", "mimic_target_poses", "previous_actions"] (no morphology_obs in trunk input)
