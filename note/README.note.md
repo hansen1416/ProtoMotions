@@ -221,12 +221,14 @@ get_obs() → network reads it by key
 
 ## Sampling motions
 
-Sample ~1024 motions from the 5th–55th difficulty percentile. This skips pure static poses at the bottom and avoids hard motions at the top that won't converge within the pilot budget. Train with 8,192 envs / 32,768 batch size to make use of the 48 GB GPU. The goal is a discriminative difficulty range where good architectures clearly outperform weak ones within a reasonable training window.
+**Full dataset:** 20,951 motions across 128 beta variants (64 shapes × 2 genders), listed in `/home/hlz/repos/hhi/data-processing/valid_motions.txt`. Each motion was predicted by HUMOS for all 128 beta inputs.
 
-- Start with ~1,000 motions — not for memory, but because it's much faster to diagnose convergence issues on a small set
-first
-- When it converges, jump straight to all 20,951 motions — they fit easily
-- Scale num_envs to 8192 and batch_size to 32768 to use the GPU more fully (~31 GB with full dataset, safe headroom)
+**Current stage:** pilot training on ~1,024 motions sampled from the 5th–55th difficulty percentile. Skips pure static poses (bottom) and motions too hard to converge within budget (top). Goal is a discriminative difficulty range where good architectures clearly outperform weak ones within a reasonable training window.
+
+**Scale-up plan:**
+- Pilot with ~1,024 motions first — faster to diagnose convergence and architecture differences (MLP vs FiLM)
+- Once pilot converges, jump to all 20,951 motions — they fit easily in memory
+- Scale `num_envs` to 8192 and `batch_size` to 32768 (~31 GB GPU, safe headroom on A40)
 
 ------
 
