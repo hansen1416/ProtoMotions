@@ -106,3 +106,9 @@
 study the humannoid template properly!!
 
 We can either tune the humanoid to align with SMPL joints exactly, or we can develop a script that perform the target motion, and record its data
+
+
+Start generating the held-out betas via HUMOS whenever you have a spare hour — that's the one thing you can do now without   waiting for checkpoints. We should use the same sample logic, same 1024 motions.
+
+
+claude --resume 72bc247f-b1a6-4937-ac71-73d04ce6f8bb

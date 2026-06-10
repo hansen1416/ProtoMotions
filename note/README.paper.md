@@ -152,4 +152,74 @@ These experiments show the policy has learned physically meaningful shape-condit
 | `hhi_1024_motion` | MLP, 4096 envs, 4× A40 | ~22s/step | ~8k steps |
 | `hhi_film_1024_motion` | FiLM, 8192 envs, 4× A40 | ~34s/step | ~2.3k steps |
 
-Hardware note: 4× A40 ≈ 4× A100 for this workload (IsaacGym physics-sim bound, 30–50% GPU util).
+Hardware note: 4× A40 ≈ 4× A100 for this workload (IsaacGym physics-sim bound, 30-50% GPU util).
+
+---
+
+## Strengthening Experiments (additional)
+
+These build on the existing plan and address likely reviewer challenges. All are low effort — no new training required, just rollout data analysis on existing checkpoints.
+
+### S1. Motion Type x Shape Extremity Interaction (2D analysis)
+
+**Gap addressed:** current results average across motion types, hiding the structure of failures.
+
+- Categorise the 1024 motion clips into types (locomotion, dynamic/jumping, manipulation, static/pose) using `data-processing/motion_id_text.json` text descriptions — can be done with simple keyword clustering
+- For each (motion category, body shape extremity bucket) cell, compute mean body tracking distance
+- Output: 2D heatmap — one axis motion category, other axis shape extremity (beta L2 norm buckets), color = tracking error
+- Expected finding: locomotion robust across shapes, dynamic motions degrade sharply for extreme shapes
+- **High impact, low effort** — motion categorisation is the only new work
+
+### S2. Embodiment Encoding Probe
+
+**Gap addressed:** proves the FiLM network has learned an internal representation of body physics, not just memorised shape IDs.
+
+- During inference across all 128 shapes, extract FiLM gamma/beta activation vectors per shape
+- Fit a simple linear regression: FiLM activations → physical body properties (estimated height, mass, limb length ratios derived from SMPL beta → URDF)
+- If linear probe predicts body properties with low error: the network has built a physically meaningful internal representation purely from imitation learning
+- **This is the single strongest "AI learns physics" result** — surprising, clean, one figure
+- Requires: FiLM checkpoint + a few hours of analysis code
+
+### S3. Failure Mode Taxonomy
+
+**Gap addressed:** current metrics measure *how much* the policy fails, not *why* physically.
+
+- From rollout data, categorise failures into:
+  - **Fall** — root height drops below threshold during episode
+  - **COM drift** — horizontal displacement from reference exceeds bound
+  - **Joint limit violation** — DOF hits limit repeatedly
+  - **Contact failure** — foot sliding or floating (detected from contact forces)
+- Plot failure type distribution per shape extremity bucket and per motion category
+- Reveals which physical failure modes are shape-sensitive vs motion-sensitive
+- Reusable diagnostic tool for the community — adds a methodological contribution
+
+### S4. Motion Retargeting Behaviour
+
+**Gap addressed:** shows the policy does implicit retargeting, not blind reference tracking.
+
+- For a walking/locomotion clip, measure stride length and stride frequency across all 128 shapes
+- Plot stride length vs body height — if positive correlation exists, the policy is scaling motion to body proportions
+- Also check: does a shorter body take more steps to cover the same distance?
+- **Very visual, good for video** — intuitive result that ICRA reviewers will appreciate
+- Extractable from root position trajectory in existing rollouts
+
+### S5. Fine-tuning Efficiency (optional, low priority)
+
+**Gap addressed:** shows the single policy is also a strong initialisation for shape-specific specialisation.
+
+- Take converged single policy, fine-tune for 200-500 steps on 2-3 specific shapes
+- Compare convergence speed vs training from scratch on those same shapes
+- If fine-tuning reaches same quality in ~10% of the steps: the single policy has practical value beyond deployment
+- Cost: ~1 week of additional training on a subset — do only if timeline allows
+
+---
+
+## Strengthening Priority
+
+| Experiment | Narrative value | Effort | Priority |
+|---|---|---|---|
+| S1. Motion type x shape heatmap | High — visual, reveals failure structure | Low | Do it |
+| S2. Embodiment encoding probe | Very high — surprising, clean result | Low | Do it |
+| S3. Failure mode taxonomy | Medium — grounded, community value | Low | Do it |
+| S4. Retargeting behaviour | Medium — intuitive, great for video | Low | Do it |
+| S5. Fine-tuning efficiency | Medium — practical value | Medium | If time allows |
