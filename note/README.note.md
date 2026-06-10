@@ -444,140 +444,109 @@ def _throw_projectile(self) -> None:
 
 ------
 
-## Multi GPU deadlock
+## Multi GPU Deadlock
 
-1. NCCL_P2P_DISABLE=1 (train_agent.py top)
-  IsaacGym claims the primary CUDA context for all ranks. When NCCL first tries to create its communicator (inside the DDP
-  constructor in create_optimizers), it attempts peer-to-peer memory access across GPUs. With IsaacGym already holding CUDA
-  contexts, this P2P handshake deadlocks silently — and the 30-minute NCCL default timeout makes it look like a permanent
-  hang. NCCL_P2P_DISABLE=1 forces NCCL to use a copy-then-reduce path instead, which avoids the conflict entirely. setdefault
-  means you can still override it via env var if needed.
+**Root cause:** NCCL P2P initialization conflicts with IsaacGym's CUDA context. When DDP broadcasts parameters, NCCL's `cudaIpcGetMemHandle()` call silently hangs (30-min timeout) because IsaacGym already holds the CUDA context.
 
-  2. torch.cuda.set_device(fabric.local_rank) after env creation (train_agent.py)
-  In headless mode, IsaacGym hard-codes graphics_device_id = 0. Internally this triggers cudaSetDevice(0) on all ranks.
-  fabric.local_rank for ranks 1/2/3 then becomes the wrong current device for NCCL stream creation. The set_device call
-  re-asserts the correct GPU before DDP setup.
+**Fix:** `NCCL_P2P_DISABLE=1` in `train_agent.py` — forces NCCL to use PCIe copy-reduce path instead of NVLink P2P. Set via `os.environ.setdefault` so it can still be overridden.
 
-  3. Print statements (train_agent.py + ppo/agent.py)
-  Show whether the hang is at fabric.setup(actor), fabric.setup(critic), the explicit barrier(), or somewhere else. The CUDA
-  device mismatch will also be visible in the first print (expected: N vs CUDA current device: 0).
+**Performance impact:** Negligible. Gradient sync on ~1M params adds <2ms/backward pass — well under 1% of epoch time when sim dominates.
 
-  To run the diagnostic:
-  NCCL_DEBUG=WARN python -u protomotions/train_agent.py \
-      --robot-name smpl_mor \
-      --simulator isaacgym \
-      --experiment-path examples/experiments/mimic/mlp.py \
-      --experiment-name hhi_1024_motion \
-      --motion-file /workspace/merged4/humos_slurmrank.pt \
-      --num-envs 1024 --batch-size 16384 --ngpu 2
-
-  If NCCL_P2P_DISABLE=1 alone fixes it, you're done. If it still hangs, check which print is the last one seen — that's
-  exactly where the deadlock is. Then set NCCL_DEBUG=INFO for more detail on that specific op.
-
-
-  The CUDA devices were already correct (0→0, 1→1), so the set_device call was a harmless no-op. The actual fix was
-  NCCL_P2P_DISABLE=1. Here's why it deadlocked:
-
-  The root cause: NCCL P2P initialization conflicts with IsaacGym's CUDA context
-
-  When NCCL does its first collective (the parameter broadcast inside DistributedDataParallel(actor)), it tries to set up
-  peer-to-peer memory access between the two GPUs. P2P means NCCL registers the GPU memory regions for cross-GPU IPC
-  (Inter-Process Communication) — direct NVLink/PCIe reads between GPU 0 and GPU 1 without going through the CPU.
-
-  To do that registration, NCCL needs the CUDA memory to be "IPC-exportable". IsaacGym allocates its own physics tensors with
-  cudaMalloc in the same CUDA context and memory space. The exact conflict is: NCCL's P2P handshake uses cudaIpcGetMemHandle()
-  on some allocations, and with IsaacGym's context already set up, the CUDA runtime returns an error internally — but NCCL
-  doesn't surface it as a Python exception. Instead it just... waits. Forever (30-minute default timeout).
-
-  With NCCL_P2P_DISABLE=1, NCCL skips the P2P path entirely and falls back to copy-through-CPU (PCIe DMA). The gradient sync
-  is somewhat slower, but for RL training where physics simulation dominates the runtime, this is negligible.
-
-  Performance impact: for gradient sync of a ~1M parameter actor-critic, PCIe bandwidth (~16 GB/s) vs NVLink (~600 GB/s) adds
-  maybe 1–2ms per backward pass. On a 16384 batch with 64-step rollouts that's well under 1% of epoch time — not worth
-  worrying about.
-
-  Two things to clean up now that it's confirmed working:
-
-  The diagnostic prints are noisy and should come out before merging. The NCCL_P2P_DISABLE line stays but deserves a cleaner
-  placement. Let me strip the prints:
+**Diagnostic (if it recurs):**
+```bash
+NCCL_DEBUG=WARN python -u protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_1024_motion \
+    --motion-file /workspace/merged4/humos_slurmrank.pt \
+    --num-envs 1024 --batch-size 16384 --ngpu 2
+```
+Last print before hang identifies the exact deadlock point.
 
 ------
 
-What the evaluator does every 200 epochs
+## Evaluator (runs every 200 epochs)
 
-  It has two distinct purposes:
+**Two purposes:**
+- **Logging only:** records per-frame robot state → computes smoothness, jitter, success rates → logs to wandb
+- **Curriculum update (affects training):** failed motions get higher sampling weight, succeeded motions get discounted (`0.999^200 ≈ 0.82`). This is the only evaluator feedback loop into training.
 
-  1. Metrics/logging (no training impact)
-  Runs the policy on motions, records per-frame robot state and actions into MotionMetrics, then computes smoothness scores,
-  jitter, success rates — logged to wandb.
+**Evaluator changes and training impact:**
+- CPU storage for MotionMetrics — no impact, purely memory
+- `motion_lens.to(device)` fix — no impact, correctness fix for cross-device indexing
+- `max_eval_motions=2000` subsampling — mild impact: only 2000 motions get weight updates per eval cycle
 
-  2. Motion sampling weight update (directly affects training)
-  This is the part that matters for learning:
-  # In _update_motion_sampling_weights:
-  new_weights[success_motions] *= success_discount   # 0.999^200 ≈ 0.82
-  new_weights[failed_motions] /= failure_discount    # failed motions get higher weight
-  Motions the policy fails get sampled more during the next 200 training epochs. This is a curriculum: keep pushing on hard
-  motions, relax on easy ones. It's the evaluator's only feedback loop into training.
-
-  ---
-
-  Impact of my changes:
-
-  ┌──────────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────┐
-  │              Change              │                                 Affects training?                                  │
-  ├──────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
-  │ CPU storage for MotionMetrics    │ No — purely memory. Same values, different device.                                 │
-  ├──────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
-  │ motion_lens.to(device) +         │ No — correctness fix for cross-device indexing.                                    │
-  │ update() device fix              │                                                                                    │
-  ├──────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
-  │ max_eval_motions=2000            │ Yes, mildly — only the 2000 sampled motions get weight updates per eval. The other │
-  │ subsampling                      │  motions' weights are unchanged until they appear in a future eval's random        │
-  │                                  │ sample.                                                                            │
-  └──────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────┘
-
-  The last point is worth thinking about. With 25k+ motions and 2000 evaluated per cycle, each motion gets a weight update
-  roughly every 25000/2000 = 12.5 eval cycles = 2500 epochs. That's slower curriculum feedback for rare/hard motions compared
-  to evaluating everything.
-
-  If the curriculum is important to you, you have two options:
-  1. Keep max_eval_motions=2000 but accept slower weight updates (probably fine for large datasets since any single motion is
-  a small fraction of training anyway)
-  2. Set max_eval_motions=null via --overrides agent.config.evaluator.max_eval_motions=null to evaluate all motions — but then
-  you'd need the CPU-storage fix alone to be enough (it will be, since CPU metrics don't consume GPU VRAM)
-
-  The CPU storage fix alone (without subsampling) would already save the OOM — the MotionMetrics allocations just move off
-  GPU. The subsampling is an extra layer of safety. If you want to be conservative, you could increase max_eval_motions to
-  something like 10000 and see if memory holds.
-
-
-  only the 2000 sampled motions get weight updates per eval. The other motions' weights are unchanged until they appear in a future eval's random
+**`max_eval_motions=2000` tradeoff:**
+- With 25k+ motions, each motion gets a weight update every ~2500 epochs (12.5 eval cycles) — slower curriculum feedback
+- Options:
+  - Keep 2000 — fine for large datasets, memory-safe
+  - Set `null` via `--overrides agent.config.evaluator.max_eval_motions=null` to evaluate all — safe since CPU metric storage already avoids GPU OOM
 
 ------
 
-protomotions/agents/common/film_mlp.py (new)
+## FiLM MLP Implementation
 
-  Two things in one file:
+**`protomotions/agents/common/film_mlp.py`**
+- `FiLMMLPConfig`: extends `NormObsBaseConfig`, adds `cond_keys` (default `["morphology_obs"]`), `cond_hidden_units` (`[64,64]`), `beta_norm_scale` (`3.0`)
+- `FiLMMLPWithCond`: trunk is a `ModuleList` of blocks (not fused) so FiLM scale/shift can be applied between layers; conditioner MLP maps morphology → gamma/beta per layer; `_split_film_params` handles both `[B, D]` and `[T, N, D]` shapes
 
-  FiLMMLPConfig — a NormObsBaseConfig subclass with _target_ pointing to FiLMMLPWithCond. Fields beyond MLPWithConcatConfig:
-  - cond_keys (default ["morphology_obs"]) — the conditioning inputs, separate from in_keys
-  - cond_hidden_units (default [64, 64]) — conditioner MLP hidden sizes
-  - cond_activation (default "relu")
-  - beta_norm_scale (default 3.0) — divides beta dims before they enter the conditioner
+**`examples/experiments/mimic/mlp_film.py`**
+- Identical env/reward/termination config to `mlp.py`
+- Only change: actor and critic use `FiLMMLPConfig` with `morphology_obs` as `cond_keys` (not in `in_keys` / trunk concat)
+- `_MAIN_OBS_KEYS = ["max_coords_obs", "mimic_target_poses", "previous_actions"]`
 
-  FiLMMLPWithCond — TensorDictModuleBase that:
-  - Builds the trunk as a nn.ModuleList of blocks (one per hidden layer), keeping them separate so FiLM can be applied between
-  them cleanly
-  - Builds the output head as a standalone nn.LazyLinear
-  - Builds cond_mlp + cond_linear which map morphology → flat gamma/beta vector
-  - Normalizes morphology: [gender, betas/3] before conditioning
-  - _split_film_params uses [..., pos:pos+h] indexing so it handles both [B, D] and [T, N, D] shapes (ready for AMP rollout
-  reward paths if needed later)
+------
 
-  examples/experiments/mimic/mlp_film.py (new)
+## Training Speed (current runs, 4× A40)
 
-  Identical env/reward/termination to mimic/mlp.py. The only change is in agent_config():
-  - Actor mu_model: FiLMMLPConfig(in_keys=_MAIN_OBS_KEYS, cond_keys=["morphology_obs"], ...) — morphology_obs removed from the
-  flat concat
-  - Critic: same swap
-  - _MAIN_OBS_KEYS = ["max_coords_obs", "mimic_target_poses", "previous_actions"] (no morphology_obs in trunk input)
+| Run | Envs/Batch | Step time | Samples/hour | Status (as of Jun 10) |
+|---|---|---|---|---|
+| Non-FiLM | 4096 / 16384 | ~22s/step | ~2.7M | ~8k steps, reward 0.84 |
+| FiLM | 8192 / 32768 | ~34s/step | ~3.5M | ~2.3k steps, reward 0.72 |
+
+**Key points:**
+- Bottleneck is IsaacGym physics sim (30–50% GPU util), not NN compute — A40 ≈ A100 for this workload
+- FiLM is slower per step but processes 2× data → 30% more samples/hour
+- FiLM's lower reward despite more samples/hour confirms it's harder to optimize, not data-starved
+- **Projected finish:** Non-FiLM ~+2 days, FiLM ~+5–7 days (~$380 total, worth it for generalization goal)
+
+------
+
+## Evaluation Plan
+
+**Infrastructure ready:** `evaluate_hhi_faults.py` + `HHIFaultEvaluator` handles morphology-matched batching and outputs per-(gender, beta_key) CSV report.
+
+**What's missing:** held-out motion files. All 128 training betas (64 shapes × 2 genders) are in the training set.
+
+**Held-out eval sets to generate via HUMOS:**
+1. **Interpolation** — ~16–32 new random betas sampled from `[-3, 3]` (different seed from training 128)
+2. **Extrapolation** — betas in `[-5, 5]` range (scale existing betas by 5/3 is cleanest)
+
+**Run evaluation on both checkpoints:**
+```bash
+python protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_1024_motion/last.ckpt \
+    --simulator isaacgym \
+    --motion-file /path/to/held_out_shapes.pt \
+    --num-envs 64 \
+    --output results/eval_mlp_heldout.csv
+
+python protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_film_1024_motion/last.ckpt \
+    --simulator isaacgym \
+    --motion-file /path/to/held_out_shapes.pt \
+    --num-envs 64 \
+    --output results/eval_film_heldout.csv
+```
+
+**Key metric:** not mean body distance — **per-shape variance and worst-case degradation**
+- Plot body distance vs beta L2 norm — FiLM should degrade more gracefully on extreme shapes
+- Compare worst 10–20 betas between MLP and FiLM — that's where FiLM's value shows up
+
+**Note on ±5 betas:** SMPL motions at this range may be noisier — account for this when interpreting extrapolation results.
+
+**Timeline:**
+1. Generate held-out motion files now while training runs
+2. Non-FiLM converges (~+2 days) → validate pipeline end-to-end
+3. FiLM converges (~+7 days) → run full MLP vs FiLM comparison
