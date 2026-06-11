@@ -122,6 +122,16 @@ def create_parser():
         help="If set, place humanoids in a compact grid during inference visualization.",
     )
     parser.add_argument(
+        "--max-motions",
+        type=int,
+        default=None,
+        help=(
+            "Limit the number of motions loaded from the motion file. "
+            "Useful when the full file is too large for GPU memory. "
+            "For morphology-consistent sampling set this >= number of unique shapes."
+        ),
+    )
+    parser.add_argument(
         "--gender-beta",
         nargs="*",
         default=None,
@@ -290,6 +300,10 @@ def main():
     if args.motion_file is not None:
         log.info(f"CLI override: motion_file = {args.motion_file}")
         motion_lib_config.motion_file = args.motion_file  # Always present
+
+    if args.max_motions is not None:
+        log.info(f"CLI override: max_motions = {args.max_motions}")
+        motion_lib_config.max_motions = args.max_motions
 
     if args.scenes_file is not None:
         log.info(f"CLI override: scenes_file = {args.scenes_file}")

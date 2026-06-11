@@ -272,6 +272,14 @@ python protomotions/inference_agent_mor.py \
     --compact-spawn-spacing 1.5 \
     --num-envs 16
 
+python protomotions/inference_agent_mor.py \
+      --checkpoint results/hhi_1024_motion/score_based.ckpt \
+      --simulator isaacgym \
+      --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0001_offset.pt \
+      --compact-spawn-spacing 1.5 \
+      --num-envs 16 \
+      --max-motions 128
+
 
 female:093098f0 female:09a0fcbd female:0e26b88d female:0f05fd5a female:10900e9a female:10c258c2 female:1658f5d3 female:1e5a1c90 female:2286da8c female:25247499 female:2e949ac0 female:30f6048e female:312bf810 female:324b2d00 female:36baeba5 female:371b5e94
 
@@ -561,3 +569,24 @@ python protomotions/evaluate_hhi_faults.py \
 1. Generate held-out motion files now while training runs
 2. Non-FiLM converges (~+2 days) → validate pipeline end-to-end
 3. FiLM converges (~+7 days) → run full MLP vs FiLM comparison
+
+------
+
+## `max_motions` — inference with large motion files
+
+**Problem:** `humos_131072_0000_offset.pt` is 3.6 GB. Loading it during inference with 16 envs exceeds GPU memory.
+
+**Fix:** Added `max_motions: Optional[int]` to `MotionLibConfig` (default `None`). When set, `load_from_file` loads the full file to CPU, slices to the first N motions, then moves to GPU. Training is unaffected when `max_motions` is not set (the only behavior change for the unset case is CPU→GPU via `.to()` instead of `map_location=device`, which is functionally identical).
+
+**Usage:**
+```bash
+python protomotions/inference_agent_mor.py \
+    --checkpoint results/hhi_1024_motion/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0000_offset.pt \
+    --compact-spawn-spacing 1.5 \
+    --num-envs 16 \
+    --max-motions 1024
+```
+
+**Sizing:** with 128 morphology shapes, set `--max-motions` ≥ 128 so morphology-consistent sampling has at least one motion per shape. 1024 is comfortable (~30 MB GPU vs 3.6 GB).

@@ -93,8 +93,8 @@ python -u protomotions/train_agent.py \
     --experiment-path examples/experiments/mimic/mlp_shape_embed.py \
     --experiment-name hhi_se_1024_motion \
     --motion-file /workspace/merged4/humos_slurmrank.pt \
-    --num-envs 8192 \
-    --batch-size 65536 \
+    --num-envs 4096 \
+    --batch-size 16384 \
     --ngpu 4 \
     --use-wandb \
     --wandb-project hhi-protomotions \
@@ -108,8 +108,8 @@ nohup python -u protomotions/train_agent.py \
   --experiment-path examples/experiments/mimic/mlp_shape_embed.py \
   --experiment-name hhi_se_1024_motion \
   --motion-file /workspace/merged4/humos_slurmrank.pt \
-  --num-envs 8192 \
-  --batch-size 65536 \
+  --num-envs 4096 \
+  --batch-size 16384 \
   --ngpu 4 \
   --use-wandb \
   --wandb-project hhi-protomotions \

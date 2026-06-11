@@ -83,6 +83,17 @@ class MotionLibConfig:
             "help": "Use interpolation for smooth motion queries between frames."
         },
     )
+    max_motions: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Limit the number of motions loaded from a packaged .pt file. "
+                "Useful for inference when the full file is too large for GPU memory. "
+                "Data is loaded to CPU, sliced, then moved to device. "
+                "For morphology-consistent sampling ensure this covers all desired shapes."
+            )
+        },
+    )
 
 
 class MotionLib:
@@ -696,8 +707,47 @@ class MotionLib:
         """
         print(f"Loading motion library from {file_path}")
         loaded_data = torch.load(
-            file_path, map_location=self.device, weights_only=False
+            file_path, map_location="cpu", weights_only=False
         )
+
+        max_motions = getattr(self.config, "max_motions", None)
+        if max_motions is not None:
+            n = min(max_motions, len(loaded_data["motion_num_frames"]))
+            print(
+                f"[MotionLib] max_motions={max_motions}: keeping {n} of "
+                f"{len(loaded_data['motion_num_frames'])} motions."
+            )
+            ls = loaded_data["length_starts"]
+            nf = loaded_data["motion_num_frames"]
+            frame_end = (ls[n - 1] + nf[n - 1]).item()
+
+            # Per-frame tensors
+            for key in ("gts", "grs", "gvs", "gavs", "dvs", "dps", "contacts", "lrs"):
+                if loaded_data.get(key) is not None:
+                    loaded_data[key] = loaded_data[key][:frame_end]
+
+            # Per-motion tensors
+            for key in (
+                "length_starts",
+                "motion_lengths",
+                "motion_dt",
+                "motion_num_frames",
+                "motion_weights",
+                "motion_betas",
+                "motion_gender_ids",
+            ):
+                if loaded_data.get(key) is not None:
+                    loaded_data[key] = loaded_data[key][:n]
+
+            # Per-motion tuples / sequences
+            for key in ("motion_genders", "motion_beta_keys", "motion_asset_ids", "motion_files"):
+                if loaded_data.get(key) is not None:
+                    loaded_data[key] = loaded_data[key][:n]
+
+        # Move tensors to target device
+        for key in loaded_data:
+            if isinstance(loaded_data[key], torch.Tensor):
+                loaded_data[key] = loaded_data[key].to(self.device)
 
         for field in loaded_data:
             assert loaded_data[field] is not None, f"Field {field} is None"
