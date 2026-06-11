@@ -80,6 +80,22 @@ python -u protomotions/train_agent.py \
 ```
 
 ```bash
+python -u protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_shape_embed.py \
+    --experiment-name hhi_se_1024_motion \
+    --motion-file /workspace/merged4/humos_slurmrank.pt \
+    --num-envs 8192 \
+    --batch-size 32768 \
+    --ngpu 4 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_se_1024_motion
+```
+
+```bash
 docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --ipc=host --shm-size=16g hansen1416/hhi-protomotions-isaacgym:v1 /bin/bash
 ```
 ----

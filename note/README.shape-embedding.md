@@ -61,3 +61,21 @@ more usable form.
 
 Goal: determine whether the nonlinear projection adds value over raw concat,
 and whether FiLM's poor performance was architectural rather than a capacity issue.
+
+------
+
+protomotions/agents/common/shape_embed_mlp.py
+  - ShapeEmbedMLPConfig — same API as FiLMMLPConfig, swap cond_hidden_units to control encoder depth
+  - ShapeEmbedMLP — encodes morphology to a 64-dim embedding, cats with normalized main obs, feeds standard trunk
+
+  examples/experiments/mimic/mlp_shape_embed.py
+  - Identical env/reward/termination setup to mlp_film.py
+  - Default: 1-layer encoder (cond_hidden_units=[64]) — ablate to [64, 64] via --overrides
+
+  To run the ablation:
+  # 1-layer encoder (default)
+  python protomotions/train_agent.py --experiment-path examples/experiments/mimic/mlp_shape_embed.py ...
+
+  # 2-layer encoder override
+  python protomotions/train_agent.py --experiment-path examples/experiments/mimic/mlp_shape_embed.py ... \
+      --overrides agent.model.actor.mu_model.cond_hidden_units=[64,64] agent.model.critic.cond_hidden_units=[64,64]

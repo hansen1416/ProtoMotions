@@ -252,6 +252,15 @@ python protomotions/train_agent.py \
     --num-envs 8 \
     --batch-size 16
 
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_shape_embed.py \
+    --experiment-name local_test \
+    --motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --num-envs 8 \
+    --batch-size 16
+
 ------
 
 ## inference motion
