@@ -112,3 +112,72 @@ Start generating the held-out betas via HUMOS whenever you have a spare hour —
 
 
 claude --resume 72bc247f-b1a6-4937-ac71-73d04ce6f8bb
+
+
+Based on our discussion, the five action plans are:
+
+1. **Replace FiLM with a simpler shape-conditioning mechanism**
+
+   * Baseline: concatenate `[gender, betas]` directly into the observation.
+   * Optionally pass them through a small MLP first to create a compact shape embedding.
+   * Goal: determine whether FiLM is the scaling bottleneck when moving from 1 motion to thousands of motions.
+
+2. **Profile CPU utilization**
+
+   * Use `htop` during training.
+   * Check:
+
+     * Overall CPU usage
+     * Per-core utilization
+     * RAM usage
+     * Swap usage
+   * Goal: determine whether environment orchestration is CPU-bound.
+
+3. **Profile the simulation pipeline**
+
+   * Add timing around:
+
+     * Physics stepping
+     * Observation generation
+     * Motion sampling
+     * Reward computation
+     * Policy inference
+   * Goal: identify where training time is actually spent.
+
+4. **Tune the environment count vs batch size trade-off**
+
+   * Experiment with:
+
+     * Fewer environments + larger batch size
+     * More environments + smaller batch size
+   * Since your A40 has substantial memory available, increasing batch size may improve throughput while reducing environment-management overhead.
+   * Goal: maximize samples/sec rather than env count.
+
+5. **Add physics-aware shape descriptors**
+
+   * Instead of providing only gender and betas, derive physically meaningful features:
+
+     * Total body mass
+     * Per-limb mass
+     * Center of mass
+     * Limb lengths
+     * Inertia-related quantities
+     * Mass distribution statistics
+   * Goal: provide the policy with features that are closer to the actual dynamics changes caused by body shape.
+
+### Priority Order
+
+I would execute them in this order:
+
+1. Replace FiLM → simple shape embedding.
+2. CPU profiling (`htop`).
+3. Simulation profiling (timers).
+4. Environment/batch-size tuning.
+5. Physics-aware shape features.
+
+The first four are primarily **engineering and diagnosis**. The fifth is a **research idea** that could potentially improve multi-shape generalization beyond the current baseline.
+
+
+
+7. Wandb timing metrics — if training is logging perf/rollout_time, perf/opt_time, perf/fps etc., share those values from
+  the first 10-20 steps.
