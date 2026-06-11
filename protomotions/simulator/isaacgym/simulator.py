@@ -95,9 +95,12 @@ class IsaacGymSimulator(Simulator):
         else:
             device_index = self.device.index
 
+        # In multi-GPU DDP, each rank must use its own GPU as the graphics device.
+        # Forcing graphics_device_id=0 for all headless ranks routes IsaacGym's internal
+        # state management through GPU 0, bottlenecking all other ranks on that one GPU.
         self._graphics_device_id = device_index
-        if self.headless is True:
-            self._graphics_device_id = 0
+        # if self.headless is True:
+        #     self._graphics_device_id = 0
 
         self._gym = gymapi.acquire_gym()
 
