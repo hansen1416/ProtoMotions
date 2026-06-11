@@ -416,6 +416,14 @@ class BaseAgent:
             dtype = env_tensor.dtype
             self.experience_buffer.register_key(key, shape=shape[1:], dtype=dtype)
 
+        # Diagnose NaN obs before first model forward
+        import torch.distributed as _dist
+        _rank = _dist.get_rank() if _dist.is_initialized() else 0
+        for key, val in obs_td.items():
+            if torch.is_tensor(val) and not torch.isfinite(val).all():
+                n = (~torch.isfinite(val)).sum().item()
+                print(f"[rank{_rank}] NaN/Inf in obs '{key}': {n}/{val.numel()} values", flush=True)
+
         # Auto-register model output keys by running one forward pass
         with torch.no_grad():
             output_td = self.model(obs_td)
