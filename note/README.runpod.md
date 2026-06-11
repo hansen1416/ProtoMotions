@@ -31,6 +31,13 @@ tmux new -s hhi
 tmux new -t hhi
 tmux kill-session -t hhi
 
+tmux ls
+
+tmux kill-server
+
+tmux capture-pane -p -S -5000 > /tmp/tmux_log.txt
+  cat /tmp/tmux_log.txt | grep -i "error\|traceback\|exception" | head -50
+
 
 ```bash
 python protomotions/train_agent.py \
@@ -87,13 +94,35 @@ python -u protomotions/train_agent.py \
     --experiment-name hhi_se_1024_motion \
     --motion-file /workspace/merged4/humos_slurmrank.pt \
     --num-envs 8192 \
-    --batch-size 32768 \
+    --batch-size 65536 \
     --ngpu 4 \
     --use-wandb \
     --wandb-project hhi-protomotions \
     --wandb-entity yugoamaryl \
     --wandb-group hhi_se_1024_motion
 ```
+
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_shape_embed.py \
+  --experiment-name hhi_se_1024_motion \
+  --motion-file /workspace/merged4/humos_slurmrank.pt \
+  --num-envs 8192 \
+  --batch-size 65536 \
+  --ngpu 4 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_se_1024_motion > /tmp/train_se.log 2>&1 &
+      
+Then note the PID it prints. Close your window freely — the process keeps running on the server.
+
+To check on it later:
+tail -f /tmp/train_se.log   # watch live log
+ps aux | grep train_agent   # confirm still running
+
+To stop it: kill 1437
 
 ```bash
 docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --ipc=host --shm-size=16g hansen1416/hhi-protomotions-isaacgym:v1 /bin/bash

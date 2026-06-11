@@ -416,6 +416,11 @@ class BaseAgent:
             dtype = env_tensor.dtype
             self.experience_buffer.register_key(key, shape=shape[1:], dtype=dtype)
 
+        # Ensure all pending GPU ops (e.g. IsaacGym cross-GPU tensor copies) are
+        # complete before the first model forward, avoiding non-deterministic NaN
+        # on non-zero ranks when graphics_device_id=0 is shared across all ranks.
+        torch.cuda.synchronize()
+
         # Auto-register model output keys by running one forward pass
         with torch.no_grad():
             output_td = self.model(obs_td)
