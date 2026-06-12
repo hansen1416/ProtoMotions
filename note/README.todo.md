@@ -1,183 +1,145 @@
-1. double check scripts/export_humos_to_amass_npz.py, I remember HUMOS performed better on smplx not smpl.
-2. do visualize on multiple humanoid/moition in same window
-    1. need to let protomotions load multiple smpl robot
-    2. display multiple motion in same window
+# 3-Month Research Plan
+**Start:** 2026-06-12  **Deadline:** ~2026-09-12 (ICRA 2027 submission)
 
+---
 
-- multiple humanoid / robot loading
-- multiple motions, one motion per robot / env
-- env_id → gender/beta_key
-    motion_id → gender/beta_key
-    sample real AMP demo from the same gender/beta_key as the simulated humanoid
-    ensure: fake motion from body shape m
-            vs.
-            real motion from the same body shape m
+## Paper Narrative
 
-    MotionLib metadata:
-        motion_id -> gender, beta_key, beta vector
+> "We present the first physics-based motion imitation policy that generalizes across 128 SMPL body shapes. Physics-derived morphology features (mass, COM, limb lengths) unlock shape-adaptive physical control, particularly for floor-contact motions (crawl, kneel, squat) — the primary failure mode of raw shape-parameter conditioning. The policy develops an internal representation of body physics correlated with physical properties it was never explicitly trained to predict."
 
-    Env metadata:
-        env_id -> humanoid asset, gender, beta_key, beta vector
+---
 
-    Sampler:
-        sample_motion(env_id) only from matching shape bucket
+## Current State (2026-06-12)
 
-    AMP demo sampler:
-        sample_real_amp(env_id) only from matching shape bucket
+| Item | Status |
+|---|---|
+| MLP baseline `hhi_1024_motion` | Converged ~epoch 12000, reward ~0.84 |
+| FiLM `hhi_film_1024_motion` | Failed (~0.72), dropped |
+| ShapeEmbed | Empirically identical to concat, dropped |
+| Failed motion analysis | Done — crawl/kneel/squat/backward are the hard class (65 clips ≥8 betas failing) |
+| Data pipeline | Complete — 131,072 motions, 16 local shards |
+| Evaluator infrastructure | Ready (`evaluate_hhi_faults.py`) |
+| Held-out betas (interpolation/extrapolation) | **Not yet generated** |
 
-- actor / critic observation expansion with gender + betas
-- discriminator observation expansion or conditioning
-- FiLM-conditioned MLP, where FiLM takes shape input
-- shape-conditioned actor / critic / discriminator path
+---
 
-| Old `hhi` logic               | ProtoMotions3 target                              |
-| ----------------------------- | ------------------------------------------------- |
-| multiple humanoid XML loading | robot config + simulator asset creation           |
-| `env_id_beta_keys_map`        | environment context / control component state     |
-| HUMOS MotionLib metadata      | extend `protomotions/components/motion_lib.py`    |
-| actor obs + betas             | observation component                             |
-| critic FiLM                   | PPO / AMP model config + custom module            |
-| discriminator FiLM            | AMP discriminator custom module                   |
-| AMP demo shape matching       | AMP agent / replay / demo batch assembly          |
-| reset to target motion frame  | mimic control component                           |
-| PD scaling / residual PD      | robot config control + simulator action mapping   |
-| jitter penalties              | reward component, e.g. smoothness / power penalty |
+## What to Drop
 
-1. Data conversion
-   HUMOS .pt / npz -> ProtoMotions .motion -> packaged MotionLib .pt
+- **FiLM** — failed; literature confirms it's the wrong tool for fixed-topology fixed-D conditioning
+- **ShapeEmbed** — same empirical result as concat; weakens the story
+- **SMPL-X validation** — not blocking for 1024-clip pilot scope
+- **Fine-tuning efficiency (S5)** — low ICRA impact; only if weeks 1–9 finish early
+- **Hardware validation** — out of scope
 
-2. MotionLib extension
-   store:
-       motion_shape: [num_motions, 11]
-       gender
-       beta_key
-       beta_key_motion_id_mapping
+---
 
-3. Multi-shape robot assets
-   load correct SMPL/SMPL-X/MJCF asset per env
-   verify joint limits, mass, inertia, contact geometry, height offset
+## Experiments
 
-4. Env context
-   expose:
-       env_shape
-       env_gender
-       env_beta_key
-       env_motion_id
+### Experiment 1 — Physics Features (highest priority)
+**Goal:** Replace/augment `morphology_obs` with physics-derived features extracted from SMPL XMLs.
 
-5. Observation component
-   append or separately route morphology:
-       obs = [base_obs, task_obs, gender, betas]
+Features to extract (implement `scripts/extract_smpl_physics_features.py`):
+- Total mass, COM height at T-pose
+- Per-limb lengths: upper arm, forearm, thigh, shin, torso height, shoulder width
+- ~15–20 features, z-scored across the 128 training bodies
 
-6. Model
-   actor: FiLM or concat
-   critic: FiLM or concat
-   discriminator: FiLM strongly recommended
-   disc critic: probably also shape-conditioned
+**Why:** The failed motions (crawl/kneel/squat) fail because the policy doesn't know COM height or mass — raw betas are opaque. Physics features give the policy directly actionable information. Also the strongest interpretability story for the paper.
 
-7. AMP/demo sampling
-   fake AMP obs uses env shape
-   real AMP obs must be sampled from same shape bucket
+**Training run:** `hhi_physics_feat_1024` — MLP + physics features, 1024 clips, 4× A40. Start from scratch (cleaner science than fine-tuning).
 
-8. Reset logic
-   reset humanoid to reference motion frame from matching shape
+**Decision gate:** If floor-contact success improves meaningfully (≥10 pp on crawl/kneel subset), this becomes the main result. Even a small gain is publishable because the analysis tells the story.
 
-9. Reward/termination
-   tracking reward uses shape-matched reference
-   contact reward uses correct body/contact indices
-   power/smoothness penalties retained
+---
 
-10. Checkpoint/normalization
-   old running mean/std cannot be blindly reused after obs shape changes
-   load compatible layers only
-   reinitialize new FiLM/shape branches
+### Experiment 2 — Adaptive Sampler for Hard Clips
+**Goal:** Aggressively upweight the 65 identified hard clips (crawl/kneel/squat) during training.
 
-11. Validation
-   single shape + single motion
-   multi shape + single motion
-   single shape + many motions
-   multi shape + many motions
-   AMP real/fake shape-match unit test
+- Increase `failure_discount` magnitude for the identified hard clip IDs
+- For floor-contact clips: floor-aware RSI — initialize from a mid-clip frame instead of always standing
+- Can be baked into Experiment 1's run (same training, additional config)
 
+**Reference:** Hard clip list at `results/hhi_1024_motion/persistent_failures.txt`. Hard clip category: ≥8 betas failing at epoch 12000.
 
------
+---
 
-~~make sure the gender-beta consistentcy, varify it in training, testing, inference~~
+### Experiment 3 — Evaluations (no new training, runs in parallel)
 
-study the humannoid template properly!!
+All use existing checkpoints from `hhi_1024_motion` and the new `hhi_physics_feat_1024`.
 
-We can either tune the humanoid to align with SMPL joints exactly, or we can develop a script that perform the target motion, and record its data
+| Analysis | Output | Tool |
+|---|---|---|
+| Per-shape eval on 128 training betas | CSV → per-shape degradation curve | `evaluate_hhi_faults.py` |
+| Held-out interpolation (16–32 new betas, [-3,3]) | Generalization plot vs MLP | Same evaluator |
+| Held-out extrapolation (16 betas, [-5,5]) | Degradation slope | Same evaluator |
+| Torque + energy per body shape (same clip) | "Heavier → higher torques" figure | Custom rollout logger |
+| COM trajectory + support polygon | Stability analysis figure | Rollout data |
+| Stride length vs body height | Implicit retargeting figure | Root position trajectory |
+| Embodiment encoding probe | "Policy learned physics" figure | Linear ridge probe on activations |
+| Motion category × shape heatmap | 2D failure structure figure | Rollout + `motion_id_text.json` |
+| Failure mode taxonomy | Fall / COM drift / joint-limit breakdown | Rollout data |
 
+---
 
-Start generating the held-out betas via HUMOS whenever you have a spare hour — that's the one thing you can do now without   waiting for checkpoints. We should use the same sample logic, same 1024 motions.
+### Experiment 4 — Full-motion Scale-up (conditional)
+**Trigger:** Only if Experiment 1 shows clear gains on hard clips.  
+**Run:** All 20,951 valid motions from `hhi/data-processing/valid_motions.txt`, same physics-feat config.  
+**Value:** "Scales to full AMASS" — strengthens the system contribution.
 
+---
 
-claude --resume 72bc247f-b1a6-4937-ac71-73d04ce6f8bb
+## Month-by-Month Timeline
 
+### Month 1 — New Training + Setup (June 12 – July 12)
 
-Based on our discussion, the five action plans are:
+| Week | Tasks |
+|---|---|
+| **1** | Extract physics features from SMPL XMLs. Augment `morphology_obs`. Run evaluator on `hhi_1024_motion` → baseline per-shape CSV. Generate held-out betas via HUMOS. |
+| **2** | Launch `hhi_physics_feat_1024`. Implement floor-aware RSI for floor-contact clips. |
+| **3** | Monitor training; compare reward curves on crawl/kneel subset specifically. |
+| **4** | Run per-shape eval on physics-feat checkpoint. Start rollout logging infrastructure for torque/energy/contact. |
 
-1. **Replace FiLM with a simpler shape-conditioning mechanism**
+### Month 2 — Analysis Sprint (July 12 – Aug 12)
 
-   * Baseline: concatenate `[gender, betas]` directly into the observation.
-   * Optionally pass them through a small MLP first to create a compact shape embedding.
-   * Goal: determine whether FiLM is the scaling bottleneck when moving from 1 motion to thousands of motions.
+| Week | Tasks |
+|---|---|
+| **5** | Held-out generalization eval (interpolation + extrapolation) on both checkpoints. |
+| **6** | Torque/energy analysis: same clip × all 128 shapes. COM trajectory + stability. |
+| **7** | Embodiment encoding probe: policy layer activations → linear regression → {mass, COM, limb lengths}. **Key paper figure.** |
+| **8** | Motion category × shape heatmap. Stride/step analysis. Failure mode taxonomy. |
 
-2. **Profile CPU utilization**
+### Month 3 — Paper (Aug 12 – Sep 12)
 
-   * Use `htop` during training.
-   * Check:
+| Week | Tasks |
+|---|---|
+| **9** | Full-motion scale-up run if warranted. Begin paper draft (method section). |
+| **10** | Results section + all figures. Qualitative video: side-by-side multi-shape visualization. |
+| **11** | Introduction, related work, conclusion. Internal review. |
+| **12** | Buffer: polish, video narration, submission. |
 
-     * Overall CPU usage
-     * Per-core utilization
-     * RAM usage
-     * Swap usage
-   * Goal: determine whether environment orchestration is CPU-bound.
+---
 
-3. **Profile the simulation pipeline**
+## Paper Figures (target list)
 
-   * Add timing around:
+1. System diagram: HUMOS → motionlib → multi-shape sim → physics-feat policy
+2. Per-shape tracking performance across 128 training betas (bar/violin plot)
+3. Held-out generalization: body distance vs beta L2 norm (interpolation + extrapolation curves)
+4. Torque/energy vs body shape for a fixed locomotion clip
+5. **Embodiment encoding probe:** probe R² per physical property — the "AI learned physics" figure
+6. Motion category × shape extremity heatmap (crawl/kneel hardest, locomotion robust)
+7. Failure mode taxonomy across shape extremity buckets
+8. Qualitative: same motion clip across 8 body shapes side-by-side (also video)
+9. Ablation: MLP vs physics-feat on overall and floor-contact subsets
 
-     * Physics stepping
-     * Observation generation
-     * Motion sampling
-     * Reward computation
-     * Policy inference
-   * Goal: identify where training time is actually spent.
+---
 
-4. **Tune the environment count vs batch size trade-off**
+## Key Files and References
 
-   * Experiment with:
-
-     * Fewer environments + larger batch size
-     * More environments + smaller batch size
-   * Since your A40 has substantial memory available, increasing batch size may improve throughput while reducing environment-management overhead.
-   * Goal: maximize samples/sec rather than env count.
-
-5. **Add physics-aware shape descriptors**
-
-   * Instead of providing only gender and betas, derive physically meaningful features:
-
-     * Total body mass
-     * Per-limb mass
-     * Center of mass
-     * Limb lengths
-     * Inertia-related quantities
-     * Mass distribution statistics
-   * Goal: provide the policy with features that are closer to the actual dynamics changes caused by body shape.
-
-### Priority Order
-
-I would execute them in this order:
-
-1. Replace FiLM → simple shape embedding.
-2. CPU profiling (`htop`).
-3. Simulation profiling (timers).
-4. Environment/batch-size tuning.
-5. Physics-aware shape features.
-
-The first four are primarily **engineering and diagnosis**. The fifth is a **research idea** that could potentially improve multi-shape generalization beyond the current baseline.
-
-
-
-7. Wandb timing metrics — if training is logging perf/rollout_time, perf/opt_time, perf/fps etc., share those values from
-  the first 10-20 steps.
+| Item | Path |
+|---|---|
+| Failed clip analysis | `note/README.failed-motions.md` |
+| Ranked failure list | `results/hhi_1024_motion/persistent_failures.txt` |
+| Full research plan (literature) | `note/deep-research-report.md` |
+| Paper outline | `note/README.paper.md` |
+| HUMOS data notes | `note/README.humos-data.md` |
+| Clip text annotations | `/home/hlz/repos/hhi/data-processing/motion_id_text.json` |
+| Valid motions list | `/home/hlz/repos/hhi/data-processing/valid_motions.txt` |
