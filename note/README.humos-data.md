@@ -48,6 +48,53 @@ Note: `infer_with_offset.py` uses 3 genders (`[-1, 0, 1]`) with 64 betas → 192
 
 ---
 
+## ProtoMotions "99% Success on Entire AMASS" — Why It's Misleading
+
+ProtoMotions claims 99% imitation learning success on the entire AMASS dataset. This is questionable for several reasons.
+
+### 1. "Success" = didn't fall, not faithful reproduction
+
+In `protomotions/agents/evaluators/base_evaluator.py`:
+```python
+success_rate = 1.0 - self._motion_failed.float().mean().item()
+```
+A motion is only marked as "failed" if the physics rollout terminates early (character falls over). A character that hovers in a half-crouch through a "sit in chair" clip without falling is counted as a **success**, even though no chair exists in the simulation.
+
+### 2. They don't filter semantically invalid motions
+
+ProtoMotions' `data/scripts/motion_filter.py` only applies physics-quality filters (body parts below ground, unrealistically high velocities). It does **not** filter motions that require objects the simulator never provides.
+
+### 3. 1,508 motions in HumanML3D require external objects
+
+From `/home/hlz/repos/hhi/data-processing/invalid_category_counts.txt` (predecessor project analysis):
+
+| Category | Count |
+|---|---|
+| `seat_support` (chairs, benches) | 657 |
+| `terrain_or_structure` | 198 |
+| `other_person_or_animal` | 187 |
+| `table_shelf_surface` | 174 |
+| `wall_door_window` | 111 |
+| `obstacle_or_gap` | 83 |
+| `external_support` | 53 |
+| `forceful_object_interaction` | 32 |
+| `environment_medium` (water, etc.) | 13 |
+| **Total** | **1,508 of 22,459 (6.7%)** |
+
+These motions are physically impossible to reproduce faithfully in a plain flat-ground simulation. The character will approximate the pose without the object — and as long as it doesn't fall, ProtoMotions counts it as a success.
+
+### Summary
+
+| Claim | Reality |
+|---|---|
+| "Entire AMASS" | Likely HumanML3D subset (~22K motions); ProtoMotions also applies velocity/height quality filters |
+| "99% success" | 99% of rollouts don't fall over — not 99% faithful motion reproduction |
+| Object-interaction motions | Not filtered; character improvises and passes the fall-detection threshold |
+
+The filtering in `/home/hlz/repos/hhi/data-processing/` (valid_motions.txt / invalid_motions.txt) is the more principled approach: it excludes motions that are semantically impossible to reproduce in a flat-ground, object-free simulation.
+
+---
+
 ## Data Pipeline Summary
 
 ```
