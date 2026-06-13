@@ -143,3 +143,27 @@ All use existing checkpoints from `hhi_1024_motion` and the new `hhi_physics_fea
 | HUMOS data notes | `note/README.humos-data.md` |
 | Clip text annotations | `/home/hlz/repos/hhi/data-processing/motion_id_text.json` |
 | Valid motions list | `/home/hlz/repos/hhi/data-processing/valid_motions.txt` |
+
+------
+
+The file is 10 GB. That's because 192 clips × 128 betas × 200 frames × all tensor fields. If you want a tighter set, you can
+  rerun with --min-avg-betas 8.0 to get the 65 most severe clips (~3.4 GB), or use --clip-indices for an exact hand-picked
+  list. The threshold 5.0 gives you a broader hard-clip curriculum; 8.0 gives you the truly broken ones.
+
+  Ready to use immediately:
+
+  # Fine-tune from the converged checkpoint, sampling only from hard clips
+  python protomotions/train_agent.py \
+      --robot-name smpl_mor \
+      --simulator isaacgym \
+      --experiment-path examples/experiments/mimic/mlp.py \
+      --experiment-name hhi_failed_finetune \
+      --motion-file /home/hlz/datasets/humos_proto/failed_clips.pt \
+      --num-envs 4096 \
+      --batch-size 16384 \
+      --overrides agent.config.init_from=results/hhi_1024_motion/last.ckpt
+
+  Before launching the actual training run though Jump to bottom (ctrl+End) ↓  physics features to morphology_obs — otherwise this is just fine-tuning on the hard clips with the same input representation, which won't tell us much. Do you want to
+  tackle the physics features extraction from the SMPL XMLs next?
+
+  claude --resume 8e2b4dfa-0c8c-4a9f-8ce8-7f78c80e21bc

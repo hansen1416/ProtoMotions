@@ -261,6 +261,14 @@ python protomotions/train_agent.py \
     --num-envs 8 \
     --batch-size 16
 
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_physics.py \
+    --experiment-name hhi_physics_feat_1024 \
+    --motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --num-envs 8 \
+    --batch-size 16
 ------
 
 ## inference motion
@@ -273,7 +281,7 @@ python protomotions/inference_agent_mor.py \
     --num-envs 16
 
 python protomotions/inference_agent_mor.py \
-      --checkpoint results/hhi_1024_motion/score_based.ckpt \
+      --checkpoint results/hhi_se_1024_motion/score_based.ckpt \
       --simulator isaacgym \
       --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0001_offset.pt \
       --compact-spawn-spacing 1.5 \
