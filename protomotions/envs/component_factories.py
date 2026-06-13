@@ -1278,6 +1278,24 @@ def morphology_obs_factory() -> MdpComponent:
         dynamic_vars={"morphology": EnvContext.env_morphology},
     )
 
+
+def physics_obs_factory() -> MdpComponent:
+    """Factory for physics-feature observation (z-scored segment lengths, mass, widths).
+
+    Passes through env_physics_features from context — shape [num_envs, 15].
+    Only valid when using smpl_mor multi-shape assets with physics_features.pt present.
+
+    Returns:
+        MdpComponent configured for physics feature observations.
+    """
+    from protomotions.envs.obs.humanoid import compute_physics_obs
+
+    return MdpComponent(
+        compute_func=compute_physics_obs,
+        dynamic_vars={"physics_features": EnvContext.env_physics_features},
+    )
+
+
 __all__ = [
     # Observation factories
     "max_coords_obs",
@@ -1289,6 +1307,8 @@ __all__ = [
     "mimic_target_poses_future_rel",
     "mimic_target_poses_reduced_coords",
     "mimic_deploy_target_poses",
+    "morphology_obs_factory",
+    "physics_obs_factory",
     # Reward factories
     "action_smoothness",
     "gt_rew",

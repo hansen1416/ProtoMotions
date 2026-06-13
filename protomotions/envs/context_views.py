@@ -533,6 +533,8 @@ class EnvContext:
 
     # Morphology (optional — only present with smpl_mor multi-shape assets)
     env_morphology: Optional[Tensor] = FieldPath()
+    # Physics features (optional — only present with smpl_mor multi-shape assets)
+    env_physics_features: Optional[Tensor] = FieldPath()
 
     # Control-specific contexts (populated by controllers via populate_context)
     mimic: Optional[MimicContext] = NestedField(MimicContext)
@@ -557,6 +559,7 @@ class EnvContext:
         prev_contact_force_magnitudes: Optional[Tensor] = None,
         contact_body_ids: Optional[Tensor] = None,
         env_morphology: Optional[Tensor] = None,
+        env_physics_features: Optional[Tensor] = None,
         mimic: Optional[MimicContext] = None,
         masked_mimic: Optional[MaskedMimicContext] = None,
         steering: Optional[SteeringContext] = None,
@@ -609,6 +612,7 @@ class EnvContext:
         self.contact_body_ids = contact_body_ids
 
         self.env_morphology = env_morphology
+        self.env_physics_features = env_physics_features
 
         # Control-specific views
         self.mimic = mimic

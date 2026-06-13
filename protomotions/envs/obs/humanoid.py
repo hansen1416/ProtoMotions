@@ -351,3 +351,8 @@ def compute_humanoid_max_coords_observations(
 def compute_morphology_obs(morphology: torch.Tensor) -> torch.Tensor:
     """Pass-through morphology observation [gender_id, betas] — shape [num_envs, 11]."""
     return morphology
+
+
+def compute_physics_obs(physics_features: torch.Tensor) -> torch.Tensor:
+    """Pass-through physics features observation — shape [num_envs, 15] (z-scored)."""
+    return physics_features

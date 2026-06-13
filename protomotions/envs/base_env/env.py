@@ -1017,6 +1017,7 @@ class BaseEnv:
             contact_body_ids=self.contact_body_ids,
 
             env_morphology=self.simulator.env_morphology if getattr(self.simulator, "morphology", False) else None,
+            env_physics_features=self.simulator.env_physics_features if getattr(self.simulator, "morphology", False) else None,
         )
 
         # Controllers populate their task-specific views

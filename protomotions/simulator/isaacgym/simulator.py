@@ -588,6 +588,9 @@ class IsaacGymSimulator(Simulator):
             dim=-1,
         )
 
+        # env_id -> physics features tensor, shape [num_envs, 15] (z-scored)
+        self.env_physics_features = self._build_physics_features()
+
         self.env_root_height = torch.tensor(
             [
                 asset_info["root_height"]
@@ -606,6 +609,43 @@ class IsaacGymSimulator(Simulator):
             f"Assigned {self.num_envs} envs over {num_assets} morphology assets "
             f"using {assignment_mode}"
         )
+
+    def _build_physics_features(self) -> torch.Tensor:
+        """Load precomputed z-scored physics features for each env's asset.
+
+        Returns tensor of shape [num_envs, 15]. Falls back to zeros if the
+        physics_features.pt file is not found next to assets.yaml.
+        """
+        import os
+        from pathlib import Path
+
+        asset_root = self.robot_config.asset.asset_root
+        asset_info_file = self.robot_config.asset.asset_info_file
+        assets_dir = Path(os.path.join(asset_root, os.path.dirname(asset_info_file)))
+        feat_path = assets_dir / "physics_features.pt"
+
+        if not feat_path.exists():
+            print(
+                f"[Warning] physics_features.pt not found at {feat_path}. "
+                "Run tools/extract_smpl_physics_features.py first. "
+                "Falling back to zeros."
+            )
+            return torch.zeros(self.num_envs, 15, device=self.device)
+
+        data = torch.load(str(feat_path), weights_only=False)
+        feat_map = data["features"]  # dict[asset_id -> tensor(15)]
+
+        rows = []
+        for asset_info in self.env_id_to_asset_info:
+            asset_id = asset_info["asset_id"]
+            if asset_id not in feat_map:
+                raise KeyError(
+                    f"asset_id '{asset_id}' not found in {feat_path}. "
+                    "Re-run tools/extract_smpl_physics_features.py."
+                )
+            rows.append(feat_map[asset_id])
+
+        return torch.stack(rows, dim=0).to(device=self.device, dtype=torch.float32)
 
     def _validate_humanoid_asset_topology(self, humanoid_asset, asset_id: str):
         num_bodies = self._gym.get_asset_rigid_body_count(humanoid_asset)
