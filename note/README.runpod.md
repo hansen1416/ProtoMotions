@@ -1,22 +1,30 @@
 cd /workspace && git clone -b feature/hhi https://github.com/hansen1416/ProtoMotions.git && cd ProtoMotions
 
+pip install gdown && apt update && apt install curl zip -y && curl https://rclone.org/install.sh | bash
+
 <!-- humos_128_offset.pt -->
-pip install gdown && gdown 1iO5sTFrY41Lj2UQwVR_g5yU_t6Wgw5-K
+gdown 1iO5sTFrY41Lj2UQwVR_g5yU_t6Wgw5-K
+
+<!-- 1024-raw.zip -->
+gdown 14IYbHhMxKARQ9nnEitJXyHwGGP0SFKHG
 
 <!-- download data from R2 -->
-<!-- todo need to update rclone first -->
-apt update && apt install curl zip -y
-
-curl https://rclone.org/install.sh | bash
-
 rclone config
 
 4, 7
 
 https://a17f581e2d142fd42fd7169cd4c48c8c.r2.cloudflarestorage.com
 
+<!-- copy 1024 motions -->
 rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
   --transfers=4 \
+  --multi-thread-streams=16 \
+  --multi-thread-chunk-size=128M \
+  --progress
+
+<!-- copy only failed motions -->
+rclone copy r2:proto-data/difficult-motions/ /workspace/difficult-motions/ \
+  --transfers=2 \
   --multi-thread-streams=16 \
   --multi-thread-chunk-size=128M \
   --progress
@@ -69,6 +77,24 @@ python -u protomotions/train_agent.py \
     --wandb-entity yugoamaryl \
     --wandb-group hhi_1024_motion
 ```
+
+```bash
+nohup python -u protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_1024_motion_tune \
+    --motion-file /workspace/difficult-motions/failed_clips.pt \
+    --checkpoint results/hhi_1024_motion/last.ckpt \
+    --num-envs 8192 \
+    --batch-size 32768 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_1024_motion_tune > /tmp/train_hhi_tune.log 2>&1 &
+```
+
+------
 
 ```bash
 python -u protomotions/train_agent.py \

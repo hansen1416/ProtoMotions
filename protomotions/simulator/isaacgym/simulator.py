@@ -624,7 +624,7 @@ class IsaacGymSimulator(Simulator):
         assets_dir = Path(os.path.join(asset_root, os.path.dirname(asset_info_file)))
         feat_path = assets_dir / "physics_features.pt"
 
-        if not feat_path.exists():
+        if not feat_path.is_file():
             print(
                 f"[Warning] physics_features.pt not found at {feat_path}. "
                 "Run tools/extract_smpl_physics_features.py first. "

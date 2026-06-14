@@ -72,6 +72,16 @@ rclone copy /home/hlz/datasets/humos_proto/merged4/ \
     --low-level-retries=20 \
     --progress
 
+rclone copy /home/hlz/datasets/humos_proto/failed \
+    r2:proto-data/difficult-motions/ \
+    --progress \
+    --transfers=2 \
+    --s3-upload-concurrency=4 \
+    --s3-chunk-size=64M \
+    --retries=10 \
+    --retries-sleep=30s \
+    --low-level-retries=20
+
 
 ## Download from R2
 
