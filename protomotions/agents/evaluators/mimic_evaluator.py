@@ -79,17 +79,30 @@ class MimicEvaluator(BaseEvaluator):
 
         return metrics
 
+    def _sample_one_per_shape(self) -> torch.Tensor:
+        """Pick one random motion per unique gender-beta shape. Returns sorted global IDs."""
+        asset_to_motion_ids = self.motion_lib.build_asset_id_to_motion_ids()
+        selected = []
+        for motion_ids in asset_to_motion_ids.values():
+            idx = torch.randint(len(motion_ids), (1,), device=motion_ids.device).item()
+            selected.append(motion_ids[idx])
+        return torch.stack(selected).sort().values
+
     def initialize_eval(self) -> Dict:
         """Initialize evaluation tracking and cache env state for restoration."""
         total_motions = self.motion_lib.num_motions()
 
         # Subsample motions to cap GPU memory usage from MotionMetrics tensors.
-        max_eval = self.config.max_eval_motions
-        if max_eval is not None and total_motions > max_eval:
-            perm = torch.randperm(total_motions, device=self.device)[:max_eval].sort().values
-            self._eval_motion_subset = perm
+        if self.config.eval_one_per_shape and self.motion_lib.has_morphology_metadata():
+            # One random motion per gender-beta shape — covers all shapes with minimal compute.
+            self._eval_motion_subset = self._sample_one_per_shape()
         else:
-            self._eval_motion_subset = None
+            max_eval = self.config.max_eval_motions
+            if max_eval is not None and total_motions > max_eval:
+                perm = torch.randperm(total_motions, device=self.device)[:max_eval].sort().values
+                self._eval_motion_subset = perm
+            else:
+                self._eval_motion_subset = None
 
         if self._eval_motion_subset is not None:
             eval_motion_ids = self._eval_motion_subset

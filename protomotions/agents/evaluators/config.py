@@ -69,9 +69,20 @@ class MimicEvaluatorConfig(EvaluatorConfig):
             "help": (
                 "Cap the number of motions evaluated per eval run. "
                 "None = evaluate all motions. "
+                "Ignored when eval_one_per_shape=True. "
                 "Reduces GPU memory when the motion library is large."
             ),
             "min": 1,
+        },
+    )
+    eval_one_per_shape: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "When True and the motion library has morphology metadata, "
+                "randomly pick exactly one motion per unique gender-beta shape "
+                "for each evaluation run. Overrides max_eval_motions."
+            )
         },
     )
     save_predicted_motion_lib_every: Optional[int] = field(
