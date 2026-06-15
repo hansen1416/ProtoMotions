@@ -580,6 +580,108 @@ python protomotions/evaluate_hhi_faults.py \
 
 ------
 
+## Evaluator Sampling Strategy — `eval_one_shape_per_motion`
+
+### Problem
+
+When training switched from 4 GPUs × 4096 envs to 1 GPU × 8192 envs, the periodic
+evaluation loop became stuck with the GPU at 100% utilisation. The evaluator
+iterates every motion in the library across all envs, so with `~131k` total motions
+(1024 clips × 128 body shapes) the evaluation ran for hours and never completed.
+
+### Commit history
+
+| Commit | Change | Outcome |
+|---|---|---|
+| `42b48cf` | Added `max_eval_motions=2000` — cap the number of randomly sampled motions per eval run | Limits GPU memory and eval duration, but samples a random subset each time, so not all clips are covered |
+| `a08ccd7` | Added `eval_one_per_shape` — sample 1 clip per body shape (128 shapes → 128 eval motions) | Wrong direction: covers all shapes but misses most clips |
+| `8e74268` | Replaced with `eval_one_shape_per_motion` — sample 1 shape per clip (N clips → N eval motions) | Correct: covers every unique clip, each paired with one randomly drawn body shape |
+
+### Final approach — `eval_one_shape_per_motion=True` (default)
+
+**Goal:** evaluate every unique motion clip, but pair each clip with exactly one
+randomly sampled gender-beta body shape per eval run. This gives full clip coverage
+while reducing the total evaluation set from `num_clips × num_shapes` to `num_clips`.
+
+**Code changes**
+
+`protomotions/agents/evaluators/config.py` — two fields on `MimicEvaluatorConfig`:
+
+```python
+max_eval_motions: Optional[int] = field(
+    default=2000,
+    metadata={
+        "help": (
+            "Cap the number of motions evaluated per eval run. "
+            "None = evaluate all motions. "
+            "Ignored when eval_one_shape_per_motion=True. "
+            ...
+        ),
+    },
+)
+eval_one_shape_per_motion: bool = field(
+    default=True,
+    metadata={
+        "help": (
+            "When True and the motion library has morphology metadata, "
+            "cover every unique motion clip but pair each with one randomly "
+            "sampled gender-beta shape per evaluation run. "
+            "Overrides max_eval_motions."
+        )
+    },
+)
+```
+
+`protomotions/agents/evaluators/mimic_evaluator.py`:
+
+```python
+def _sample_one_shape_per_motion(self) -> torch.Tensor:
+    asset_to_motion_ids = self.motion_lib.build_asset_id_to_motion_ids()
+    shape_lists = list(asset_to_motion_ids.values())  # each: [num_clips]
+
+    num_shapes = len(shape_lists)
+    num_clips = shape_lists[0].shape[0]
+
+    # [num_shapes, num_clips] — row k = all motion IDs for shape k
+    all_ids = torch.stack(shape_lists, dim=0)
+
+    # For each clip position, draw one random shape index
+    shape_picks = torch.randint(num_shapes, (num_clips,), device=all_ids.device)
+    clip_idx = torch.arange(num_clips, device=all_ids.device)
+
+    selected = all_ids[shape_picks, clip_idx]
+    return selected.sort().values
+```
+
+`initialize_eval()` branches on the new flag before falling back to `max_eval_motions`:
+
+```python
+if self.config.eval_one_shape_per_motion and self.motion_lib.has_morphology_metadata():
+    self._eval_motion_subset = self._sample_one_shape_per_motion()
+else:
+    max_eval = self.config.max_eval_motions
+    if max_eval is not None and total_motions > max_eval:
+        perm = torch.randperm(total_motions, device=self.device)[:max_eval].sort().values
+        self._eval_motion_subset = perm
+    else:
+        self._eval_motion_subset = None
+```
+
+**Key assumption:** `build_asset_id_to_motion_ids()` accumulates motion IDs in the
+order they appear in the flat `motion_asset_ids` tuple. For HUMOS (all 1024 clips
+retargeted to all 128 body shapes in a consistent order), position `i` in every
+shape's list refers to the same underlying motion clip. This makes `all_ids[k, i]`
+the global motion ID for "clip i under shape k", so the column-wise random selection
+correctly picks one shape per clip.
+
+**Result:** with 1024 clips the eval set is 1024 motions — well within the 8192-env
+budget — and each eval run samples a fresh random shape assignment, giving uniform
+coverage of the shape space over many eval cycles. Because the eval set is bounded
+to `num_clips`, MotionMetrics tensors are small enough to keep on GPU (no CPU
+offload needed).
+
+------
+
 ## `max_motions` — inference with large motion files
 
 **Problem:** `humos_131072_0000_offset.pt` is 3.6 GB. Loading it during inference with 16 envs exceeds GPU memory.

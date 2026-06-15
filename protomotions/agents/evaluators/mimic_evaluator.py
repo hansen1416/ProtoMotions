@@ -79,23 +79,37 @@ class MimicEvaluator(BaseEvaluator):
 
         return metrics
 
-    def _sample_one_per_shape(self) -> torch.Tensor:
-        """Pick one random motion per unique gender-beta shape. Returns sorted global IDs."""
+    def _sample_one_shape_per_motion(self) -> torch.Tensor:
+        """For every unique clip, pick one random gender-beta shape.
+
+        Assumes all shapes have the same clips in the same positional order,
+        which holds for fully-retargeted datasets (e.g. HUMOS). Returns sorted
+        global motion IDs — one per unique clip.
+        """
         asset_to_motion_ids = self.motion_lib.build_asset_id_to_motion_ids()
-        selected = []
-        for motion_ids in asset_to_motion_ids.values():
-            idx = torch.randint(len(motion_ids), (1,), device=motion_ids.device).item()
-            selected.append(motion_ids[idx])
-        return torch.stack(selected).sort().values
+        shape_lists = list(asset_to_motion_ids.values())  # each: [num_clips]
+
+        num_shapes = len(shape_lists)
+        num_clips = shape_lists[0].shape[0]
+
+        # [num_shapes, num_clips]
+        all_ids = torch.stack(shape_lists, dim=0)
+
+        # For each clip position, draw one random shape
+        shape_picks = torch.randint(num_shapes, (num_clips,), device=all_ids.device)
+        clip_idx = torch.arange(num_clips, device=all_ids.device)
+
+        selected = all_ids[shape_picks, clip_idx]
+        return selected.sort().values
 
     def initialize_eval(self) -> Dict:
         """Initialize evaluation tracking and cache env state for restoration."""
         total_motions = self.motion_lib.num_motions()
 
         # Subsample motions to cap GPU memory usage from MotionMetrics tensors.
-        if self.config.eval_one_per_shape and self.motion_lib.has_morphology_metadata():
-            # One random motion per gender-beta shape — covers all shapes with minimal compute.
-            self._eval_motion_subset = self._sample_one_per_shape()
+        if self.config.eval_one_shape_per_motion and self.motion_lib.has_morphology_metadata():
+            # Cover every clip with one random body shape instead of all shapes.
+            self._eval_motion_subset = self._sample_one_shape_per_motion()
         else:
             max_eval = self.config.max_eval_motions
             if max_eval is not None and total_motions > max_eval:
@@ -121,9 +135,8 @@ class MimicEvaluator(BaseEvaluator):
         self._cached_motion_ids = self.motion_manager.motion_ids.clone()
         self._cached_motion_times = self.motion_manager.motion_times.clone()
 
-        # Store metrics on CPU to avoid exhausting GPU memory for large motion sets.
         return self._create_metrics(
-            num_motions, motion_num_frames, self.config.max_eval_steps, device="cpu"
+            num_motions, motion_num_frames, self.config.max_eval_steps
         )
 
     def _save_failed_motions(self, failed_motions: list, epoch: int) -> None:
