@@ -682,6 +682,75 @@ offload needed).
 
 ------
 
+## Clip-level curriculum propagation
+
+### Finding
+
+All three pilot runs (mlp, shape_embed, physics_feat) showed virtually identical
+convergence curves over 1d18h of training. Analysis of the per-epoch failure files
+revealed that only **3 global motion IDs** were commonly failed across all three runs
+at epoch 6800 — out of ~800 failures per run. This exposed two issues:
+
+1. **Cross-run comparison noise**: `eval_one_shape_per_motion` draws a different random
+   shape per clip each eval cycle, so the failure set is largely determined by which
+   shape was sampled, not architecture. Per-epoch failure files from different runs are
+   not directly comparable.
+
+2. **Weight updates don't cross shape boundaries**: Even within a single run, when clip
+   X fails under `shape_A`, only motion ID `(clip_X, shape_A)` gets `weight = 1.0`.
+   The other 127 shape variants of clip X keep their old weights. During training,
+   each env is assigned a fixed shape; `shape_B` envs therefore never increased their
+   sampling of clip X, even though it's equally hard for them.
+
+This is the binding constraint on curriculum quality, not the 13% clip miss rate of
+the old `max_eval_motions=2000` sampling.
+
+### Fix — clip-level weight propagation
+
+**Key insight**: Motion difficulty is intrinsic to the clip (balance demands, speed,
+contact pattern), not the body shape. A clip that fails under one gender-beta is
+expected to be hard for all 128 shapes. Therefore, curriculum updates should be
+applied to **all shape variants** of a failed (or succeeded) clip simultaneously.
+
+**Implementation** in `protomotions/agents/evaluators/mimic_evaluator.py`:
+
+```python
+def _build_clip_expansion_index(self):
+    # Builds [num_shapes, num_clips] matrix and reverse global_id → clip_col map.
+    # Cached after first call. Relies on positional-order assumption (same as
+    # _sample_one_shape_per_motion): all_ids[k, i] = global ID for (clip i, shape k).
+
+def _expand_to_clip_variants(self, motion_ids: torch.Tensor) -> torch.Tensor:
+    # Given a set of global motion IDs, returns IDs for ALL shape variants
+    # of those clips via unique clip-column lookup in all_ids.
+```
+
+In `_update_motion_sampling_weights`, after mapping local → global IDs:
+```python
+# Log unexpanded failures (what actually failed in this eval cycle)
+self._save_failed_motions(global_failed.tolist(), self.agent.current_epoch)
+
+# Then expand to all shape variants before updating weights
+if self.motion_lib.has_morphology_metadata():
+    global_failed = self._expand_to_clip_variants(global_failed)
+    global_success = self._expand_to_clip_variants(global_success)
+```
+
+**Note**: `_save_failed_motions` is called with the pre-expansion IDs (the specific
+`(clip, shape)` pairs that actually failed), so the `failed_motions/` log files
+remain interpretable. The weight update uses the expanded set.
+
+**Effect**: After one eval cycle where clip X fails under `shape_A`:
+- Before: only `(clip_X, shape_A)` gets `weight = 1.0`; the other 127 shape-envs
+  still sample clip X at its old (possibly low) weight
+- After: all 128 shape variants of clip X get `weight = 1.0`; every env immediately
+  increases its sampling of the hard clip
+
+**Condition**: only activated when `motion_lib.has_morphology_metadata()` is True,
+so it's a no-op for single-morphology datasets.
+
+------
+
 ## `max_motions` — inference with large motion files
 
 **Problem:** `humos_131072_0000_offset.pt` is 3.6 GB. Loading it during inference with 16 envs exceeds GPU memory.

@@ -40,6 +40,8 @@ class MimicEvaluator(BaseEvaluator):
 
     def __init__(self, agent: Any, fabric: Any, config: MimicEvaluatorConfig):
         super().__init__(agent, fabric, config)
+        self._clip_expansion_all_ids: Optional[torch.Tensor] = None
+        self._clip_expansion_id_to_col: Optional[torch.Tensor] = None
 
     @property
     def motion_lib(self) -> MotionLib:
@@ -78,6 +80,45 @@ class MimicEvaluator(BaseEvaluator):
         )
 
         return metrics
+
+    def _build_clip_expansion_index(self) -> tuple:
+        """Build (or return cached) tables for expanding motion IDs to all shape variants.
+
+        Returns:
+            all_ids: [num_shapes, num_clips] where all_ids[k, i] = global motion ID
+                     for (clip i, shape k).
+            id_to_clip_col: [total_motions] mapping global motion ID → clip column index.
+        """
+        if self._clip_expansion_all_ids is not None:
+            return self._clip_expansion_all_ids, self._clip_expansion_id_to_col
+
+        asset_to_motion_ids = self.motion_lib.build_asset_id_to_motion_ids()
+        shape_lists = list(asset_to_motion_ids.values())
+        all_ids = torch.stack(shape_lists, dim=0)  # [num_shapes, num_clips]
+
+        num_shapes, num_clips = all_ids.shape
+        total = self.motion_lib.num_motions()
+
+        clip_col = torch.arange(num_clips, device=all_ids.device).unsqueeze(0).expand(num_shapes, -1)
+        id_to_clip_col = torch.zeros(total, dtype=torch.long, device=all_ids.device)
+        id_to_clip_col[all_ids.flatten()] = clip_col.flatten()
+
+        self._clip_expansion_all_ids = all_ids
+        self._clip_expansion_id_to_col = id_to_clip_col
+        return all_ids, id_to_clip_col
+
+    def _expand_to_clip_variants(self, motion_ids: torch.Tensor) -> torch.Tensor:
+        """Expand global motion IDs to ALL shape variants of those clips.
+
+        If motion_ids contains the ID for (clip_3, shape_A), the result includes
+        all num_shapes variants of clip_3 — (clip_3, shape_A), (clip_3, shape_B), …
+        Relies on the same positional-order assumption as _sample_one_shape_per_motion.
+        """
+        if motion_ids.numel() == 0:
+            return motion_ids
+        all_ids, id_to_clip_col = self._build_clip_expansion_index()
+        unique_clip_cols = id_to_clip_col[motion_ids].unique()
+        return all_ids[:, unique_clip_cols].flatten()
 
     def _sample_one_shape_per_motion(self) -> torch.Tensor:
         """For every unique clip, pick one random gender-beta shape.
@@ -162,13 +203,22 @@ class MimicEvaluator(BaseEvaluator):
         local_success = torch.nonzero(~self._motion_failed).flatten()
 
         if subset is not None:
-            global_failed = subset[local_failed].tolist()
-            global_success = subset[local_success].tolist()
+            global_failed = subset[local_failed]
+            global_success = subset[local_success]
         else:
-            global_failed = local_failed.tolist()
-            global_success = local_success.tolist()
+            global_failed = local_failed
+            global_success = local_success
 
-        self._save_failed_motions(global_failed, self.agent.current_epoch)
+        # Log the directly-observed failures (pre-expansion) so the file reflects
+        # which (clip, shape) pairs actually failed in this eval cycle.
+        self._save_failed_motions(global_failed.tolist(), self.agent.current_epoch)
+
+        # Propagate curriculum signal to all shape variants of each evaluated clip.
+        # Clip difficulty is intrinsic to the motion, not the body shape, so a clip
+        # that fails under one gender-beta should be up-weighted for all 128 shapes.
+        if self.motion_lib.has_morphology_metadata():
+            global_failed = self._expand_to_clip_variants(global_failed)
+            global_success = self._expand_to_clip_variants(global_success)
 
         success_discount = math.pow(
             self.config.motion_weights_rules.motion_weights_update_success_discount,
