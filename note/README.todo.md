@@ -146,6 +146,88 @@ All use existing checkpoints from `hhi_1024_motion` and the new `hhi_physics_fea
 
 ------
 
+## Unimplemented Training Improvements (identified 2026-06-15)
+
+These were identified by reviewing all notes after the mlp / shape_embed / physics_feat runs
+converged to the same reward (~0.84) and the fine-tune on 192 hard clips was launched.
+The termination condition is already reference-relative (max joint error > 0.5m), so the
+"absolute root height threshold" concern from README.research-results.md does NOT apply.
+
+---
+
+### 1. Asymmetric critic conditioning (MorFiC-style)
+**Priority: highest — addresses the root cause of the plateau**
+
+The shared critic must predict a single value for states with wildly different expected
+returns across 128 body shapes (26 kg vs 144 kg doing the same squat). This miscalibrates
+advantages for every actor architecture, which explains why concat ≈ shape_embed ≈ physics_feat
+all converge identically — the actor encoding is not the bottleneck, the critic is.
+
+Fix: condition **only the critic** on morphology (separate larger input or FiLM conditioning).
+Actor stays unchanged. MorFiC (arXiv 2603.14554) reports +16–500% on quadrupeds from this
+change alone.
+
+Cost: ~2–3 days. Reference: `README.research-results.md` Q1 and Q5 Direction 1.
+
+---
+
+### 2. Residual PD control
+**Priority: high — directly reduces learning difficulty for the 192 hard clips**
+
+Currently: `q_target = q_neutral + scale * action`
+Policy must output large actions just to push joints from neutral standing toward the
+crawl/kneel/squat reference — the action space search starts far from the target region.
+
+Fix: `q_target = q_ref + scale * action`
+At `action=0` the PD controller already tracks the reference. Policy only learns the
+balance correction delta. PHC validates this on 11,313 AMASS clips. `q_ref` is already
+available as `EnvContext.mimic.ref_state.dof_pos`.
+
+Cost: ~2–3 days. Reference: `README.research-results.md` Q4 Finding 4.
+
+---
+
+### 3. Contact reward for knee and hand contacts
+**Priority: medium-high — direct supervision for the failure class**
+
+`contact_match_rew_factory` already exists but only tracks foot contacts
+(`contact_bodies = ["all_left_foot_bodies", "all_right_foot_bodies"]`). The 192 hard clips
+fail primarily at knee and hand contacts (crawl, kneel). The policy can reach approximate
+joint angles for a kneeling pose without knees touching the floor and still collect tracking
+reward. Adding knee + hand contact matching provides explicit binary floor-contact supervision.
+
+Cost: ~1–2 days. Reference: `README.research-results.md` Q4 Finding 1.
+
+---
+
+### 4. Per-shape running normalization
+**Priority: medium — structural correctness for multi-shape training**
+
+The current shared `RunningMeanStd` accumulates statistics averaged over all 128 body shapes.
+A 26 kg body and a 144 kg body have different root height ranges, joint velocity magnitudes,
+and inertia-related accelerations. The shared normalizer miscalibrates inputs for every shape.
+
+Fix: 128 separate `RunningMeanStd` buffers keyed by `asset_id`, each updated only from envs
+assigned to that shape. SimBa (2024) identifies obs normalization as the most impactful
+obs-processing choice in RL.
+
+Cost: ~1 day. Reference: `README.research-results.md` Q2 Finding 2.
+
+---
+
+### 5. Motion phase variable φ in observation
+**Priority: medium — resolves temporal aliasing in squat/kneel/kneel-up clips**
+
+`φ = frame_idx / total_frames ∈ [0, 1]` added to observation. Without it, the policy cannot
+distinguish the going-down phase from the coming-up phase of symmetric motions (squat, kneel) —
+both phases share identical joint angle targets but require opposite control effort. Same obs
+→ different correct action = unresolvable aliasing. Used in PULSE and Bi-Level Motion Imitation.
+
+Cost: ~1 day (one-line obs addition + experiment file update).
+Reference: `README.research-results.md` Q4 Finding 3.
+
+------
+
 The file is 10 GB. That's because 192 clips × 128 betas × 200 frames × all tensor fields. If you want a tighter set, you can
   rerun with --min-avg-betas 8.0 to get the 65 most severe clips (~3.4 GB), or use --clip-indices for an exact hand-picked
   list. The threshold 5.0 gives you a broader hard-clip curriculum; 8.0 gives you the truly broken ones.
