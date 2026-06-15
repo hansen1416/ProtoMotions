@@ -86,8 +86,8 @@ nohup python -u protomotions/train_agent.py \
     --experiment-name hhi_1024_motion_tune \
     --motion-file /workspace/difficult-motions/failed_clips.pt \
     --checkpoint results/hhi_1024_motion/last.ckpt \
-    --num-envs 8192 \
-    --batch-size 32768 \
+    --num-envs 4096 \
+    --batch-size 16384 \
     --use-wandb \
     --wandb-project hhi-protomotions \
     --wandb-entity yugoamaryl \

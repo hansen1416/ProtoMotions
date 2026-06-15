@@ -167,3 +167,5 @@ The file is 10 GB. That's because 192 clips × 128 betas × 200 frames × all te
   tackle the physics features extraction from the SMPL XMLs next?
 
   claude --resume 8e2b4dfa-0c8c-4a9f-8ce8-7f78c80e21bc
+
+  claude --resume 205a690c-2047-41cb-ae29-3907efe7d69b
