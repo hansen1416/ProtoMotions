@@ -1,4 +1,233 @@
-# Generate SMPL humanoid robto templates
+# Implementation Notes — HHI Morphology Project
+
+================================================================================
+
+## Research Context
+
+### Literature Gap
+
+No prior work uses continuous SMPL body shape variation for physics-based motion imitation.
+
+PULSE (ICLR 2024) and PHC (NeurIPS 2023) both explicitly use only the mean SMPL shape. XHugWBC, H-Zero, MetaMorph, and ManyQuadrupeds all work with discrete different robot designs — not continuous beta variation. The combination of (1) continuous SMPL beta variation, (2) physics-based motion imitation across diverse clips, and (3) a single shared policy is our novel contribution.
+
+---
+
+### Why All Architectures Converge to the Same Reward (~0.84)
+
+All three runs (mlp, shape_embed, physics_feat) hit the same ceiling despite different morphology encodings in the actor. Two explanations:
+
+**1. Shape variance << motion variance in gradients.**
+With 1024 diverse motion clips, gradient signal is dominated by motion content variation. The 128-shape signal is a much smaller component of the loss landscape — the network learns motion-invariant features first; shape-specific adaptation is a small correction.
+
+**2. Implicit shape information from proprioception.**
+Some shape information (body height, segment length ratios) is implicitly available in proprioceptive states. The 11-dim beta vector offers an explicit shortcut, but the network may not need it for seen shapes when the implicit signal is sufficient.
+
+**Note on MorFiC (arXiv 2603.14554):** The paper attributes multi-morphology plateaus to shared critic value miscalibration. Our critic already receives `morphology_obs` in its `in_keys` — it is not blind to morphology. MorFiC's fix does not apply to our setup.
+
+---
+
+### Key Literature Findings
+
+| Finding | Source | Implication |
+|---|---|---|
+| Residual PD (`q_ref + scale*action`) dramatically helps non-standing motions | PHC (NeurIPS 2023) | Highest priority training fix; also addresses jerk in fine-tune |
+| Contact reward needed for floor-contact clips (knees, hands, hips) | PHC, SkillMimic | Extend `contact_bodies` beyond feet |
+| Phase variable φ resolves temporal aliasing in squat/kneel | PULSE, Bi-Level | One-line obs addition |
+| TVS (Torque Variation Score) correctly rates squats/crawls as hard; kinematic metrics don't | arXiv 2512.07248 | Better difficulty curriculum |
+| FiLM is unstable in RL with low-dim conditioning; zero-init gamma is the fix if retried | FiLM-Ensemble | Don't retry FiLM without zero-init gamma |
+| Linear probing on activations measures embodiment encoding | Standard RL analysis | "AI learned physics" paper figure |
+
+================================================================================
+
+## Training Results
+
+All runs use `--robot-name smpl_mor --simulator isaacgym --motion-file humos_*.pt`.
+The 128 SMPL body shapes (64 β-vectors × 2 genders) span total_mass 26–144 kg and total_height 1.13–1.67 m.
+
+### Summary Table
+
+| Approach | Input dim | Architecture / intervention | Reward | Outcome |
+|---|---|---|---|---|
+| Raw beta concat (`mlp.py`) | 11 | None | ≈ 0.84 | **Baseline** |
+| FiLM (`mlp_film.py`) | 11 | Multiplicative conditioning | ≈ 0.40–0.45 | Failed — fanout + instability |
+| Shape embed (`mlp_shape_embed.py`) | 11 → 64 embed | Learned projection + concat | ≈ 0.84 | Neutral — no gain |
+| Physics features (`mlp_physics.py`) | 15 | Input swap (z-scored physics) | ≈ 0.84 | Neutral — no gain |
+| Hard clip fine-tune (`mlp.py`) | 11 | Fine-tune on 192 hard clips | > 0.90 | Success rate +15 pp; jerk 3–4× |
+
+---
+
+### Run 1: Baseline — Direct Beta Concatenation (`hhi_1024_motion`)
+
+**Command** (RunPod):
+```bash
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_1024_motion \
+    --motion-file /workspace/merged4/humos_slurmrank.pt \
+    --num-envs 4096 \
+    --batch-size 16384
+```
+
+**Morphology input**: `morphology_obs` = `[gender_id, beta_1/3, …, beta_10/3]` — 11-dim, appended directly to the flat observation vector before the MLP trunk.
+
+**Architecture**: Standard 6-layer 1024-unit MLP (`MLPWithConcat`). No special conditioning — the 11-dim morphology vector is just another group of floats in the input.
+
+**Result**: Converged to reward ≈ 0.84. This is the **baseline** all other runs are compared against.
+
+**Known failure modes**: 65 hard clips involving floor-contact motions (crawl, kneel, squat, backward-walk) fail persistently. The root hypothesis is that raw PCA betas give the policy no explicit signal about the physical constraints governing these motions (torso mass, leg length, COM height relative to floor).
+
+**Status**: Converged. Reference point for all ablations.
+
+---
+
+### Run 2: FiLM Conditioning (`hhi_film_1024_motion`)
+
+**Motivation**: FiLM (Feature-wise Linear Modulation) conditions the trunk by predicting per-layer scale (γ) and shift (β) from the morphology input, rather than concatenating morphology into the obs.
+
+**Architecture**: Conditioner MLP (64→64 hidden units) produces `2 × num_layers × hidden_dim` values. Trunk activations at each layer are modulated as `h_l = h_l × γ_l + β_l`.
+
+**Why it failed**: Two compounding issues:
+
+1. **Fanout bottleneck**: For a 6-layer × 1024-unit actor, the conditioner must produce `2 × 6 × 1024 = 12,288` outputs from a 64-unit network. Severe compression-to-expansion mismatch dilutes gradients across all conditioner outputs.
+
+2. **Multiplicative instability**: Trunk gradients at layer `l` are scaled by `γ_l`. If `γ_l` drifts from 1.0 early in training, the effective learning rate becomes shape-dependent and unstable. Noisy gamma estimates per minibatch amplify this instability.
+
+**Result**: Reward ≈ 0.40–0.45. The trunk could not converge to a stable feature representation under multiplicative noise from the conditioner.
+
+**Status**: Stopped at 1d 17h. No path to recovery without architectural change.
+
+---
+
+### Run 3: Shape Embedding + Concat (`hhi_se_1024_motion`)
+
+**Motivation**: Replace multiplicative FiLM conditioning with a simple learned projection — encode the 11-dim morphology into a 64-dim embedding via a shallow MLP, then concatenate with the observation before the trunk.
+
+**Architecture**:
+```
+morphology_obs (11-dim: gender + betas/3)
+    → Linear(→ 64) → SiLU
+    → shape_embed (64-dim)
+                        │
+[main obs (400–600+ dim)] ──cat──→ standard 6-layer 1024-unit trunk → output
+```
+
+| Property | FiLM | Shape Embed + Concat |
+|---|---|---|
+| Conditioner output size | 2 × 6 × 1024 = 12,288 | 64 |
+| Trunk coupling | Multiplicative (γ × h + β) | Additive (concat) |
+| Gradient stability | Trunk grads scaled by γ | Trunk grads unaffected |
+
+**Files**: `protomotions/agents/common/shape_embed_mlp.py`, `examples/experiments/mimic/mlp_shape_embed.py`.
+
+**Result**: Performance almost identical to the baseline (reward ≈ 0.84). The nonlinear projection did not improve over raw concat; the trunk learns an equivalent representation either way.
+
+**Status**: Stopped at 1d 19h. Performance parity confirmed; no further upside expected.
+
+---
+
+### Run 4: Physics Features (`hhi_physics_feat_1024`)
+
+**Motivation**: Raw betas are PCA coefficients in appearance space with no direct physical interpretation. Replace `morphology_obs` (11-dim betas) with `physics_obs` (15-dim z-scored physics features extracted from each body's MJCF). Gender is implicitly encoded in the physics features.
+
+**The 15 physics features** (z-scored across 128 training bodies):
+
+| Feature | Mean | Std | Range | Units |
+|---|---|---|---|---|
+| `total_mass` | 73.4 | 25.7 | 26.4 – 144.4 | kg |
+| `l_thigh_length` | 0.379 | 0.036 | 0.298 – 0.457 | m |
+| `l_shin_length` | 0.409 | 0.045 | 0.303 – 0.502 | m |
+| `r_thigh_length` | 0.381 | 0.035 | 0.302 – 0.461 | m |
+| `r_shin_length` | 0.405 | 0.043 | 0.304 – 0.495 | m |
+| `l_upper_arm_len` | 0.256 | 0.023 | 0.212 – 0.304 | m |
+| `l_forearm_len` | 0.253 | 0.025 | 0.201 – 0.302 | m |
+| `r_upper_arm_len` | 0.256 | 0.024 | 0.209 – 0.305 | m |
+| `r_forearm_len` | 0.258 | 0.025 | 0.210 – 0.306 | m |
+| `torso_height` | 0.307 | 0.035 | 0.234 – 0.394 | m |
+| `neck_head_height` | 0.304 | 0.029 | 0.247 – 0.379 | m |
+| `hip_width` | 0.126 | 0.022 | 0.085 – 0.193 | m |
+| `shoulder_width` | 0.358 | 0.048 | 0.251 – 0.472 | m |
+| `leg_length` | 0.787 | 0.079 | 0.603 – 0.956 | m |
+| `total_height` | 1.399 | 0.125 | 1.132 – 1.666 | m |
+
+**New files**: `tools/extract_smpl_physics_features.py`, `protomotions/data/assets/mjcf/smpl_mor/physics_features.pt`, `examples/experiments/mimic/mlp_physics.py`.
+
+**Modified files**: `simulator.py` (`_build_physics_features()`), `context_views.py` (`env_physics_features` field), `env.py` (`_build_global_context()`), `obs/humanoid.py` (`compute_physics_obs()`), `component_factories.py` (`physics_obs_factory()`).
+
+**Status**: **Converged.** Reward ≈ 0.84 — identical to baseline. Physics features provide no advantage over raw beta concat. Floor-contact motions remain the persistent failure class regardless of morphology encoding mechanism.
+
+#### Physics Feature Derivations
+
+**Limb lengths** — from body `pos` vectors (relative offset from parent joint in T-pose):
+```
+limb_length = norm(body.pos)
+```
+Body hierarchy: `Pelvis → L_Hip → L_Knee (thigh) → L_Ankle (shin)`, similarly for arms via `Torso → Spine → Chest → L_Thorax → L_Shoulder → L_Elbow (upper arm) → L_Wrist (forearm)`.
+
+**Torso/head heights** — summed segment lengths:
+```
+torso_height     = norm(Torso.pos) + norm(Spine.pos) + norm(Chest.pos)
+neck_head_height = norm(Neck.pos)  + norm(Head.pos)
+```
+
+**Hip/shoulder widths** — lateral global positions (Y axis = lateral):
+```
+hip_width      = |L_Hip.pos_y - R_Hip.pos_y|
+shoulder_width = |global_y(L_Shoulder) - global_y(R_Shoulder)|
+```
+
+**Total mass** — from geom density × volume. Three geom types: capsule (`π r² L + (4/3) π r³`), box (`8 × sx × sy × sz`), sphere (`(4/3) π r³`). Total spans 26–144 kg (5.5× range).
+
+#### Biomechanically-Grounded Derived Features (6 candidates, not yet tried)
+
+| Feature | Formula | Predicts |
+|---|---|---|
+| `v_preferred_walk` | `sqrt(0.5 × g × l_leg)` | Natural walking speed (Froude, Alexander 1984) |
+| `T_step_natural` | `2π × sqrt(l_leg / g)` | Natural step timing (inverted pendulum) |
+| `f_upper_mass` | `m_upper / m_total` | Squat/kneel torque demand |
+| `tau_knee_proxy` | `m_upper × l_thigh` | Required knee torque (interaction term) |
+| `I_swing_leg` | `m_thigh×(0.37 l_thigh)² + m_shank×(l_thigh + 0.28 l_shin)²` | Leg repositioning speed |
+| `cormic_index` | `torso_height / total_height` | COM fraction, squat form |
+
+---
+
+### Run 5: Hard Clip Fine-Tune (`hhi_1024_motion_tune`)
+
+**Command** (RunPod):
+```bash
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_1024_motion_tune \
+    --motion-file /home/hlz/datasets/humos_proto/failed_clips.pt \
+    --num-envs 4096 \
+    --batch-size 16384 \
+    --overrides agent.config.init_from=results/hhi_1024_motion/last.ckpt
+```
+
+**Motivation**: Fine-tune the converged baseline checkpoint exclusively on the 192 hard clips (crawl/kneel/squat/backward, `--min-avg-betas 5.0`). These clips fail consistently across all shape variants.
+
+**Motion file**: `failed_clips.pt` — 192 clips × 128 body shapes = 24,576 motions (~10 GB). Hard clips selected by average body distance > 5.0 across betas at baseline convergence.
+
+**Results** (as of 2026-06-16):
+- `eval/success_rate`: ≈ 0.80 (+15 pp over baseline cluster at ~0.65)
+- `unnormalized_task_rewards`: > 0.90 (up from ~0.84)
+- `eval/normalized_jerk_mean`: ~2000–2500 (3–4× higher than baselines at ~500–800)
+- `eval/high_jerk_frame_percentage_mean`: ~35–40% (vs ~10–15% for baselines)
+
+**Interpretation**: Success rate improved but motion quality degraded severely. The policy fights to hold difficult configurations against gravity instead of moving through them smoothly — classic narrow-dataset overfitting.
+
+**Root cause of jerk**: Policy must output large actions from neutral posture (`q_neutral`) to reach the reference. Residual PD control (`q_target = q_ref + scale*action`) is the structural fix — at `action=0` the controller already tracks the reference, eliminating large corrective actions.
+
+**Status**: **Converged.** High success rate (+15 pp) but unacceptable jerk (3–4×). Residual PD control is the next training intervention.
+
+================================================================================
+
+# Implementation Details
+
+## Generate SMPL humanoid robot templates
 
 Use SMPLSim run.py to generate all_betas.pt and .xml files for sml and smplx.
 

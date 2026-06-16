@@ -9,17 +9,19 @@
 
 ---
 
-## Current State (2026-06-12)
+## Current State (2026-06-16)
 
 | Item | Status |
 |---|---|
-| MLP baseline `hhi_1024_motion` | Converged ~epoch 12000, reward ~0.84 |
-| FiLM `hhi_film_1024_motion` | Failed (~0.72), dropped |
-| ShapeEmbed | Empirically identical to concat, dropped |
-| Failed motion analysis | Done — crawl/kneel/squat/backward are the hard class (65 clips ≥8 betas failing) |
+| MLP baseline `hhi_1024_motion` | Converged, reward ~0.84 |
+| FiLM `hhi_film_1024_motion` | Failed (~0.40–0.45), dropped |
+| ShapeEmbed `hhi_se_1024_motion` | Converged, reward ~0.84 — identical to baseline, dropped |
+| Physics features `hhi_physics_feat_1024` | Converged, reward ~0.84 — no gain over baseline |
+| Hard clip fine-tune `hhi_1024_motion_tune` | Converged — success_rate ~0.80 (+15 pp), reward >0.90, jerk 3–4× baseline |
+| Failed motion analysis | Done — 65 clips (crawl/kneel/squat/backward) with ≥8 betas failing |
 | Data pipeline | Complete — 131,072 motions, 16 local shards |
-| Evaluator infrastructure | Ready (`evaluate_hhi_faults.py`) |
-| Held-out betas (interpolation/extrapolation) | **Not yet generated** |
+| Evaluator | Complete — `eval_one_shape_per_motion` + clip-level weight propagation |
+| Held-out betas (interpolation/extrapolation) | Not yet generated |
 
 ---
 
@@ -31,104 +33,49 @@
 - **Fine-tuning efficiency (S5)** — low ICRA impact; only if weeks 1–9 finish early
 - **Hardware validation** — out of scope
 
----
+================================================================================
 
-## Experiments
+## Month-by-Month Timeline (updated 2026-06-16)
 
-### Experiment 1 — Physics Features (highest priority)
-**Goal:** Replace/augment `morphology_obs` with physics-derived features extracted from SMPL XMLs.
-
-Features to extract (implement `scripts/extract_smpl_physics_features.py`):
-- Total mass, COM height at T-pose
-- Per-limb lengths: upper arm, forearm, thigh, shin, torso height, shoulder width
-- ~15–20 features, z-scored across the 128 training bodies
-
-**Why:** The failed motions (crawl/kneel/squat) fail because the policy doesn't know COM height or mass — raw betas are opaque. Physics features give the policy directly actionable information. Also the strongest interpretability story for the paper.
-
-**Training run:** `hhi_physics_feat_1024` — MLP + physics features, 1024 clips, 4× A40. Start from scratch (cleaner science than fine-tuning).
-
-**Decision gate:** If floor-contact success improves meaningfully (≥10 pp on crawl/kneel subset), this becomes the main result. Even a small gain is publishable because the analysis tells the story.
-
----
-
-### Experiment 2 — Adaptive Sampler for Hard Clips
-**Goal:** Aggressively upweight the 65 identified hard clips (crawl/kneel/squat) during training.
-
-- Increase `failure_discount` magnitude for the identified hard clip IDs
-- For floor-contact clips: floor-aware RSI — initialize from a mid-clip frame instead of always standing
-- Can be baked into Experiment 1's run (same training, additional config)
-
-**Reference:** Hard clip list at `results/hhi_1024_motion/persistent_failures.txt`. Hard clip category: ≥8 betas failing at epoch 12000.
-
----
-
-### Experiment 3 — Evaluations (no new training, runs in parallel)
-
-All use existing checkpoints from `hhi_1024_motion` and the new `hhi_physics_feat_1024`.
-
-| Analysis | Output | Tool |
-|---|---|---|
-| Per-shape eval on 128 training betas | CSV → per-shape degradation curve | `evaluate_hhi_faults.py` |
-| Held-out interpolation (16–32 new betas, [-3,3]) | Generalization plot vs MLP | Same evaluator |
-| Held-out extrapolation (16 betas, [-5,5]) | Degradation slope | Same evaluator |
-| Torque + energy per body shape (same clip) | "Heavier → higher torques" figure | Custom rollout logger |
-| COM trajectory + support polygon | Stability analysis figure | Rollout data |
-| Stride length vs body height | Implicit retargeting figure | Root position trajectory |
-| Embodiment encoding probe | "Policy learned physics" figure | Linear ridge probe on activations |
-| Motion category × shape heatmap | 2D failure structure figure | Rollout + `motion_id_text.json` |
-| Failure mode taxonomy | Fall / COM drift / joint-limit breakdown | Rollout data |
-
----
-
-### Experiment 4 — Full-motion Scale-up (conditional)
-**Trigger:** Only if Experiment 1 shows clear gains on hard clips.  
-**Run:** All 20,951 valid motions from `hhi/data-processing/valid_motions.txt`, same physics-feat config.  
-**Value:** "Scales to full AMASS" — strengthens the system contribution.
-
----
-
-## Month-by-Month Timeline
-
-### Month 1 — New Training + Setup (June 12 – July 12)
+### Month 1 (June 12 – July 12) — Training Improvements
 
 | Week | Tasks |
 |---|---|
-| **1** | Extract physics features from SMPL XMLs. Augment `morphology_obs`. Run evaluator on `hhi_1024_motion` → baseline per-shape CSV. Generate held-out betas via HUMOS. |
-| **2** | Launch `hhi_physics_feat_1024`. Implement floor-aware RSI for floor-contact clips. |
-| **3** | Monitor training; compare reward curves on crawl/kneel subset specifically. |
-| **4** | Run per-shape eval on physics-feat checkpoint. Start rollout logging infrastructure for torque/energy/contact. |
+| **1–2** | Implement A1 (residual PD) + A2 (contact reward) + A3 (phase φ) — launch combined run |
+| **3** | Monitor training; compare hard clip success rate vs `hhi_1024_motion_tune` |
+| **4** | Generate held-out betas via HUMOS (B1); start rollout logging for torque/energy |
 
-### Month 2 — Analysis Sprint (July 12 – Aug 12)
-
-| Week | Tasks |
-|---|---|
-| **5** | Held-out generalization eval (interpolation + extrapolation) on both checkpoints. |
-| **6** | Torque/energy analysis: same clip × all 128 shapes. COM trajectory + stability. |
-| **7** | Embodiment encoding probe: policy layer activations → linear regression → {mass, COM, limb lengths}. **Key paper figure.** |
-| **8** | Motion category × shape heatmap. Stride/step analysis. Failure mode taxonomy. |
-
-### Month 3 — Paper (Aug 12 – Sep 12)
+### Month 2 (July 12 – Aug 12) — Analysis Sprint
 
 | Week | Tasks |
 |---|---|
-| **9** | Full-motion scale-up run if warranted. Begin paper draft (method section). |
-| **10** | Results section + all figures. Qualitative video: side-by-side multi-shape visualization. |
-| **11** | Introduction, related work, conclusion. Internal review. |
-| **12** | Buffer: polish, video narration, submission. |
+| **5** | Held-out generalization eval — interpolation + extrapolation on best checkpoint |
+| **6** | Torque/energy analysis: same clip × all 128 shapes. COM trajectory + stability |
+| **7** | Embodiment encoding probe (B2) — activations → physical property R² |
+| **8** | Stride/retargeting analysis (B3). Motion category × shape heatmap. Failure mode taxonomy |
 
----
+### Month 3 (Aug 12 – Sep 12) — Paper
+
+| Week | Tasks |
+|---|---|
+| **9** | Scale-up run (Track C) if Track A shows clear gains. Begin paper draft (method section) |
+| **10** | Results section + all figures. Qualitative video: side-by-side multi-shape |
+| **11** | Introduction, related work, conclusion. Internal review |
+| **12** | Buffer: polish, video narration, submission |
+
+================================================================================
 
 ## Paper Figures (target list)
 
-1. System diagram: HUMOS → motionlib → multi-shape sim → physics-feat policy
+1. System diagram: HUMOS → motionlib → multi-shape sim → morphology-conditioned policy
 2. Per-shape tracking performance across 128 training betas (bar/violin plot)
-3. Held-out generalization: body distance vs beta L2 norm (interpolation + extrapolation curves)
-4. Torque/energy vs body shape for a fixed locomotion clip
-5. **Embodiment encoding probe:** probe R² per physical property — the "AI learned physics" figure
+3. Held-out generalization: tracking error vs beta L2 norm from training distribution (interpolation + extrapolation curves)
+4. Torque/energy vs body shape for a fixed locomotion clip ("heavier → higher torques" figure)
+5. **Embodiment encoding probe:** R² per physical property from linear probe on activations — "AI learned physics" figure
 6. Motion category × shape extremity heatmap (crawl/kneel hardest, locomotion robust)
-7. Failure mode taxonomy across shape extremity buckets
+7. Failure mode taxonomy: fall / COM drift / joint-limit breakdown across shape extremity buckets
 8. Qualitative: same motion clip across 8 body shapes side-by-side (also video)
-9. Ablation: MLP vs physics-feat on overall and floor-contact subsets
+9. Ablation: baseline vs fine-tune vs Track A combined on overall reward and floor-contact success rate
 
 ---
 
@@ -144,110 +91,145 @@ All use existing checkpoints from `hhi_1024_motion` and the new `hhi_physics_fea
 | Clip text annotations | `/home/hlz/repos/hhi/data-processing/motion_id_text.json` |
 | Valid motions list | `/home/hlz/repos/hhi/data-processing/valid_motions.txt` |
 
-------
+================================================================================
 
-## Unimplemented Training Improvements (identified 2026-06-15)
+## TRACK A — Training Improvements (Performance)
 
-These were identified by reviewing all notes after the mlp / shape_embed / physics_feat runs
-converged to the same reward (~0.84) and the fine-tune on 192 hard clips was launched.
-The termination condition is already reference-relative (max joint error > 0.5m), so the
-"absolute root height threshold" concern from README.research-results.md does NOT apply.
+These directly target the hard clip failure class (crawl/kneel/squat/backward).
+Note: early termination is already reference-relative (max joint error > 0.5 m) — no fix needed there.
 
 ---
 
-### 1. Asymmetric critic conditioning (MorFiC-style)
-**Priority: highest — addresses the root cause of the plateau**
+### A1. Residual PD Control
+**Priority: HIGH — fixes jerk in fine-tune AND reduces hard clip learning difficulty**
 
-The shared critic must predict a single value for states with wildly different expected
-returns across 128 body shapes (26 kg vs 144 kg doing the same squat). This miscalibrates
-advantages for every actor architecture, which explains why concat ≈ shape_embed ≈ physics_feat
-all converge identically — the actor encoding is not the bottleneck, the critic is.
+```
+Current:  q_target = q_neutral + scale * action
+Fix:      q_target = q_ref    + scale * action
+```
 
-Fix: condition **only the critic** on morphology (separate larger input or FiLM conditioning).
-Actor stays unchanged. MorFiC (arXiv 2603.14554) reports +16–500% on quadrupeds from this
-change alone.
+At `action=0` the PD controller already tracks the reference pose. Policy only learns the balance correction delta, eliminating the large corrective actions from neutral posture that cause oscillation in `hhi_1024_motion_tune`. `q_ref` is already available as `EnvContext.mimic.ref_state.dof_pos`.
 
-Cost: ~2–3 days. Reference: `README.research-results.md` Q1 and Q5 Direction 1.
+Validated by PHC on 11,313 AMASS clips. Cost: ~2–3 days.
 
 ---
 
-### 2. Residual PD control
-**Priority: high — directly reduces learning difficulty for the 192 hard clips**
+### A2. Contact Reward for Knees and Hands
+**Priority: HIGH — direct floor-contact supervision for the failure class**
 
-Currently: `q_target = q_neutral + scale * action`
-Policy must output large actions just to push joints from neutral standing toward the
-crawl/kneel/squat reference — the action space search starts far from the target region.
+`contact_match_rew_factory` exists but only tracks foot contacts. The 192 hard clips fail at knee and hand contacts (crawl, kneel). The policy can reach approximate joint angles for a kneeling pose without knees touching the floor and still collect full tracking reward — explicit contact supervision is needed.
 
-Fix: `q_target = q_ref + scale * action`
-At `action=0` the PD controller already tracks the reference. Policy only learns the
-balance correction delta. PHC validates this on 11,313 AMASS clips. `q_ref` is already
-available as `EnvContext.mimic.ref_state.dof_pos`.
+Extend `contact_bodies`:
+```python
+contact_bodies = [
+    "all_left_foot_bodies", "all_right_foot_bodies",
+    "L_Knee", "R_Knee",        # kneel / crawl
+    "L_Wrist", "R_Wrist",      # crawl
+]
+```
 
-Cost: ~2–3 days. Reference: `README.research-results.md` Q4 Finding 4.
-
----
-
-### 3. Contact reward for knee and hand contacts
-**Priority: medium-high — direct supervision for the failure class**
-
-`contact_match_rew_factory` already exists but only tracks foot contacts
-(`contact_bodies = ["all_left_foot_bodies", "all_right_foot_bodies"]`). The 192 hard clips
-fail primarily at knee and hand contacts (crawl, kneel). The policy can reach approximate
-joint angles for a kneeling pose without knees touching the floor and still collect tracking
-reward. Adding knee + hand contact matching provides explicit binary floor-contact supervision.
-
-Cost: ~1–2 days. Reference: `README.research-results.md` Q4 Finding 1.
+Cost: ~1–2 days.
 
 ---
 
-### 4. Per-shape running normalization
-**Priority: medium — structural correctness for multi-shape training**
+### A3. Motion Phase Variable φ in Observation
+**Priority: MEDIUM — resolves temporal aliasing in squat/kneel**
 
-The current shared `RunningMeanStd` accumulates statistics averaged over all 128 body shapes.
-A 26 kg body and a 144 kg body have different root height ranges, joint velocity magnitudes,
-and inertia-related accelerations. The shared normalizer miscalibrates inputs for every shape.
+```
+φ = frame_idx / total_frames  ∈ [0, 1]
+```
 
-Fix: 128 separate `RunningMeanStd` buffers keyed by `asset_id`, each updated only from envs
-assigned to that shape. SimBa (2024) identifies obs normalization as the most impactful
-obs-processing choice in RL.
+Without φ, the policy cannot distinguish going-down from coming-up in a squat — both phases share identical joint angles but require opposite control effort. Same obs → different correct action = unresolvable aliasing. Used in PULSE and Bi-Level Motion Imitation.
 
-Cost: ~1 day. Reference: `README.research-results.md` Q2 Finding 2.
+Cost: ~1 day (one observation key + experiment file update).
 
 ---
 
-### 5. Motion phase variable φ in observation
-**Priority: medium — resolves temporal aliasing in squat/kneel/kneel-up clips**
+### A4. Per-Shape RunningMeanStd
+**Priority: MEDIUM — structural correctness for multi-shape training**
 
-`φ = frame_idx / total_frames ∈ [0, 1]` added to observation. Without it, the policy cannot
-distinguish the going-down phase from the coming-up phase of symmetric motions (squat, kneel) —
-both phases share identical joint angle targets but require opposite control effort. Same obs
-→ different correct action = unresolvable aliasing. Used in PULSE and Bi-Level Motion Imitation.
+The shared `RunningMeanStd` averages statistics over all 128 shapes. A 26 kg body and a 144 kg body have different root height ranges, joint velocity magnitudes, and inertia-related accelerations — the shared normalizer miscalibrates inputs for every shape.
 
-Cost: ~1 day (one-line obs addition + experiment file update).
-Reference: `README.research-results.md` Q4 Finding 3.
+Fix: 128 separate `RunningMeanStd` buffers keyed by `asset_id`, each updated only from envs assigned to that shape. SimBa (2024): running normalization is the most impactful obs-processing choice in RL.
 
-------
+Cost: ~1 day.
 
-The file is 10 GB. That's because 192 clips × 128 betas × 200 frames × all tensor fields. If you want a tighter set, you can
-  rerun with --min-avg-betas 8.0 to get the 65 most severe clips (~3.4 GB), or use --clip-indices for an exact hand-picked
-  list. The threshold 5.0 gives you a broader hard-clip curriculum; 8.0 gives you the truly broken ones.
+---
 
-  Ready to use immediately:
+### A5. PopArt Per-Shape Return Normalization
+**Priority: MEDIUM — calibrates critic value targets per shape**
 
-  # Fine-tune from the converged checkpoint, sampling only from hard clips
-  python protomotions/train_agent.py \
-      --robot-name smpl_mor \
-      --simulator isaacgym \
-      --experiment-path examples/experiments/mimic/mlp.py \
-      --experiment-name hhi_failed_finetune \
-      --motion-file /home/hlz/datasets/humos_proto/failed_clips.pt \
-      --num-envs 4096 \
-      --batch-size 16384 \
-      --overrides agent.config.init_from=results/hhi_1024_motion/last.ckpt
+Different shapes have genuinely different expected return magnitudes (easy walk vs hard squat for a heavy body). PopArt tracks a running mean/std of returns per shape and normalizes the critic value head accordingly. Used in multi-task RL (DeepMind) to handle reward scale mismatches.
 
-  Before launching the actual training run though Jump to bottom (ctrl+End) ↓  physics features to morphology_obs — otherwise this is just fine-tuning on the hard clips with the same input representation, which won't tell us much. Do you want to
-  tackle the physics features extraction from the SMPL XMLs next?
+Cost: ~2 days.
 
-  claude --resume 8e2b4dfa-0c8c-4a9f-8ce8-7f78c80e21bc
+---
 
-  claude --resume 205a690c-2047-41cb-ae29-3907efe7d69b
+### A6. TVS Difficulty Re-Scoring
+**Priority: LOW-MEDIUM — better curriculum for hard clips**
+
+Current difficulty score (root velocity, flight ratio, DOF velocity) misclassifies squats/crawls as easy (low root velocity, no flight). Torque Variation Score (TVS, arXiv 2512.07248) is physics-grounded: it measures the torque variation required to correct small pose perturbations.
+
+> "High-TV motions induce flat reward landscapes and vanishing policy gradients."
+
+TVS correctly rates squats/crawls as hard. Re-weight curriculum using TVS. Cost: ~3–5 days.
+
+================================================================================
+
+## TRACK B — Analysis & Paper Contributions (No New Training)
+
+These use existing checkpoints from `hhi_1024_motion` or `hhi_1024_motion_tune`.
+
+---
+
+### B1. Held-Out Evaluation
+**Priority: CRITICAL — core generalization claim of the paper**
+
+Generate held-out body shapes via HUMOS, evaluate both checkpoints:
+
+1. **Interpolation** — 16–32 new random betas from `[-3, 3]` (different seed from training 128)
+2. **Extrapolation** — betas in `[-5, 5]` range (scale existing betas by 5/3)
+
+```bash
+python protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_1024_motion/last.ckpt \
+    --motion-file /path/to/held_out_interpolation.pt \
+    --num-envs 64 \
+    --output results/eval_mlp_interpolation.csv
+```
+
+Key metric: tracking error vs beta L2 norm from training distribution → generalization curve. This is the core paper figure.
+
+---
+
+### B2. Embodiment Encoding Probe
+**Priority: HIGH NARRATIVE VALUE — "AI learned physics" paper figure**
+
+At inference, record actor hidden activations for each of the 128 training shapes. Fit linear regression:
+```
+activation_vector → [total_mass, com_height, limb_lengths, ...]
+```
+Report R² per physical property. If R² > 0.8 for mass and limb length, the policy built an internal physics representation purely from imitation learning, with no explicit supervision.
+
+No new training. Cost: ~1–2 days analysis.
+
+---
+
+### B3. Stride / Retargeting Analysis
+**Priority: MEDIUM — visual paper contribution**
+
+For a walking clip tracked across all 128 shapes: measure stride length and frequency per shape. If taller bodies take longer strides at similar frequency, the policy is doing implicit gait retargeting — adapting to body proportions without being told to.
+
+No new training. Cost: ~1 day rollout analysis.
+
+================================================================================
+
+## TRACK C — Scale-Up (Conditional)
+
+**Trigger:** Only after Track A shows clear gains on hard clips.
+
+Run all 20,951 valid motions from `/home/hlz/repos/hhi/data-processing/valid_motions.txt`, same config as best Track A experiment. Scale `num_envs` to 8192, `batch_size` to 32768 (~31 GB GPU, safe on A40).
+
+Value: "Scales to full AMASS" strengthens the system contribution for the paper.
+  
+  claude --resume 6e4a4a57-daf6-4774-af32-3339857a56c0
