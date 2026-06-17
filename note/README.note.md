@@ -835,4 +835,57 @@ Two visible clusters in worst-performing motions:
 
 **Interpretation:** Tune model performs noticeably better on the hard clips it was trained on (0.75m vs 1.03m on easy clips, 14.6% vs 2.3% success). But 14.6% success on crawl/kneel/squat is still low — residual PD (TODO A1) is the structural fix needed.
 
+================================================================================
+
+## 9. Transfer Training Setup (2026-06-17)
+
+### [Analysis] Evaluation Diagnosis
+
+Evaluation of `hhi_1024_motion_tune` on two motion sets reveals:
+
+| Dataset | Physics explosion rate | Stable-run success |
+|---|---|---|
+| Shard-0 easy clips (2 clips × 128 shapes) | 95% | 46% |
+| Hard clips 1k (8 clips × 128 shapes) | 62% | 38% |
+
+**Primary failure mode: physics explosions** (`max_body_dist > 100m`). The tune checkpoint's 3–4× jerk causes IsaacGym's constraint solver to blow up — limbs reach degenerate states while the root stays grounded. Among the 38% of hard-clip runs that don't explode, 38.3% succeed and 44.2% fall. The tracking quality itself is reasonable when stable.
+
+**Shard-0 catastrophic forgetting is almost entirely explosions**, not true forgetting — only 5% of shard-0 runs stay numerically stable, of which 46% succeed.
+
+### [Fix] Reward Changes in `mlp.py` for Transfer Run
+
+**1. Action smoothness weight: `-0.02` → `-0.05`**
+
+`compute_action_smoothness = ‖a_t - a_{t-1}‖₂ × weight`. Increased penalty directly discourages the large consecutive action deltas that destabilize the physics solver.
+
+**2. Contact force change penalty added (new)**
+
+```python
+"contact_force_change_rew": contact_force_change_rew_factory(
+    weight=-1e-4, threshold=30.0, zero_during_grace_period=True
+)
+```
+
+`compute_contact_force_change_rew = clamp(|F_t - F_{t-1}| - threshold, min=0).sum()`. Penalizes sudden contact force spikes above 30 N. The infrastructure (`current_contact_force_magnitudes`, `prev_contact_force_magnitudes`) is already populated every step — this is zero-overhead to add.
+
+### [Command] Transfer Training Command
+
+```bash
+nohup python -u protomotions/train_agent.py \
+      --robot-name smpl_mor \
+      --simulator isaacgym \
+      --experiment-path examples/experiments/mimic/mlp.py \
+      --experiment-name hhi_1024_transfer \
+      --motion-file /workspace/merged4/humos_slurmrank.pt \
+      --checkpoint results/hhi_1024_motion/last.ckpt \
+      --num-envs 4096 \
+      --batch-size 16384 \
+      --use-wandb \
+      --wandb-project hhi-protomotions \
+      --wandb-entity yugoamaryl \
+      --wandb-group hhi_1024_transfer > /tmp/train_hhi_transfer.log 2>&1 &
+```
+
+Motion sampling weights restart fresh (desired — improved `eval_one_shape_per_motion` sampling strategy replaces old curriculum state).
+
 **Next to run on RunPod:** Full 192-clip evaluation of both tune and baseline checkpoints on `failed_clips.pt` and at least one full shard, to quantify forgetting vs improvement trade-off.
