@@ -1,10 +1,12 @@
+# We only append to this file, everything is on chronological order.
+
 # Implementation Notes — HHI Morphology Project
 
 ================================================================================
 
 ## 1. Research Context
 
-### Literature Gap
+### [Research] Literature Gap
 
 No prior work uses continuous SMPL body shape variation for physics-based motion imitation.
 
@@ -12,7 +14,7 @@ PULSE (ICLR 2024) and PHC (NeurIPS 2023) both explicitly use only the mean SMPL 
 
 ---
 
-### Why All Architectures Converge to the Same Reward (~0.84)
+### [Analysis] Why All Architectures Converge to the Same Reward (~0.84)
 
 All three runs (mlp, shape_embed, physics_feat) hit the same ceiling despite different morphology encodings. Two explanations:
 
@@ -26,7 +28,7 @@ Some shape information (body height, segment length ratios) is implicitly availa
 
 ---
 
-### Key Literature Findings
+### [Research] Key Literature Findings
 
 | Finding | Source | Implication |
 |---|---|---|
@@ -41,7 +43,7 @@ Some shape information (body height, segment length ratios) is implicitly availa
 
 ## 2. Data Pipeline
 
-### Step 1: Generate SMPL Robot Assets
+### [Pipeline] Step 1: Generate SMPL Robot Assets
 
 Use SMPLSim `run.py` to generate `all_betas.pt` and `.xml` files for smpl and smplx.
 
@@ -64,7 +66,7 @@ All SMPL `.xml` templates are in `protomotions/data/assets/mjcf/smpl_mor/*.xml`.
 
 ---
 
-### Step 2: Export HUMOS Output → AMASS-style `.npz`
+### [Pipeline] Step 2: Export HUMOS Output → AMASS-style `.npz`
 
 **Batch mode — all 1024 clips, all 128 variants each:**
 ```bash
@@ -84,7 +86,7 @@ python tools/export_humos_to_amass_npz.py \
 
 ---
 
-### Step 3: Convert `.npz` → MotionLib `.pt`
+### [Pipeline] Step 3: Convert `.npz` → MotionLib `.pt`
 
 **Full dataset (131,072 motions, batched to stay within RAM):**
 ```bash
@@ -102,7 +104,7 @@ Produces `humos_proto/humos_131072_{chunk_idx:04d}.pt` per chunk. Each chunk ~3.
 
 ---
 
-### Step 4: Align Frame 0 with Ground
+### [Pipeline] Step 4: Align Frame 0 with Ground
 
 ```bash
 python tools/compute_humos_frame0_offsets.py \
@@ -125,7 +127,7 @@ tools/merge_motion_shards.py
 
 ---
 
-### Step 5: Visualize
+### [Pipeline] Step 5: Visualize
 
 ```bash
 python examples/motion_libs_visualizer_mor.py \
@@ -137,7 +139,7 @@ python examples/motion_libs_visualizer_mor.py \
 
 ---
 
-### Motion File Format (`humos_8_offset.pt`)
+### [Reference] Motion File Format (`humos_8_offset.pt`)
 
 ```
 gts:              tensor [n_frames, 24, 3]   — global translations
@@ -166,7 +168,7 @@ motion_npz_files: tuple [n_envs]             — *.npz source files
 
 ## 3. Morphology Code Changes
 
-### Key Modified Files
+### [Reference] Key Modified Files
 
 | File | Change |
 |---|---|
@@ -185,7 +187,7 @@ motion_npz_files: tuple [n_envs]             — *.npz source files
 
 ---
 
-### Code Path Overview
+### [Code] Code Path Overview
 
 **Training asset load:**
 - `selected_asset_ids` auto-populated from motion library's unique `asset_ids` before simulator init.
@@ -227,7 +229,7 @@ Code path: `simulator.py:558-585 → env.py:972 → component_factories.py:1265-
 
 ---
 
-### Dataset Scale
+### [Data] Motion Difficulty Curriculum
 
 Full dataset: 20,951 motions across 128 beta variants (64 shapes × 2 genders), listed in `/home/hlz/repos/hhi/data-processing/valid_motions.txt`.
 
@@ -237,7 +239,7 @@ Pilot training: ~1,024 motions sampled from the 5th–55th difficulty percentile
 
 ## 4. Training Commands
 
-### Local Smoke Tests (8 envs)
+### [Command] Local Smoke Tests (8 envs)
 
 ```bash
 # Baseline
@@ -273,7 +275,7 @@ python protomotions/train_agent.py \
     --num-envs 8 --batch-size 16
 ```
 
-### Full-Scale RunPod Commands (4096 envs)
+### [Command] Full-Scale RunPod Commands (4096 envs)
 
 ```bash
 # Run 1 — Baseline
@@ -294,7 +296,7 @@ python protomotions/train_agent.py \
     --overrides agent.config.init_from=results/hhi_1024_motion/last.ckpt
 ```
 
-### Inference Commands
+### [Command] Inference Commands
 
 ```bash
 # Single-shape inference
@@ -332,7 +334,7 @@ male:7e492dfc male:7f246a41 male:82266732 male:944474c9 male:97b473d4 male:9b4a6
 male:bfd4619b male:c1d2c0ef male:ca12d763 male:cf7925fd male:d1dc53df male:d495801e male:d4c80970 male:d6f908ec male:d9dbd795 male:da7b9ae1 male:df1b853d male:dfd2d9cf male:e57f26a5 male:e5c9712a male:f0de7631 male:fb454239
 ```
 
-### Evaluator Command
+### [Command] Evaluator Command
 
 ```bash
 python protomotions/evaluate_hhi_faults.py \
@@ -350,7 +352,7 @@ python protomotions/evaluate_hhi_faults.py \
 All runs use `--robot-name smpl_mor --simulator isaacgym`.
 The 128 SMPL body shapes (64 β-vectors × 2 genders) span total_mass 26–144 kg and total_height 1.13–1.67 m.
 
-### Summary Table
+### [Results] Summary Table
 
 | Run | Experiment name | Input dim | Intervention | Reward | Outcome |
 |---|---|---|---|---|---|
@@ -362,7 +364,7 @@ The 128 SMPL body shapes (64 β-vectors × 2 genders) span total_mass 26–144 k
 
 ---
 
-### Run 1: Baseline — Direct Beta Concatenation (`hhi_1024_motion`)
+### [Experiment] Run 1: Baseline — Direct Beta Concatenation (`hhi_1024_motion`)
 
 **Morphology input**: `morphology_obs` = `[gender_id, beta_1/3, …, beta_10/3]` — 11-dim, appended directly to the flat observation vector before the MLP trunk.
 
@@ -376,7 +378,7 @@ The 128 SMPL body shapes (64 β-vectors × 2 genders) span total_mass 26–144 k
 
 ---
 
-### Run 2: FiLM Conditioning (`hhi_film_1024_motion`)
+### [Experiment] Run 2: FiLM Conditioning (`hhi_film_1024_motion`)
 
 **Motivation**: FiLM (Feature-wise Linear Modulation) conditions the trunk by predicting per-layer scale (γ) and shift (β) from the morphology input, rather than concatenating morphology into the obs.
 
@@ -399,7 +401,7 @@ The 128 SMPL body shapes (64 β-vectors × 2 genders) span total_mass 26–144 k
 
 ---
 
-### Run 3: Shape Embedding + Concat (`hhi_se_1024_motion`)
+### [Experiment] Run 3: Shape Embedding + Concat (`hhi_se_1024_motion`)
 
 **Motivation**: Replace multiplicative FiLM conditioning with a simple learned projection — encode the 11-dim morphology into a 64-dim embedding via a shallow MLP, then concatenate with the observation before the trunk.
 
@@ -427,7 +429,7 @@ Config knobs: `cond_hidden_units` (e.g. `[64]`), `cond_activation` (default `sil
 
 ---
 
-### Run 4: Physics Features (`hhi_physics_feat_1024`)
+### [Experiment] Run 4: Physics Features (`hhi_physics_feat_1024`)
 
 **Motivation**: Raw betas are PCA coefficients in appearance space with no direct physical interpretation. Replace `morphology_obs` (11-dim betas) with `physics_obs` (15-dim z-scored features extracted from each body's MJCF). Gender is implicitly encoded in the physics features.
 
@@ -457,7 +459,7 @@ Config knobs: `cond_hidden_units` (e.g. `[64]`), `cond_activation` (default `sil
 
 **Status**: **Converged.** Reward ≈ 0.84 — identical to baseline. Physics features provide no advantage over raw beta concat. Floor-contact motions remain the persistent failure class regardless of morphology encoding mechanism.
 
-#### Physics Feature Derivations
+#### [Reference] Physics Feature Derivations
 
 **Limb lengths** — from body `pos` vectors (relative offset from parent joint in T-pose):
 ```
@@ -492,7 +494,7 @@ shoulder_width = |global_y(L_Shoulder) - global_y(R_Shoulder)|
 
 ---
 
-### Run 5: Hard Clip Fine-Tune (`hhi_1024_motion_tune`)
+### [Train] Run 5: Hard Clip Fine-Tune (`hhi_1024_motion_tune`)
 
 **Motivation**: Fine-tune the converged baseline checkpoint exclusively on the 192 hard clips (crawl/kneel/squat/backward, `--min-avg-betas 5.0`). These clips fail consistently across all shape variants.
 
@@ -513,7 +515,7 @@ shoulder_width = |global_y(L_Shoulder) - global_y(R_Shoulder)|
 
 ---
 
-### Training Speed Reference (4× A40)
+### [Reference] Training Speed Reference (4× A40)
 
 | Run | Envs / Batch | Step time | Samples/hour |
 |---|---|---|---|
@@ -526,7 +528,7 @@ Bottleneck is IsaacGym physics sim (30–50% GPU util), not NN compute. A40 ≈ 
 
 ## 6. Bug Fixes
 
-### Fix: IsaacGym Crash at 4096+ Envs (CUDA Error 700 / Segfault)
+### [Fix] IsaacGym Crash at 4096+ Envs (CUDA Error 700 / Segfault)
 
 **Root cause**: `SimulatorConfig` defaults to 5 projectile cubes per env. Each cube is a dynamic rigid body that PhysX tracks contact patches for against the triangle mesh terrain (wildcard broadphase coverage):
 
@@ -579,7 +581,7 @@ def _throw_projectile(self) -> None:
 
 ---
 
-### Fix: Multi-GPU Deadlock (NCCL P2P Hang)
+### [Fix] Multi-GPU Deadlock (NCCL P2P Hang)
 
 **Root cause**: NCCL P2P initialization conflicts with IsaacGym's CUDA context. `cudaIpcGetMemHandle()` call silently hangs (30-min timeout) because IsaacGym already holds the CUDA context.
 
@@ -600,7 +602,7 @@ Last print before hang identifies the exact deadlock point.
 
 ## 7. Evaluator Improvements
 
-### Overview
+### [Overview] Evaluator Design
 
 The evaluator runs every 200 epochs and serves two purposes:
 - **Logging**: records per-frame robot state → computes smoothness, jitter, success rates → logs to wandb
@@ -608,7 +610,7 @@ The evaluator runs every 200 epochs and serves two purposes:
 
 ---
 
-### `eval_one_shape_per_motion` — Evaluator Sampling Strategy
+### [Optimization] `eval_one_shape_per_motion` — Evaluator Sampling Strategy
 
 **Problem**: With ~131k total motions (1024 clips × 128 shapes), the evaluator iterated every motion each cycle, running for hours and never completing on a single GPU.
 
@@ -644,7 +646,7 @@ def _sample_one_shape_per_motion(self) -> torch.Tensor:
 
 ---
 
-### Clip-Level Curriculum Propagation
+### [Optimization] Clip-Level Curriculum Propagation
 
 **Problem**: When clip X fails under `shape_A`, only motion ID `(clip_X, shape_A)` gets `weight = 1.0`. The other 127 shape variants keep their old (possibly low) weights. Cross-run comparison was also noisy because different random shape draws dominated the failure set.
 
@@ -672,10 +674,18 @@ if self.motion_lib.has_morphology_metadata():
 
 ---
 
-### `max_motions` — Inference with Large Motion Files
+### [Fix] `max_motions` — Inference with Large Motion Files
 
 **Problem**: `humos_131072_0000_offset.pt` is 3.6 GB. Loading it during inference with 16 envs exceeds GPU memory.
 
 **Fix**: Added `max_motions: Optional[int]` to `MotionLibConfig` (default `None`). When set, `load_from_file` loads the full file to CPU, slices to the first N motions, then moves to GPU.
 
 **Usage**: `--max-motions 1024` — with 128 shapes, set ≥ 128 so morphology-consistent sampling has at least one motion per shape. 1024 is comfortable (~30 MB GPU vs 3.6 GB).
+
+================================================================================
+
+## 8. Evaluation on hhi_1024_motion_tune
+
+python protomotions/inference_agent_mor.py --checkpoint results/hhi_1024_motion_tune/score_based.ckpt --simulator isaacgym --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0000_offset.pt --compact-spawn-spacing 1.5 --num-envs 16 --max-motions 128
+
+python protomotions/inference_agent_mor.py --checkpoint results/hhi_1024_motion_tune/score_based.ckpt --simulator isaacgym --motion-file /home/hlz/datasets/humos_proto/failed/failed_clips.pt --compact-spawn-spacing 1.5 --num-envs 16 --max-motions 128
