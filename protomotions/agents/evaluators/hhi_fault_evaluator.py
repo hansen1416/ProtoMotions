@@ -117,6 +117,7 @@ class HHIFaultEvaluator(MimicEvaluator):
 
             self._episode_ctx = MimicEpisodeContext(
                 motion_ids=motion_ids,
+                local_ids=motion_ids,
                 frame_limits=frame_limits,
             )
 

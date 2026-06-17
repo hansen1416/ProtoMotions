@@ -2,7 +2,7 @@
 
 ## Training
 
-- **A1 (HIGH)** Residual PD: change `q_target = q_neutral + scale * action` → `q_target = q_ref + scale * action` using `EnvContext.mimic.ref_state.dof_pos`
+- ~~**A1 (HIGH)** Residual PD: change `q_target = q_neutral + scale * action` → `q_target = q_ref + scale * action` using `EnvContext.mimic.ref_state.dof_pos`~~ *(ProtoMotions does not use residual PD and achieves its results without it; PHC claim does not transfer)*
 - **A2 (HIGH)** Contact reward: extend `contact_bodies` to include `L_Knee`, `R_Knee`, `L_Wrist`, `R_Wrist` for crawl/kneel clips
 - **A3 (MED)** Phase obs: add `φ = frame_idx / total_frames ∈ [0,1]` as observation key
 - **A4 (MED)** Per-shape RunningMeanStd: 128 separate buffers keyed by `asset_id`
@@ -14,6 +14,8 @@
 - **B1 (CRITICAL)** Held-out eval: generate 16–32 interpolation betas + extrapolation betas via HUMOS; eval `hhi_1024_motion` and `hhi_1024_motion_tune` checkpoints; plot tracking error vs beta L2 distance
 - **B2 (HIGH)** Embodiment probe: record actor hidden activations for 128 shapes; fit linear regression → `[mass, com_height, limb_lengths]`; report R² per property
 - **B3 (MED)** Stride analysis: measure stride length/frequency across 128 shapes for a walking clip
+
+================================================================================
 
 ## Evaluation — `hhi_1024_motion_tune` (systematic)
 

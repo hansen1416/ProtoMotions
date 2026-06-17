@@ -686,6 +686,153 @@ if self.motion_lib.has_morphology_metadata():
 
 ## 8. Evaluation on hhi_1024_motion_tune
 
-python protomotions/inference_agent_mor.py --checkpoint results/hhi_1024_motion_tune/score_based.ckpt --simulator isaacgym --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0000_offset.pt --compact-spawn-spacing 1.5 --num-envs 16 --max-motions 128
+### [Command] Inference (visual)
 
-python protomotions/inference_agent_mor.py --checkpoint results/hhi_1024_motion_tune/score_based.ckpt --simulator isaacgym --motion-file /home/hlz/datasets/humos_proto/failed/failed_clips.pt --compact-spawn-spacing 1.5 --num-envs 16 --max-motions 128
+```bash
+python protomotions/inference_agent_mor.py \
+    --checkpoint results/hhi_1024_motion_tune/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0000_offset.pt \
+    --compact-spawn-spacing 1.5 --num-envs 16 --max-motions 128
+
+python protomotions/inference_agent_mor.py \
+    --checkpoint results/hhi_1024_motion_tune/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/offset/failed_clips.pt \
+    --compact-spawn-spacing 1.5 --num-envs 16 --max-motions 128
+```
+
+---
+
+### [Command] E1 — Systematic Fault Evaluation
+
+**Motion file choice**: MotionLib's slurmrank loader requires distributed (multi-GPU) setup.
+For single-machine evaluation the motion file must be a single `.pt` file.
+Two options depending on scope:
+
+**Local (hard clips only — 192 clips × 128 shapes = 24,576 motions):**
+Evaluates the exact set fine-tuned on. Most informative for measuring tune improvement.
+```bash
+python protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_1024_motion_tune/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/offset/failed_clips.pt \
+    --num-envs 256 \
+    --headless \
+    --output results/hhi_1024_motion_tune/eval_failed_clips/fault_report.csv
+```
+Expected runtime: ~256 envs × 96 batches × ~150 frames ≈ 30–40 min on one A40/4090.
+
+**RunPod (full 1024 clips × 128 shapes = 131,072 motions):**
+Complete evaluation for the paper. Requires the merged training file on `/workspace`.
+```bash
+python protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_1024_motion_tune/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /workspace/merged4/humos_slurmrank.pt \
+    --num-envs 256 \
+    --headless \
+    --output results/hhi_1024_motion_tune/eval_full_1024/fault_report.csv
+```
+
+---
+
+### [Reference] E1 CSV Output Schema
+
+One row per motion. Columns:
+
+| Column | Used by |
+|---|---|
+| `gender`, `beta_key` | E4 per-shape grouping |
+| `mean_body_dist` | E2 success threshold, E5 cross-shape variance, E6 shape extremity scatter |
+| `min_root_height` | E2 fall detection (threshold 0.5 m) |
+| `max_body_dist`, `mean_root_dist`, `max_root_dist` | supplementary |
+| `motion_id`, `asset_id`, `motion_clip_id` | join back to clip metadata |
+| `steps_seen` | sanity check (should equal motion frames) |
+
+---
+
+### [Plan] E2–E6 Post-Processing (pandas, no re-simulation)
+
+All derived from the E1 CSV + the motion file's `motion_betas` tensor:
+
+- **E2 Success rate**: `(min_root_height > 0.5) & (mean_body_dist < 0.5)` per row → overall %
+- **E4 Per-shape histogram**: group by `(gender, beta_key)`, compute per-shape success rate → histogram over 128 shapes
+- **E5 Cross-shape variance**: group by `motion_clip_id`, compute `std(mean_body_dist)` across 128 shapes → mean and max std
+- **E6 Shape extremity scatter**: join beta L2 norms from `motion_betas` → scatter `‖β‖₂` vs `mean_body_dist`, fit OLS
+
+---
+
+### [Results] Smoke Test — shard 0, 2 clips × 128 shapes (256 motions)
+
+**Command:**
+```bash
+python protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_1024_motion_tune/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0000_offset.pt \
+    --num-envs 256 \
+    --headless \
+    --output evaluation/smoke_test_shard0.csv \
+    --overrides motion_lib.max_motions=256
+```
+
+**Output:** `evaluation/smoke_test_shard0.csv`
+
+| Metric | Value |
+|---|---|
+| Motions evaluated | 256 (2 clips × 128 shapes) |
+| mean_body_dist mean | 1.027 m |
+| mean_body_dist max | 1.854 m |
+| max_body_dist max | 355.7 m |
+| Success rate (root>0.5m & body_dist<0.5m) | 2.3% (6/256) |
+| Physics explosions (max_body_dist>100m) | 243/256 (95%) |
+
+**Interpretation:**
+- `max_body_dist` values of 50–355m are physics instability: individual body parts (hands/feet) reaching degenerate constraint states while the root pelvis stays grounded (mean `min_root_height` ≈ 0.9m)
+- 2.3% success rate and 1m mean body dist indicate near-total failure on these 2 shard-0 clips
+- **Expected behaviour**: the fine-tune was trained exclusively on `failed_clips.pt` (192 hard clips). Shard-0 clips are different motions the fine-tune never saw — high error here is **catastrophic forgetting on easy clips**
+- This is a key paper finding: fine-tuning on hard clips improves those clips at the cost of general tracking quality
+- Next: run on `failed_clips.pt` to measure actual improvement on the clips the model was trained on; run baseline on shard-0 to confirm forgetting quantitatively
+
+---
+
+### [Results] Partial Failed-Clips Eval — tune checkpoint, 8 clips × 128 shapes (1024 motions)
+
+**Memory constraint**: `failed_clips.pt` (24,576 motions) is 10.86 GB — too large for local RTX 4060 (7.72 GB).
+Max safe `max_motions` with `num_envs=256`: ~1024. Full 192-clip eval must run on RunPod.
+
+**Command:**
+```bash
+python protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_1024_motion_tune/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/failed/failed_clips.pt \
+    --num-envs 256 \
+    --headless \
+    --output evaluation/tune_failed_clips_1k.csv \
+    --overrides motion_lib.max_motions=1024
+```
+
+**Output:** `evaluation/tune_failed_clips_1k.csv`
+
+| Metric | Tune (failed clips) | Tune (shard-0 easy clips) |
+|---|---|---|
+| Motions evaluated | 1024 (8×128) | 256 (2×128) |
+| mean_body_dist mean | **0.750 m** | 1.027 m |
+| Success rate | **14.6%** | 2.3% |
+| Falls (root ≤ 0.5m) | 33.0% | ~0% |
+| Drifts (root ok, bad tracking) | 52.4% | ~97% |
+
+**Failure mode breakdown (key paper finding):**
+- **Falls** (33%): root height drops below 0.5m — complete balance loss. Mean body dist 0.68m
+- **Drifts** (52%): root stays up (~0.9m) but body tracking fails — consistent with the 3–4× jerk reported in training. Mean body dist 0.91m
+- **Successes** (14.6%): body_dist < 0.5m AND root > 0.5m — balanced across genders (female 14.6%, male 14.5%)
+
+Two visible clusters in worst-performing motions:
+1. `min_root_height ≈ 0.1m` → clear fall (floor-contact motions where gravity wins)
+2. `min_root_height ≈ 0.9m` → no fall but large drift → jerk/high-frequency oscillations
+
+**Interpretation:** Tune model performs noticeably better on the hard clips it was trained on (0.75m vs 1.03m on easy clips, 14.6% vs 2.3% success). But 14.6% success on crawl/kneel/squat is still low — residual PD (TODO A1) is the structural fix needed.
+
+**Next to run on RunPod:** Full 192-clip evaluation of both tune and baseline checkpoints on `failed_clips.pt` and at least one full shard, to quantify forgetting vs improvement trade-off.
