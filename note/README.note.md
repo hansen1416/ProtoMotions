@@ -125,6 +125,22 @@ Merge shards into fewer files:
 tools/merge_motion_shards.py
 ```
 
+#### [Logic] Frame-0 Grounding Algorithm (`compute_humos_frame0_offsets.py`)
+
+**Goal**: shift each motion's `gts[:, :, 2]` so the lowest collision point at frame 0 sits at `target_z = 0.005 m` above the ground plane. This prevents characters from spawning partially underground.
+
+**Key design**: creates one IsaacGym env per **unique SMPL shape** (~128 envs) and reuses them across all ~131k motions in rounds — ~64× cheaper than one env per motion.
+
+**Steps:**
+1. Parse collision geometry from each MJCF XML (capsules, spheres, boxes, cylinders → `LocalShape` objects with body-local points and radii). Pre-batches these into `[N_shapes, P, 3]` GPU tensors once.
+2. For each round, set frame-0 root position/rotation and DOF state into the matching env using IsaacGym's indexed set-tensor API (only touched envs disturbed).
+3. Run one simulation step (gravity disabled) → refresh `rigid_body_states` to get FK'd world poses.
+4. For each geom slot: rotate local points by the body's world quaternion, add body world position → world-space collision points. Lowest Z across all geoms = `lowest_z[env]`.
+5. `offset = target_z - lowest_z`. Apply as a constant Z shift to all frames: `gts[start:end, :, 2] += offset`. Velocities (`gvs`) are unchanged — a rigid vertical shift does not affect velocity.
+6. Save corrected `gts` back into the motion file (all other metadata fields preserved).
+
+**Output**: `*_offset.pt` file with identical structure to input; only `gts` changes.
+
 ---
 
 ### [Pipeline] Step 5: Visualize

@@ -46,21 +46,7 @@ tmux kill-server
 tmux capture-pane -p -S -5000 > /tmp/tmux_log.txt
   cat /tmp/tmux_log.txt | grep -i "error\|traceback\|exception" | head -50
 
-
-```bash
-python protomotions/train_agent.py \
-    --robot-name smpl_mor \
-    --simulator isaacgym \
-    --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name hhi_1_motion_128_shape \
-    --motion-file ./humos_128_offset.pt \
-    --num-envs 1024 \
-    --batch-size 4096 \
-    --use-wandb \
-    --wandb-project hhi-protomotions \
-    --wandb-entity yugoamaryl \
-    --wandb-group hhi_1_motion_128_shape
-```
+------
 
 ```bash
 python -u protomotions/train_agent.py \
@@ -92,6 +78,22 @@ nohup python -u protomotions/train_agent.py \
     --wandb-project hhi-protomotions \
     --wandb-entity yugoamaryl \
     --wandb-group hhi_1024_motion_tune > /tmp/train_hhi_tune.log 2>&1 &
+```
+
+```bash
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp.py \
+  --experiment-name hhi_1024_transfer \
+  --motion-file /workspace/merged4/humos_slurmrank.pt \
+  --checkpoint results/hhi_1024_motion/last.ckpt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_1024_transfer > /tmp/train_hhi_transfer.log 2>&1 &
 ```
 
 ------
