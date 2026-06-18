@@ -904,4 +904,35 @@ nohup python -u protomotions/train_agent.py \
 
 Motion sampling weights restart fresh (desired — improved `eval_one_shape_per_motion` sampling strategy replaces old curriculum state).
 
+================================================================================
+
+## 10. Transfer Training Fix (2026-06-18)
+
+### [Fix] Revert Smoothness and Contact Force Changes (commit 02c18d6)
+
+The reward changes introduced in the previous section caused `WARNING:tensorboardX.x2num:NaN or Inf found in input tensor` every epoch during `hhi_1024_transfer`. Root cause: `contact_force_change_rew` returns raw unbounded Newton values (`force_changes.sum(dim=-1)`), which overflow float16 in the logging pipeline (`episode_env_tensors` stores as float16, max ~65504). Large SMPL body shapes with diverse motions can produce contact force changes far exceeding this limit, silently producing `inf` in TensorBoard/WandB logs.
+
+Reverted in `mlp.py`:
+- `action_smoothness` weight: `-0.05` → `-0.02` (restored original)
+- `contact_force_change_rew` reward component: removed entirely
+
+### [Command] Transfer Training Command (with 4 GPUs)
+
+```bash
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp.py \
+  --experiment-name hhi_1024_transfer \
+  --motion-file /workspace/merged4/humos_slurmrank.pt \
+  --checkpoint results/hhi_1024_motion/last.ckpt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 4 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_1024_transfer > /tmp/train_hhi_transfer.log 2>&1 &
+```
+
 **Next to run on RunPod:** Full 192-clip evaluation of both tune and baseline checkpoints on `failed_clips.pt` and at least one full shard, to quantify forgetting vs improvement trade-off.
