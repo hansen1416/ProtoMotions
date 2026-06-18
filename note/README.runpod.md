@@ -87,9 +87,9 @@ nohup python -u protomotions/train_agent.py \
   --experiment-path examples/experiments/mimic/mlp.py \
   --experiment-name hhi_1024_transfer \
   --motion-file /workspace/merged4/humos_slurmrank.pt \
-  --checkpoint results/hhi_1024_motion/last.ckpt \
   --num-envs 4096 \
   --batch-size 16384 \
+  --ngpu 4 \
   --use-wandb \
   --wandb-project hhi-protomotions \
   --wandb-entity yugoamaryl \

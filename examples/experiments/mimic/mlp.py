@@ -58,7 +58,6 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
         mimic_tracking_rewards_factory,
         pow_rew_factory,
         contact_match_rew_factory,
-        contact_force_change_rew_factory,
         tracking_error_term_factory,
         morphology_obs_factory,
     )
@@ -82,7 +81,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
     }
 
     reward_components = {
-        "action_smoothness": action_smoothness_factory(weight=-0.05),
+        "action_smoothness": action_smoothness_factory(weight=-0.02),
         **mimic_tracking_rewards_factory(
             gt_weight=0.5,
             gr_weight=0.3,
@@ -98,9 +97,6 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
         "pow_rew": pow_rew_factory(weight=-1e-5, min_value=-0.5),
         "contact_match_rew": contact_match_rew_factory(
             weight=-0.1, zero_during_grace_period=True
-        ),
-        "contact_force_change_rew": contact_force_change_rew_factory(
-            weight=-1e-4, threshold=30.0, zero_during_grace_period=True
         ),
     }
 
