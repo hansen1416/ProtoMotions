@@ -5,8 +5,7 @@ import torch
 import yaml
 
 
-# FILENAME_RE = re.compile(r"^(male|female|neutral)_(.+)_smpl\.xml$")
-FILENAME_RE = re.compile(r"^(male|female|neutral)_(.+)_smplx\.xml$")
+FILENAME_RE = re.compile(r"^(male|female|neutral)_(.+)_smpl\.xml$")
 
 
 def to_float_list(x):
@@ -114,17 +113,18 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-    """
-    python tools/generate_smpl_mor_asset_info.py \
-    --asset-folder mjcf/smpl_mor \
-    --betas-file protomotions/data/assets/all_betas.pt \
-    --out protomotions/data/assets/mjcf/smpl_mor/assets.yaml
-    """
-
-    """
-    python tools/generate_smpl_mor_asset_info.py \
-    --asset-folder mjcf/smplx_mor \
-    --betas-file protomotions/data/assets/all_betas.pt \
-    --out protomotions/data/assets/mjcf/smplx_mor/assets.yaml
-    """
+    # Example usage:
+    # python tools/generate_smpl_mor_asset_info.py \
+    #     --asset-folder mjcf/smpl_mor \
+    #     --betas-file protomotions/data/assets/all_betas.pt \
+    #     --out protomotions/data/assets/mjcf/smpl_mor/assets.yaml
+    #
+    # python tools/generate_smpl_mor_asset_info.py \
+    #     --asset-folder mjcf/smpl_mor_interp \
+    #     --betas-file /home/hlz/repos/humos/humos/all_betas_interp.pt \
+    #     --out protomotions/data/assets/mjcf/smpl_mor_interp/assets.yaml
+    #
+    # python tools/generate_smpl_mor_asset_info.py \
+    #     --asset-folder mjcf/smpl_mor_extrap \
+    #     --betas-file /home/hlz/repos/humos/humos/all_betas_extrap.pt \
+    #     --out protomotions/data/assets/mjcf/smpl_mor_extrap/assets.yaml

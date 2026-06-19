@@ -258,3 +258,38 @@ but those are Tier 3 deferred items and the infrastructure already exists to add
 - **E9** Contact timing adaptation — needs per-step foot contact state recording
 - **E11** Failure mode taxonomy — fall / COM drift / joint-limit / contact failure classification
 - **B2** Embodiment probe — actor hidden activations → linear regression to mass/COM/limb lengths
+
+======================================================
+
+┌─────────────────┬───────┬──────┬─────────┬─────────┬────────┐
+│       Set       │ Betas │ Seed │  Range  │ L2 mean │ L2 max │
+├─────────────────┼───────┼──────┼─────────┼─────────┼────────┤
+│ Training        │ 64    │ 46   │ [-3, 3] │ 5.48    │ 6.96   │
+├─────────────────┼───────┼──────┼─────────┼─────────┼────────┤
+│ Interp held-out │ 16    │ 99   │ [-3, 3] │ 5.05    │ 6.58   │
+├─────────────────┼───────┼──────┼─────────┼─────────┼────────┤
+│ Extrap held-out │ 16    │ 99   │ [-5, 5] │ 8.41    │ 10.97  │
+└─────────────────┴───────┴──────┴─────────┴─────────┴────────┘
+
+Zero key overlap with training — no shape collisions. The extrapolation set has L2 norms well above the training ceiling
+(6.96), so the boundary between in/out of distribution is unambiguous for the paper.
+
+To run once SMPLSim deps are available:
+  cd /home/hlz/repos/SMPLSim
+
+  # interpolation shapes
+  python run_heldout.py --mode interp --num-betas 16
+
+  # extrapolation shapes
+  python run_heldout.py --mode extrap --num-betas 16
+
+  Then generate assets.yaml for each (from ProtoMotions root):
+  python tools/generate_smpl_mor_asset_info.py \
+      --asset-folder mjcf/smpl_mor_interp \
+      --betas-file /home/hlz/repos/humos/humos/all_betas_interp.pt \
+      --out protomotions/data/assets/mjcf/smpl_mor_interp/assets.yaml
+
+    python tools/generate_smpl_mor_asset_info.py \
+      --asset-folder mjcf/smpl_mor_extrap \
+      --betas-file /home/hlz/repos/humos/humos/all_betas_extrap.pt \
+      --out protomotions/data/assets/mjcf/smpl_mor_extrap/assets.yaml
