@@ -284,12 +284,13 @@ To run once SMPLSim deps are available:
   python run_heldout.py --mode extrap --num-betas 16
 
   Then generate assets.yaml for each (from ProtoMotions root):
-  python tools/generate_smpl_mor_asset_info.py \
-      --asset-folder mjcf/smpl_mor_interp \
-      --betas-file /home/hlz/repos/humos/humos/all_betas_interp.pt \
-      --out protomotions/data/assets/mjcf/smpl_mor_interp/assets.yaml
 
-    python tools/generate_smpl_mor_asset_info.py \
-      --asset-folder mjcf/smpl_mor_extrap \
-      --betas-file /home/hlz/repos/humos/humos/all_betas_extrap.pt \
-      --out protomotions/data/assets/mjcf/smpl_mor_extrap/assets.yaml
+python tools/generate_smpl_mor_asset_info.py \
+    --asset-folder mjcf/smpl_mor_interp \
+    --betas-file /home/hlz/repos/humos/humos/all_betas_interp.pt \
+    --out protomotions/data/assets/mjcf/smpl_mor_interp/assets.yaml
+
+python tools/generate_smpl_mor_asset_info.py \
+    --asset-folder mjcf/smpl_mor_extrap \
+    --betas-file /home/hlz/repos/humos/humos/all_betas_extrap.pt \
+    --out protomotions/data/assets/mjcf/smpl_mor_extrap/assets.yaml
