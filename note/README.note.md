@@ -936,3 +936,109 @@ nohup python -u protomotions/train_agent.py \
 ```
 
 **Next to run on RunPod:** Full 192-clip evaluation of both tune and baseline checkpoints on `failed_clips.pt` and at least one full shard, to quantify forgetting vs improvement trade-off.
+
+================================================================================
+
+## 11. New Training Strategy — Two-Stage Curriculum (2026-06-19)
+
+### [Analysis] Why the 717-clip Test Set Was Wrong
+
+The original E7 held-out evaluation ran HUMOS inference on 717 HumanML3D test-split clips to test generalisation to new body shapes. This confounds **motion OOD** with **shape OOD**: if the policy fails, it is impossible to tell whether the cause is the new motion content or the new body shape. E7 is supposed to isolate shape generalisation only.
+
+Root cause of the 717: `infer.py` concatenates train+val+test splits, skips keyids already in the rclone cache (`remote_index.txt`, 21,742 entries from prior training runs), and strips M-prefix from the test split. The 717 = 664 MLD test clips + 53 train/val stragglers — an accidental outcome of rclone cache state, not a deliberate split.
+
+### [Strategy] Two-Stage Curriculum
+
+**Stage 1 — Learn all motion content on a neutral body.**
+Train on all 20,951 valid HumanML3D clips (from `valid_sorted.json`, difficulty-ordered) with betas = 0 (neutral SMPL shape). The policy sees the full diversity of human motion without any body-shape variation. Morphology obs is still passed (all zeros) — the policy learns to ignore it.
+
+**Stage 2 — Transfer: introduce body shape variation.**
+Fine-tune the Stage 1 checkpoint on the existing 1024-clip × 128-shape dataset (`humos_slurmrank.pt`). The policy already tracks all motion types; Stage 2 only teaches it to adapt per body shape.
+
+**Why this is better:**
+- After Stage 1 the policy has seen all 20,951 motions — any held-out evaluation clip is in-distribution for motion content.
+- E7 (held-out betas on the same 1024 clips) then tests *only* shape generalisation — the confound is gone.
+- Stage 2 is a smaller learning problem: shape adaptation on top of a converged motion prior.
+
+### [Pipeline] Stage 1 Data Preparation — Neutral-Beta npz Export
+
+**Source:** HUMOS `.tensor` files at `/home/hlz/repos/humos/datasets/humos3dfeats/`.
+Each `.tensor` file contains the original AMASS motion (`root_orient`, `pose_body`, `trans`) at 20 FPS with the original actor's betas (non-zero, real person). We zero the betas and keep the poses as-is — the joint angles are nearly body-shape-agnostic, and the small kinematic inconsistency is acceptable for Stage 1.
+
+**Motion IDs:** exactly the 20,951 keyids in `valid_sorted.json` (physically plausible, difficulty-ordered). Includes M-prefix (mirrored) clips.
+
+**Script:** `tools/export_tensor_to_amass_npz.py`
+
+```bash
+# Run from ProtoMotions root
+python tools/export_tensor_to_amass_npz.py \
+    --out-root /home/hlz/datasets/amass_neutral \
+    --skip-existing
+```
+
+**Output (already generated, 2026-06-19):**
+```
+/home/hlz/datasets/amass_neutral/
+    HML3D/
+        {keyid}_v00_{gender}_neutral.npz   # 20,951 files
+    humanml3d_neutral_20951.yaml           # motion config for downstream pipeline
+    humanml3d_neutral_20951_manifest.yaml  # clip metadata with difficulty scores
+```
+
+npz fields per clip:
+| Field | Shape | Value |
+|---|---|---|
+| `poses` | (T, 66) | root_orient(3) + body(63), float32 |
+| `trans` | (T, 3) | root translation, float32 |
+| `betas` | (10,) | all zeros |
+| `gender` | scalar str | original actor's gender (`male`/`female`) |
+| `clip_id` | scalar str | HumanML3D keyid (e.g. `000005`, `M004501`) |
+| `mocap_framerate` | scalar | 20.0 |
+
+**Next steps** (not yet run):
+
+Step 5 — Convert to MotionLib `.pt`:
+```bash
+python tools/convert_amass_to_motionlib_with_morphology.py \
+    /home/hlz/datasets/amass_neutral \
+    /home/hlz/datasets/amass_neutral_pt \
+    --motion-config /home/hlz/datasets/amass_neutral/humanml3d_neutral_20951.yaml \
+    --humanoid-type smpl \
+    --output-fps 30 \
+    --device cuda
+```
+Requires a `neutral` entry in an `assets.yaml` pointing to a single neutral-body SMPL MJCF (one per gender). Create `male_neutral` and `female_neutral` assets from the existing smpl_mor XMLs with zero betas.
+
+Step 6 — Frame-0 grounding offset (IsaacGym):
+```bash
+python tools/compute_humos_frame0_offsets.py \
+    --motion-file /home/hlz/datasets/amass_neutral_pt/humanml3d_neutral_20951_0000.pt \
+    --asset-root protomotions/data/assets/mjcf/smpl_neutral \
+    --out-motion-file /home/hlz/datasets/amass_neutral_pt/humanml3d_neutral_20951_0000_offset.pt \
+    --overwrite
+```
+
+Step 7 — Stage 1 training (RunPod):
+```bash
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_stage1_neutral \
+    --motion-file /workspace/amass_neutral_pt/humanml3d_neutral_20951_0000_offset.pt \
+    --num-envs 4096 \
+    --batch-size 16384
+```
+
+Step 8 — Stage 2 transfer (RunPod, from Stage 1 checkpoint):
+```bash
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_stage2_transfer \
+    --motion-file /workspace/merged4/humos_slurmrank.pt \
+    --checkpoint results/hhi_stage1_neutral/last.ckpt \
+    --num-envs 4096 \
+    --batch-size 16384
+```

@@ -261,7 +261,7 @@ nohup python -u humos/infer.py \
     > /tmp/humos_extrap.log 2>&1 &
 ```
 
-Output: `~1024 .pt files` per run (one per HumanML3D clip).
+Output: `717 .pt files` per run (one per HumanML3D test-split clip). The training set has 1024 clips (M-prefix); the test split HUMOS uses for inference has 717.
 
 ### Step 4 — Export to AMASS NPZ (local, run in ProtoMotions root)
 
