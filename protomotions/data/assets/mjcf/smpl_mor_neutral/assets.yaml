@@ -1,0 +1,30 @@
+- asset_id: female_neutral
+  gender: female
+  beta_key: neutral
+  betas:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  root_height: 0.95
+- asset_id: male_neutral
+  gender: male
+  beta_key: neutral
+  betas:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  root_height: 0.95

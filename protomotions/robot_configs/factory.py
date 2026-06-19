@@ -61,6 +61,12 @@ def robot_config(robot_name: str, **updates) -> RobotConfig:
         from protomotions.robot_configs.smpl_mor import SmplMorRobotConfig
 
         config = SmplMorRobotConfig()
+    elif robot_name == "smpl_mor_neutral":
+        from protomotions.robot_configs.smpl_mor import SmplMorRobotConfig
+
+        config = SmplMorRobotConfig()
+        config.asset.asset_folder_name = "mjcf/smpl_mor_neutral/"
+        config.asset.asset_info_file = "mjcf/smpl_mor_neutral/assets.yaml"
     else:
         raise ValueError(f"Invalid robot name: {robot_name}")
 

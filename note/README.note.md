@@ -1029,23 +1029,80 @@ Output (already generated, 2026-06-19):
 
 Requires a `neutral` entry in an `assets.yaml` pointing to a single neutral-body SMPL MJCF (one per gender). Create `male_neutral` and `female_neutral` assets from the existing smpl_mor XMLs with zero betas.
 
+Also added `smpl_mor_neutral` to `protomotions/robot_configs/factory.py` — same as `smpl_mor` but with `asset_folder_name` and `asset_info_file` pointing to `mjcf/smpl_mor_neutral/`. Use `--robot-name smpl_mor_neutral` for Stage 1 training and visualization.
+
+Step 5a — Create neutral SMPL MJCF assets (run from SMPLSim repo, `smplsim` conda env):
+
+Generates `male_neutral_smpl.xml`, `female_neutral_smpl.xml` (betas = 0) and
+`all_betas_neutral.pt = {"neutral": zeros(10)}`.
+
+```bash
+cd /home/hlz/repos/SMPLSim
+conda run -n smplsim python run_neutral.py
+```
+
+Output:
+```
+protomotions/data/assets/mjcf/smpl_mor_neutral/male_neutral_smpl.xml
+protomotions/data/assets/mjcf/smpl_mor_neutral/female_neutral_smpl.xml
+protomotions/data/assets/all_betas_neutral.pt
+```
+
+Step 5b — Generate `assets.yaml` for the neutral MJCF folder (run from ProtoMotions root, any env):
+
+```bash
+cd /home/hlz/repos/ProtoMotions
+python tools/generate_smpl_mor_asset_info.py \
+    --asset-folder mjcf/smpl_mor_neutral \
+    --betas-file protomotions/data/assets/all_betas_neutral.pt \
+    --out protomotions/data/assets/mjcf/smpl_mor_neutral/assets.yaml
+```
+
+This produces 2 entries in the YAML (`male_neutral` and `female_neutral`), each with
+`betas=[0,0,...,0]` and `root_height=0.95` (default; adjusted after Step 6 grounding).
+
 Step 6 — Frame-0 grounding offset (IsaacGym):
 ```bash
-python tools/compute_humos_frame0_offsets.py \
-    --motion-file /home/hlz/datasets/amass_neutral_pt/humanml3d_neutral_20951_0000.pt \
-    --asset-root protomotions/data/assets/mjcf/smpl_neutral \
-    --out-motion-file /home/hlz/datasets/amass_neutral_pt/humanml3d_neutral_20951_0000_offset.pt \
-    --overwrite
+bash tools/run_frame0_offsets_neutral.sh
+```
+Runs `compute_humos_frame0_offsets.py` on all 6 chunks against `mjcf/smpl_mor_neutral` assets.
+Output: `humos_proto_neutral/humanml3d_neutral_20951_{0000-0005}_offset.pt`
+
+Step 6b — Visualize motion (kinematic playback, no trained policy needed):
+```bash
+# Before Step 6 (raw, may float/clip through floor):
+python examples/env_kinematic_playback.py \
+    --robot-name smpl_mor_neutral \
+    --simulator isaacgym \
+    --num-envs 4 \
+    --motion-file /home/hlz/datasets/humos_proto_neutral/humanml3d_neutral_20951_0000.pt \
+    --experiment-path examples/experiments/mimic/mlp.py
+
+# After Step 6 (grounded):
+python examples/env_kinematic_playback.py \
+    --robot-name smpl_mor_neutral \
+    --simulator isaacgym \
+    --num-envs 4 \
+    --motion-file /home/hlz/datasets/humos_proto_neutral/humanml3d_neutral_20951_0000_offset.pt \
+    --experiment-path examples/experiments/mimic/mlp.py
 ```
 
 Step 7 — Stage 1 training (RunPod):
+
+Upload all 6 offset chunks first:
+```bash
+rsync -avz /home/hlz/datasets/humos_proto_neutral/*_offset.pt runpod:/workspace/humos_proto_neutral/
+rsync -avz protomotions/data/assets/mjcf/smpl_mor_neutral/ runpod:/workspace/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor_neutral/
+```
+
+Train on all 6 chunks by passing them as a glob or list (MotionLib supports multiple files):
 ```bash
 python protomotions/train_agent.py \
-    --robot-name smpl_mor \
+    --robot-name smpl_mor_neutral \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
     --experiment-name hhi_stage1_neutral \
-    --motion-file /workspace/amass_neutral_pt/humanml3d_neutral_20951_0000_offset.pt \
+    --motion-file /workspace/humos_proto_neutral/humanml3d_neutral_20951_0000_offset.pt \
     --num-envs 4096 \
     --batch-size 16384
 ```
