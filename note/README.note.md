@@ -997,16 +997,36 @@ npz fields per clip:
 
 **Next steps** (not yet run):
 
-Step 5 — Convert to MotionLib `.pt`:
+Step 5 — Convert to MotionLib `.pt` (run in ProtoMotions root):
 ```bash
+# First attempt used --batch-size 25000 → single 7.3 GB file → PyTorch miniz ZIP reader fails on >~4 GB.
+# Correct command uses --batch-size 4096 → 6 chunks of ~1.4 GB each (safe limit ~3.5 GB).
+
 python tools/convert_amass_to_motionlib_with_morphology.py \
     /home/hlz/datasets/amass_neutral \
-    /home/hlz/datasets/amass_neutral_pt \
+    /home/hlz/datasets/humos_proto_neutral \
     --motion-config /home/hlz/datasets/amass_neutral/humanml3d_neutral_20951.yaml \
     --humanoid-type smpl \
     --output-fps 30 \
-    --device cuda
+    --device cpu \
+    --batch-size 4096
 ```
+
+Output (already generated, 2026-06-19):
+```
+/home/hlz/datasets/humos_proto_neutral/
+    humanml3d_neutral_20951_0000.pt   # 4096 motions, ~1.4 GB
+    humanml3d_neutral_20951_0001.pt   # 4096 motions
+    humanml3d_neutral_20951_0002.pt   # 4096 motions
+    humanml3d_neutral_20951_0003.pt   # 4096 motions
+    humanml3d_neutral_20951_0004.pt   # 4096 motions
+    humanml3d_neutral_20951_0005.pt   # 471 motions
+```
+
+**Verified correct** — all 20,951 motions load cleanly with the right fields. Two expected differences from the HUMOS dataset:
+- **20 fps** (not 30): `.tensor` files are at 20 fps; 20 has no divisor ≥ 30 so the converter keeps 20 fps (`motion_dt = 0.05`). `motion_dt` is stored per-motion so MotionLib interpolates correctly at training time.
+- **Variable clip length 0.3s – 263.6s** (vs fixed 6.6s in HUMOS): `valid_sorted.json` applies no duration filter. Long clips are fine — MotionLib samples random start frames within each clip during training.
+
 Requires a `neutral` entry in an `assets.yaml` pointing to a single neutral-body SMPL MJCF (one per gender). Create `male_neutral` and `female_neutral` assets from the existing smpl_mor XMLs with zero betas.
 
 Step 6 — Frame-0 grounding offset (IsaacGym):
