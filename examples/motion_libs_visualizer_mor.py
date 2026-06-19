@@ -46,7 +46,7 @@ parser.add_argument(
 parser.add_argument(
     "--robot",
     type=str,
-    choices=["g1", "rigv1", "h1_2", "smpl", "soma23", "smpl_mor"],
+    choices=["g1", "rigv1", "h1_2", "smpl", "soma23", "smpl_mor", "smpl_mor_neutral"],
     default="g1",
     help="Robot to load (g1, rigv1, h1_2, smpl, or soma23)",
 )
@@ -175,6 +175,9 @@ ROBOT_SPECS = {
         viz_bodies=[],
     ),
     "smpl_mor": RobotSpec(
+        viz_bodies=[],
+    ),
+    "smpl_mor_neutral": RobotSpec(
         viz_bodies=[],
     ),
 }
@@ -385,7 +388,7 @@ class MotionVisualizerSmoothness:
         # Special mode:
         # one packaged MotionLib contains many motions,
         # each motion has one morphology asset_id.
-        if not (robot_name == "smpl_mor"
+        if not (robot_name in ("smpl_mor", "smpl_mor_neutral")
             and len(self.motion_libs) == 1
             and self.motion_libs[0].has_morphology_metadata()
         ):

@@ -1095,7 +1095,8 @@ rsync -avz /home/hlz/datasets/humos_proto_neutral/*_offset.pt runpod:/workspace/
 rsync -avz protomotions/data/assets/mjcf/smpl_mor_neutral/ runpod:/workspace/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor_neutral/
 ```
 
-Train on all 6 chunks by passing them as a glob or list (MotionLib supports multiple files):
+MotionLib loads one `.pt` per GPU. For single-GPU RunPod, pass one chunk (4096 motions — sufficient for Stage 1 warm-up). For multi-GPU, use the slurmrank file-per-rank mechanism (see existing humos training setup for reference).
+
 ```bash
 python protomotions/train_agent.py \
     --robot-name smpl_mor_neutral \
