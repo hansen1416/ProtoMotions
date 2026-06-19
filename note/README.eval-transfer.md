@@ -195,6 +195,160 @@ Output 2D heatmap.
 
 ---
 
+## Part 1b — Held-out beta evaluation (E7)
+
+Requires generating new motion clips for the 16 interp + 16 extrap held-out shapes.
+All steps run on RunPod. Step 1 (XML/betas) is already done locally.
+
+### Step 1 — Generate XML assets (DONE locally)
+
+```bash
+# already run:
+cd /home/hlz/repos/SMPLSim
+python run_heldout.py --mode interp --num-betas 16
+python run_heldout.py --mode extrap --num-betas 16
+# betas: protomotions/data/assets/all_betas_{interp,extrap}.pt
+# XMLs:  protomotions/data/assets/mjcf/smpl_mor_{interp,extrap}/
+```
+
+Beta distribution (validated, zero key overlap with training betas):
+
+| Set | Betas | Seed | Range | L2 mean | L2 max |
+|---|---|---|---|---|---|
+| Training | 64 | 46 | [-3, 3] | 5.48 | 6.96 |
+| Interp held-out | 16 | 99 | [-3, 3] | 5.05 | 6.58 |
+| Extrap held-out | 16 | 99 | [-5, 5] | 8.41 | 10.97 |
+
+Extrap L2 norms (max 10.97) are well above the training ceiling (6.96) — the in/out-of-distribution boundary is unambiguous for the paper.
+
+### Step 2 — Generate assets.yaml (run in ProtoMotions root)
+
+```bash
+python tools/generate_smpl_mor_asset_info.py \
+    --asset-folder mjcf/smpl_mor_interp \
+    --betas-file protomotions/data/assets/all_betas_interp.pt \
+    --out protomotions/data/assets/mjcf/smpl_mor_interp/assets.yaml
+
+python tools/generate_smpl_mor_asset_info.py \
+    --asset-folder mjcf/smpl_mor_extrap \
+    --betas-file protomotions/data/assets/all_betas_extrap.pt \
+    --out protomotions/data/assets/mjcf/smpl_mor_extrap/assets.yaml
+```
+
+### Step 3 — HUMOS inference (local)
+
+Script: `humos/humos/infer.py` — produces `{keyid}.pt` per motion clip,
+each containing `{gender: {beta_key: {root_orient, pose_body, trans, betas, offset_height, ...}}}`.
+Checkpoint: `logs/humos/q6zbv2tu/checkpoints/latest-epoch=1599.ckpt`.
+`--local-out-dir` bypasses rclone and saves locally; resumes safely if interrupted.
+Output lands alongside existing training outputs at `/home/hlz/datasets/humos_output/`.
+
+```bash
+cd /home/hlz/repos/humos
+
+# interpolation shapes (16 betas × 2 genders = 32 shapes)
+nohup python -u humos/infer.py \
+    --cfg humos/configs/cfg_template.yml \
+    --betas-file /home/hlz/repos/ProtoMotions/protomotions/data/assets/all_betas_interp.pt \
+    --local-out-dir /home/hlz/datasets/humos_output/interp \
+    > /tmp/humos_interp.log 2>&1 &
+
+# extrapolation shapes
+nohup python -u humos/infer.py \
+    --cfg humos/configs/cfg_template.yml \
+    --betas-file /home/hlz/repos/ProtoMotions/protomotions/data/assets/all_betas_extrap.pt \
+    --local-out-dir /home/hlz/datasets/humos_output/extrap \
+    > /tmp/humos_extrap.log 2>&1 &
+```
+
+Output: `~1024 .pt files` per run (one per HumanML3D clip).
+
+### Step 4 — Export to AMASS NPZ (local, run in ProtoMotions root)
+
+```bash
+python tools/export_humos_to_amass_npz.py \
+    --input-dir /home/hlz/datasets/humos_output/interp \
+    --out-root /home/hlz/datasets/amass_heldout/interp \
+    --genders male female \
+    --apply-offset-height \
+    --skip-existing \
+    --fps 30.0
+
+python tools/export_humos_to_amass_npz.py \
+    --input-dir /home/hlz/datasets/humos_output/extrap \
+    --out-root /home/hlz/datasets/amass_heldout/extrap \
+    --genders male female \
+    --apply-offset-height \
+    --skip-existing \
+    --fps 30.0
+```
+
+### Step 5 — Convert to MotionLib .pt (local, run in ProtoMotions root)
+
+```bash
+python tools/convert_amass_to_motionlib_with_morphology.py \
+    --motion-yaml /home/hlz/datasets/amass_heldout/interp/humos_*.yaml \
+    --assets-yaml protomotions/data/assets/mjcf/smpl_mor_interp/assets.yaml \
+    --out /home/hlz/datasets/heldout_interp.pt
+
+python tools/convert_amass_to_motionlib_with_morphology.py \
+    --motion-yaml /home/hlz/datasets/amass_heldout/extrap/humos_*.yaml \
+    --assets-yaml protomotions/data/assets/mjcf/smpl_mor_extrap/assets.yaml \
+    --out /home/hlz/datasets/heldout_extrap.pt
+```
+
+### Step 5b — First-frame grounding offset (local, IsaacGym required)
+
+Uses IsaacGym FK to compute the lowest collision point at frame 0 for each motion and shifts `gts[:,:,2]` so the humanoid starts just above the floor. Input: MotionLib `.pt` from Step 5; output: `*_offset.pt`.
+
+```bash
+# run in ProtoMotions root
+python tools/compute_humos_frame0_offsets.py \
+    --motion-file /home/hlz/datasets/heldout_interp.pt \
+    --asset-root protomotions/data/assets/mjcf/smpl_mor_interp \
+    --out-motion-file /home/hlz/datasets/heldout_interp_offset.pt \
+    --overwrite
+
+python tools/compute_humos_frame0_offsets.py \
+    --motion-file /home/hlz/datasets/heldout_extrap.pt \
+    --asset-root protomotions/data/assets/mjcf/smpl_mor_extrap \
+    --out-motion-file /home/hlz/datasets/heldout_extrap_offset.pt \
+    --overwrite
+```
+
+### Step 6 — Evaluate with held-out motion files (RunPod, IsaacGym)
+
+Upload the offset `.pt` files first:
+```bash
+rsync -avz /home/hlz/datasets/heldout_interp_offset.pt runpod:/workspace/
+rsync -avz /home/hlz/datasets/heldout_extrap_offset.pt runpod:/workspace/
+```
+
+Then on RunPod:
+```bash
+# interp shapes
+nohup python -u protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_1024_transfer/last.ckpt \
+    --simulator isaacgym \
+    --motion-file /workspace/heldout_interp_offset.pt \
+    --num-envs 32 \
+    --output evaluation/hhi_1024_transfer_interp.csv \
+    > /tmp/eval_interp.log 2>&1 &
+
+# extrap shapes
+nohup python -u protomotions/evaluate_hhi_faults.py \
+    --checkpoint results/hhi_1024_transfer/last.ckpt \
+    --simulator isaacgym \
+    --motion-file /workspace/heldout_extrap_offset.pt \
+    --num-envs 32 \
+    --output evaluation/hhi_1024_transfer_extrap.csv \
+    > /tmp/eval_extrap.log 2>&1 &
+```
+
+Note: `--num-envs 32` = one env per shape (16 betas × 2 genders).
+
+---
+
 ## Part 3 — Augment evaluator with missing metrics
 
 ### 3a. What is currently missing
@@ -258,39 +412,3 @@ but those are Tier 3 deferred items and the infrastructure already exists to add
 - **E9** Contact timing adaptation — needs per-step foot contact state recording
 - **E11** Failure mode taxonomy — fall / COM drift / joint-limit / contact failure classification
 - **B2** Embodiment probe — actor hidden activations → linear regression to mass/COM/limb lengths
-
-======================================================
-
-┌─────────────────┬───────┬──────┬─────────┬─────────┬────────┐
-│       Set       │ Betas │ Seed │  Range  │ L2 mean │ L2 max │
-├─────────────────┼───────┼──────┼─────────┼─────────┼────────┤
-│ Training        │ 64    │ 46   │ [-3, 3] │ 5.48    │ 6.96   │
-├─────────────────┼───────┼──────┼─────────┼─────────┼────────┤
-│ Interp held-out │ 16    │ 99   │ [-3, 3] │ 5.05    │ 6.58   │
-├─────────────────┼───────┼──────┼─────────┼─────────┼────────┤
-│ Extrap held-out │ 16    │ 99   │ [-5, 5] │ 8.41    │ 10.97  │
-└─────────────────┴───────┴──────┴─────────┴─────────┴────────┘
-
-Zero key overlap with training — no shape collisions. The extrapolation set has L2 norms well above the training ceiling
-(6.96), so the boundary between in/out of distribution is unambiguous for the paper.
-
-To run once SMPLSim deps are available:
-  cd /home/hlz/repos/SMPLSim
-
-  # interpolation shapes
-  python run_heldout.py --mode interp --num-betas 16
-
-  # extrapolation shapes
-  python run_heldout.py --mode extrap --num-betas 16
-
-  Then generate assets.yaml for each (from ProtoMotions root):
-
-python tools/generate_smpl_mor_asset_info.py \
-    --asset-folder mjcf/smpl_mor_interp \
-    --betas-file /home/hlz/repos/humos/humos/all_betas_interp.pt \
-    --out protomotions/data/assets/mjcf/smpl_mor_interp/assets.yaml
-
-python tools/generate_smpl_mor_asset_info.py \
-    --asset-folder mjcf/smpl_mor_extrap \
-    --betas-file /home/hlz/repos/humos/humos/all_betas_extrap.pt \
-    --out protomotions/data/assets/mjcf/smpl_mor_extrap/assets.yaml
