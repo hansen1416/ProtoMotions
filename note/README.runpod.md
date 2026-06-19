@@ -2,11 +2,11 @@ cd /workspace && git clone -b feature/hhi https://github.com/hansen1416/ProtoMot
 
 pip install gdown && apt update && apt install curl zip -y && curl https://rclone.org/install.sh | bash
 
-<!-- humos_128_offset.pt -->
-gdown 1iO5sTFrY41Lj2UQwVR_g5yU_t6Wgw5-K
-
 <!-- 1024-raw.zip -->
 gdown 14IYbHhMxKARQ9nnEitJXyHwGGP0SFKHG
+
+<!-- 1024-phy.zip -->
+gdown 1FNqL69Xu46bW3wzQNt6ndMwiStCR6d23
 
 <!-- download data from R2 -->
 rclone config
@@ -31,21 +31,10 @@ rclone copy r2:proto-data/difficult-motions/ /workspace/difficult-motions/ \
 
 pip install -e .
 
-wandb login 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
 
+mkdir results && chmod 777 -R results && cd results && mv ../1024-raw.zip ./ && unzip 1024-raw.zip && mv results/hhi_1024_motion ./ && rm 1024-raw.zip && rm -r results && cd ../
 
-apt update && apt install -y tmux
-tmux new -s hhi
-tmux new -t hhi
-tmux kill-session -t hhi
-
-tmux ls
-
-tmux kill-server
-
-tmux capture-pane -p -S -5000 > /tmp/tmux_log.txt
-  cat /tmp/tmux_log.txt | grep -i "error\|traceback\|exception" | head -50
-
+python tools/extract_smpl_physics_features.py
 ------
 
 ```bash
@@ -169,6 +158,23 @@ nohup python -u protomotions/train_agent.py \
   --wandb-group hhi_phy_1024_motion > /tmp/train_se.log 2>&1 &
 
 ```bash
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_physics.py \
+  --experiment-name hhi_phy_1024_transfer \
+  --motion-file /workspace/merged4/humos_slurmrank.pt \
+  --checkpoint results/hhi_phy_1024_motion/last.ckpt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 4 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_phy_1024_transfer > /tmp/train_hhi_transfer.log 2>&1 &
+```
+
+```bash
 docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --ipc=host --shm-size=16g hansen1416/hhi-protomotions-isaacgym:v1 /bin/bash
 ```
 ----
@@ -190,6 +196,22 @@ docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --
 docker exec -it proto /bin/bash
 
 ----------
+
+# Archive
+
+apt update && apt install -y tmux
+tmux new -s hhi
+tmux new -t hhi
+tmux kill-session -t hhi
+
+tmux ls
+
+tmux kill-server
+
+tmux capture-pane -p -S -5000 > /tmp/tmux_log.txt
+  cat /tmp/tmux_log.txt | grep -i "error\|traceback\|exception" | head -50
+
+------
 
 apt-get update
 apt-get install -y ca-certificates curl gnupg
