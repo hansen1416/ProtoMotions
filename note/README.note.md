@@ -1120,3 +1120,46 @@ python protomotions/train_agent.py \
     --num-envs 4096 \
     --batch-size 16384
 ```
+
+------
+
+Humos neutral dataset, used for baseline training
+
+```bash
+rclone copy /home/hlz/datasets/humos_proto_neutral/offset/ \
+      r2:proto-data/humos_proto_neutral_offset/ \
+      --transfers=2 \
+      --s3-upload-concurrency=4 \
+      --s3-chunk-size=64M \
+      --retries=10 \
+      --retries-sleep=30s \
+      --low-level-retries=20 \
+      --progress
+```
+
+------
+
+## [Design Question] Two-Stage Transfer Learning
+
+**Context:** Previous runs trained directly on 1024 motions × 128 body shapes with beta + physical params concatenated into obs. Rewards/unnormalized_task_rewards >0.9, eval/success_rate ~0.7–0.8.
+
+New approach: train Stage 1 on 20k neutral motions (all beta=0), then transfer to Stage 2 on 128-shape motion data.
+
+### Q1 — How do we design the NN for Stage 1 (neutral, beta=0)?
+
+Since all bodies are neutral (beta=0), the morphology input is constant and uninformative. Design options:
+- No morphology input at all — pure motion-tracking policy on neutral SMPL
+- Include a zeroed beta slot (padded) so the Stage 2 fine-tune can activate it without architecture change
+- Include physical params only (body proportions/masses derived from beta=0) to keep the interface consistent
+
+Key tension: a simpler Stage 1 (no morphology branch) learns faster but may need architectural surgery before Stage 2. A beta-aware Stage 1 (with frozen zero-betas) is ready to fine-tune but adds dead parameters during Stage 1.
+
+### Q2 — How do we design the transfer learning process for Stage 2 (128-shape, large data)?
+
+The full 128-shape dataset is too large to hold in memory at once — need a rolling/streaming strategy. Design considerations:
+
+- **Data rolling:** load shards incrementally (e.g. one shard at a time), cycle through all shards across epochs rather than loading all 128 shapes up front
+- **Freezing strategy:** freeze the motion-tracking backbone, fine-tune only the morphology-conditioning layers first; then unfreeze and joint-fine-tune
+- **Learning rate:** Stage 2 LR should be 5–10× lower than Stage 1 to preserve learned locomotion priors
+- **Curriculum:** start Stage 2 with small beta magnitudes, gradually increase to full ±2σ variation
+- **Checkpoint:** Stage 2 resumes from Stage 1 `last.ckpt` with `--checkpoint` flag; morphology obs (beta / physical params) must be re-enabled in the experiment config
