@@ -29,11 +29,7 @@ rclone copy r2:proto-data/20946_neutral_offset/ /workspace/20946_neutral_offset/
     --multi-thread-chunk-size=128M \
     --progress
 
-pip install -e .
-
-wandb login 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
-
-python tools/extract_smpl_physics_features.py
+pip install -e . && wandb login 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 && python tools/extract_smpl_physics_features.py
 
 ------
 
