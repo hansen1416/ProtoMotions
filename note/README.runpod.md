@@ -23,7 +23,7 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
   --progress
 
 <!-- copy 20951 neutral -->
-rclone copy r2:proto-data/humos_proto_neutral_offset/ /workspace/humos_proto_neutral_offset/ \
+rclone copy r2:proto-data/20946_neutral_offset/ /workspace/20946_neutral_offset/ \
     --transfers=4 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
@@ -44,15 +44,15 @@ nohup python -u protomotions/train_agent.py \
   --robot-name smpl_mor_neutral \
   --simulator isaacgym \
   --experiment-path examples/experiments/mimic/mlp.py \
-  --experiment-name hhi_20951_neutral \
-  --motion-file /workspace/humos_proto_neutral_offset/humanml3d_neutral_20951_slurmrank.pt \
-  --num-envs 8192 \
-  --batch-size 32768 \
+  --experiment-name hhi_20946_neutral \
+  --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
+  --num-envs 4096 \
+  --batch-size 16384 \
   --ngpu 6 \
   --use-wandb \
   --wandb-project hhi-protomotions \
   --wandb-entity yugoamaryl \
-  --wandb-group hhi_20951_neutral > /tmp/train_neutral.log 2>&1 &
+  --wandb-group hhi_20946_neutral > /tmp/train_neutral.log 2>&1 &
 ```
 
 ------
