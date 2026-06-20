@@ -31,8 +31,7 @@ rclone copy r2:proto-data/humos_proto_neutral_offset/ /workspace/humos_proto_neu
 
 pip install -e .
 
-
-mkdir results && chmod 777 -R results && cd results && mv ../1024-raw.zip ./ && unzip 1024-raw.zip && mv results/hhi_1024_motion ./ && rm 1024-raw.zip && rm -r results && cd ../
+wandb login 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
 
 python tools/extract_smpl_physics_features.py
 
@@ -40,19 +39,21 @@ python tools/extract_smpl_physics_features.py
 
 # neutral and transfer
 
-python -u protomotions/train_agent.py \
+```bash
+nohup python -u protomotions/train_agent.py \
   --robot-name smpl_mor_neutral \
   --simulator isaacgym \
   --experiment-path examples/experiments/mimic/mlp.py \
   --experiment-name hhi_20951_neutral \
   --motion-file /workspace/humos_proto_neutral_offset/humanml3d_neutral_20951_slurmrank.pt \
-  --num-envs 4096 \
-  --batch-size 16384 \
+  --num-envs 8192 \
+  --batch-size 32768 \
   --ngpu 6 \
   --use-wandb \
   --wandb-project hhi-protomotions \
   --wandb-entity yugoamaryl \
-  --wandb-group hhi_20951_neutral
+  --wandb-group hhi_20951_neutral > /tmp/train_neutral.log 2>&1 &
+```
 
 ------
 
@@ -229,6 +230,10 @@ tmux kill-server
 
 tmux capture-pane -p -S -5000 > /tmp/tmux_log.txt
   cat /tmp/tmux_log.txt | grep -i "error\|traceback\|exception" | head -50
+
+---
+
+mkdir results && chmod 777 -R results && cd results && mv ../1024-raw.zip ./ && unzip 1024-raw.zip && mv results/hhi_1024_motion ./ && rm 1024-raw.zip && rm -r results && cd ../
 
 ------
 
