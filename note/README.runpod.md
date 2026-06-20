@@ -22,12 +22,12 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
   --multi-thread-chunk-size=128M \
   --progress
 
-<!-- copy only failed motions -->
-rclone copy r2:proto-data/difficult-motions/ /workspace/difficult-motions/ \
-  --transfers=2 \
-  --multi-thread-streams=16 \
-  --multi-thread-chunk-size=128M \
-  --progress
+<!-- copy 20951 neutral -->
+rclone copy r2:proto-data/humos_proto_neutral_offset/ /workspace/humos_proto_neutral_offset/ \
+    --transfers=4 \
+    --multi-thread-streams=16 \
+    --multi-thread-chunk-size=128M \
+    --progress
 
 pip install -e .
 
@@ -35,6 +35,25 @@ pip install -e .
 mkdir results && chmod 777 -R results && cd results && mv ../1024-raw.zip ./ && unzip 1024-raw.zip && mv results/hhi_1024_motion ./ && rm 1024-raw.zip && rm -r results && cd ../
 
 python tools/extract_smpl_physics_features.py
+
+------
+
+# neutral and transfer
+
+python -u protomotions/train_agent.py \
+  --robot-name smpl_mor_neutral \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp.py \
+  --experiment-name hhi_20951_neutral \
+  --motion-file /workspace/humos_proto_neutral_offset/humanml3d_neutral_20951_slurmrank.pt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 6 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_20951_neutral
+
 ------
 
 ```bash
