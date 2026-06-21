@@ -1290,3 +1290,36 @@ python protomotions/train_agent.py \
 
 Stage 2 LR is 10× lower than Stage 1 defaults (`actor: 2e-5 → 2e-6`, `critic: 1e-4 → 1e-5`).
 No freezing — `mlp.py` has no clean structural boundary to freeze at.
+
+---
+
+## Physics Features vs Raw Betas — Transfer Inference Finding (2026-06-21)
+
+Both `hhi_1024_transfer` (raw betas, 11-dim) and `hhi_phy_1024_transfer` (physics features, 15-dim) converged to the same training reward (~0.84). However, on inference:
+
+- `hhi_phy_1024_transfer`: **5/8 envs successfully followed**
+- `hhi_1024_transfer`: **0/8 envs successfully followed**
+
+Training reward parity is a poor proxy for transfer robustness. Physics features (mass, limb lengths, hip/shoulder/leg width, height) provide causally meaningful conditioning; the policy can learn actual control laws from them. Raw betas are abstract SMPL latents — the policy implicitly decodes them and apparently fails under transfer pressure.
+
+Reproduce with:
+
+```bash
+# physics features (5/8)
+python protomotions/inference_agent_mor.py \
+    --checkpoint results/hhi_phy_1024_transfer/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0001_offset.pt \
+    --compact-spawn-spacing 1.5 --num-envs 8 --max-motions 128
+
+# raw betas (0/8)
+python protomotions/inference_agent_mor.py \
+    --checkpoint results/hhi_1024_transfer/score_based.ckpt \
+    --simulator isaacgym \
+    --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0001_offset.pt \
+    --compact-spawn-spacing 1.5 --num-envs 8 --max-motions 128
+```
+
+> TODO: confirm at larger scale (32–64 envs) and check if `humos_131072_0001_offset.pt` shard is in-distribution for transfer training.
+
+
