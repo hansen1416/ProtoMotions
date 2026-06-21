@@ -1168,11 +1168,17 @@ The full 128-shape dataset is too large to hold in memory at once — need a rol
 
 ## [Design Decision] Q1 Answer — Stage 1 NN Architecture
 
-**Decision: use `smpl_mor_neutral` + `mlp_film.py`, with `morphology_obs` always present.**
+**Decision: use `smpl_mor_neutral` + `mlp.py` (flat concat), with `morphology_obs` always present.**
+
+> **Note:** This section originally proposed `mlp_film.py`. That was superseded by empirical results:
+> `hhi_film_1024_motion` (FiLM from scratch) stalled at reward ~0.40–0.45 vs ~0.84 for flat concat,
+> due to fanout bottleneck and multiplicative instability. All non-FiLM alternatives (ShapeEmbed,
+> physics features) matched flat concat but added no gain. `mlp.py` is the architecture winner
+> for both Stage 1 and Stage 2.
 
 ### Key facts from codebase research
 
-**Obs vector composition (mlp.py / mlp_film.py):**
+**Obs vector composition (mlp.py):**
 | Key | Approx dim | Content |
 |-----|-----------|---------|
 | `max_coords_obs` | ~362 | body pos/rot/vel/angvel + root_h + contacts |
@@ -1189,20 +1195,8 @@ The full 128-shape dataset is too large to hold in memory at once — need a rol
 ### Why `morphology_obs` must be included in Stage 1 (even though betas=0)
 
 - Identical obs dims → direct `load_state_dict()` at Stage 2, no architecture surgery
-- Running mean/std normalizer accumulates morphology stats during Stage 1 (near-zero); updates gracefully when Stage 2 activates real betas
+- Running mean/std normalizer accumulates morphology stats during Stage 1 (near-zero); reset with `tools/reset_morphology_normalizer.py` before Stage 2 to avoid saturated beta inputs
 - Network learns the gender signal during Stage 1; betas are just an uninformative constant the network learns to ignore — exactly the right prior going into transfer
-
-### Why `mlp_film.py` over `mlp.py` or `mlp_shape_embed.py`
-
-Three existing architectures:
-1. **`mlp.py`** — flat concat: morphology_obs appended to full obs vector, single 6-layer/1024-unit MLP. Risk: the 11-dim morphology signal is buried in ~800+ dim obs; network may learn to ignore it entirely during Stage 1 → hard to activate at Stage 2 without retraining the full trunk.
-2. **`mlp_film.py`** — FiLM conditioning: morphology_obs → separate `cond_mlp` → `(gamma, beta)` pairs that multiplicatively modulate each of the 6 trunk hidden layers. Trunk sees only kinematic obs. Architecture is identical Stage 1 → Stage 2.
-3. **`mlp_shape_embed.py`** — shape embedding: morphology_obs → small MLP → compact embedding, then concat with main obs. Better than flat concat but still a single gradient path.
-
-**FiLM wins for transfer** because:
-- The conditioning pathway (`cond_mlp` + `cond_linear`) is structurally separated from the trunk
-- At Stage 1 with neutral betas, `cond_mlp` outputs near-constant FiLM params (only gender offset varies) → trunk learns general SMPL locomotion uncontaminated by shape noise
-- At Stage 2, freeze trunk → fine-tune only `cond_mlp` + `cond_linear` first → low-rank gradient path activates body-shape adaptation without corrupting the locomotion prior → then unfreeze for joint fine-tuning
 
 ### Stage 1 training command (RunPod)
 
@@ -1210,14 +1204,19 @@ Three existing architectures:
 python protomotions/train_agent.py \
     --robot-name smpl_mor_neutral \
     --simulator isaacgym \
-    --experiment-path examples/experiments/mimic/mlp_film.py \
-    --experiment-name hhi_stage1_film_neutral \
-    --motion-file /workspace/humos_proto_neutral/humanml3d_neutral_20951_0000_offset.pt \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_stage1_neutral \
+    --motion-file /workspace/humos_proto_neutral/humanml3d_neutral_20946_0000.pt \
     --num-envs 4096 \
     --batch-size 16384
 ```
 
-*(shard 0000 only for initial run; extend to shard cycling once rolling data strategy is implemented)*
+*(shard 0000 only for single-GPU; for multi-GPU use the slurmrank mechanism with all 6 shards)*
+
+> **Note on `ckpt/20951_neutral.zip` on R2:** This is a 199-epoch checkpoint trained on the
+> raw 20951-motion shards (mixed female_neutral/male_neutral asset IDs, before the fix).
+> It does NOT correspond to the corrected 20946-motion offset shards used for training now.
+> Do not use it as a warm-start for Stage 1.
 
 ### Stage 2 transfer command (RunPod, from Stage 1 ckpt)
 
@@ -1225,15 +1224,15 @@ python protomotions/train_agent.py \
 python protomotions/train_agent.py \
     --robot-name smpl_mor \
     --simulator isaacgym \
-    --experiment-path examples/experiments/mimic/mlp_film.py \
-    --experiment-name hhi_stage2_film_transfer \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name hhi_stage2_transfer \
     --motion-file /workspace/merged4/humos_slurmrank.pt \
-    --checkpoint results/hhi_stage1_film_neutral/last.ckpt \
+    --checkpoint results/hhi_stage1_neutral/last.ckpt \
     --num-envs 4096 \
     --batch-size 16384
 ```
 
-**Open question for Stage 2:** implement freeze/unfreeze of trunk blocks in `mlp_film.py` — needs a callback or a `--overrides` param to control which parameter groups get LR=0 for the first N steps.
+**Before Stage 2:** run `tools/reset_morphology_normalizer.py` on the Stage 1 checkpoint to reset beta normalizer dims (var[-10:] → 1.0) before transferring.
 
 ------
 
