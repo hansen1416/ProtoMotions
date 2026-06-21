@@ -103,3 +103,9 @@ rclone copy /home/hlz/datasets/humos_proto_neutral/offset r2:proto-data/20946_ne
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress
+
+rclone copy ./tmp r2:proto-data/ckpt/ \
+    --transfers=2 \
+    --multi-thread-streams=16 \
+    --multi-thread-chunk-size=128M \
+    --progress

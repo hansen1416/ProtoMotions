@@ -1103,7 +1103,7 @@ python protomotions/train_agent.py \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp.py \
     --experiment-name hhi_stage1_neutral \
-    --motion-file /workspace/humos_proto_neutral/humanml3d_neutral_20951_0000_offset.pt \
+    --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
     --num-envs 4096 \
     --batch-size 16384
 ```
@@ -1127,7 +1127,7 @@ Humos neutral dataset, used for baseline training
 
 ```bash
 rclone copy /home/hlz/datasets/humos_proto_neutral/offset/ \
-      r2:proto-data/humos_proto_neutral_offset/ \
+      r2:proto-data/20946_neutral_offset/ \
       --transfers=2 \
       --s3-upload-concurrency=4 \
       --s3-chunk-size=64M \

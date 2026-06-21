@@ -569,7 +569,7 @@ class IsaacGymSimulator(Simulator):
 
         gender_id_map = {
             "female": -1.0,
-            # "neutral": 0.0,
+            "neutral": 0.0,
             "male": 1.0,
         }
 
