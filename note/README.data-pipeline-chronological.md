@@ -216,6 +216,51 @@ Local partial copy may exist at `/home/hlz/datasets/humos_output/`.
 Two additional inference runs with **different beta files** to generate data for out-of-distribution
 generalization evaluation. Each uses 16 betas × 2 genders = **32 shapes** per clip.
 
+### Bug fix required before running
+
+The original `infer.py` skip-existing logic checks `gdrive:humos_output/` unconditionally even when
+`--local-out-dir` is given. Since all 22,459 keyids already exist on gdrive from the main run,
+it skips everything immediately. Fix applied directly to `humos/infer.py`:
+
+1. Remote cache is now built **once before the loop**, and **only** when no `--local-out-dir` is set.
+2. When `--local-out-dir` is set, skip check is against the **local file** only.
+3. The redundant existence check in the save block is removed (skip already happened at loop top).
+
+The key restructure in `run_inference()`:
+
+```python
+# Before the loop — only in remote mode
+if local_out_dir is None:
+    existing_remote_names = build_remote_name_cache(RCLONE_MOUNT_ROOT, REMOTE_INDEX_CACHE, ...)
+
+for _, batch in enumerate(tqdm(dataloader, ...)):
+    remote_name = f"{batch['keyid'][0]}.pt"
+
+    if local_out_dir is not None:
+        local_path = os.path.join(local_out_dir, remote_name)
+        if os.path.exists(local_path):
+            print(f"Skip existing: {local_path}")
+            continue
+    else:
+        remote_path = f"{RCLONE_REMOTE_DIR}/{remote_name}"
+        if remote_name in existing_remote_names:
+            print(f"Skip existing remote (cached): {remote_path}")
+            continue
+
+    # ... inference ...
+
+    if local_out_dir is not None:
+        torch.save(motion_out, local_path)
+    else:
+        save_torch_to_rclone(motion_out, remote_path)
+        ...
+```
+
+### Commands
+
+Output goes to the portable hard drive (`/media/hlz/R/`). Each run ~200 GB, ~4 hours on one GPU.
+Safe to interrupt and resume — skip logic checks per-file on disk.
+
 ```bash
 cd /home/hlz/repos/humos
 
@@ -223,23 +268,22 @@ cd /home/hlz/repos/humos
 conda run -n smplsim python -u humos/infer.py \
     --cfg humos/configs/cfg_template.yml \
     --betas-file /home/hlz/repos/ProtoMotions/protomotions/data/assets/all_betas_interp.pt \
-    --local-out-dir /home/hlz/datasets/humos_output/interp
+    --local-out-dir /media/hlz/R/humos_output/interp
 
 # extrap — 16 betas, seed=99, range [-5, 5]  (outside training distribution)
+# run after interp finishes (single GPU)
 conda run -n smplsim python -u humos/infer.py \
     --cfg humos/configs/cfg_template.yml \
     --betas-file /home/hlz/repos/ProtoMotions/protomotions/data/assets/all_betas_extrap.pt \
-    --local-out-dir /home/hlz/datasets/humos_output/extrap
+    --local-out-dir /media/hlz/R/humos_output/extrap
 ```
 
 Status:
-- **interp**: partially done — 717 files locally at `/home/hlz/datasets/humos_output/interp/`; **NOT on Google Drive**
-- **extrap**: **TODO** — not yet run
+- **interp**: **in progress** — started 2026-06-21, ETA ~4 hours, saving to `/media/hlz/R/humos_output/interp/`
+- **extrap**: **TODO** — run after interp completes
 
-These outputs are **not in `gdrive:humos_output/`** (which is a flat directory containing only the
-main 128-shape run). They need to be either completed and uploaded, or re-run from scratch.
-
-Expected output per run: one `.pt` per clip (up to 20,951 valid clips), each containing 32 shape variants.
+Output per run: one `.pt` per clip (22,459 total), each containing 32 shape variants.
+These are **not** in `gdrive:humos_output/` (which is flat, main-run only).
 
 ---
 
