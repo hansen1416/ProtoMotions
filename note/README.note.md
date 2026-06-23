@@ -1323,3 +1323,12 @@ python protomotions/inference_agent_mor.py \
 > TODO: confirm at larger scale (32–64 envs) and check if `humos_131072_0001_offset.pt` shard is in-distribution for transfer training.
 
 
+------
+
+nohup rclone copy /media/hlz/R/humos_output_interp gdrive:humos_output_interp \
+      --progress \
+      --transfers 4 \
+      --checkers 8 \
+      --drive-chunk-size 64M \
+      --log-file rclone_upload_interp.log \
+      --log-level INFO > rclone_upload_interp_stdout.log 2>&1 &
