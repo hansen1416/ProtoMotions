@@ -330,6 +330,8 @@ class BaseEnv:
                     unique_checked.add(asset_id)
 
                     xml_betas = self.simulator.env_id_beta[env_id]
+                    if asset_id not in asset_id_to_motion_ids:
+                        continue  # shape not present in motion file (e.g. single-clip recording)
                     motion_id = asset_id_to_motion_ids[asset_id][0]
                     motion_betas = self.motion_lib.motion_betas[motion_id].to(xml_betas.device)
 
