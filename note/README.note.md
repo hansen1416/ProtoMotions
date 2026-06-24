@@ -1332,3 +1332,99 @@ nohup rclone copy /media/hlz/R/humos_output_interp gdrive:humos_output_interp \
       --drive-chunk-size 64M \
       --log-file rclone_upload_interp.log \
       --log-level INFO > rclone_upload_interp_stdout.log 2>&1 &
+
+
+
+================================================================================
+
+## Video Recording — 64 Clips (2026-06-23)
+
+32 motions sampled across 16 offset files (2 per file, varied small indices),
+recorded with both checkpoints → 64 videos total.
+
+Outputs: `/home/hlz/Videos/hhi_phy/` and `/home/hlz/Videos/hhi/`
+
+### Example (full command)
+
+```bash
+python protomotions/record_video_mor.py \
+  --checkpoint /home/hlz/repos/ProtoMotions/results/hhi_phy_1024_transfer/score_based.ckpt \
+  --motion-file /home/hlz/datasets/humos_proto/offset/humos_131072_0000_offset.pt \
+  --simulator isaacgym \
+  --num-envs 16 \
+  --compact-spawn-spacing 2.0 \
+  --motion-index 41 \
+  --output /home/hlz/Videos/hhi_phy/f0000_m041.mp4
+```
+
+### Remaining 63 commands (ckpt / motion-file / motion-index / output filename)
+
+Checkpoint paths:
+- `hhi_phy` → `results/hhi_phy_1024_transfer/score_based.ckpt`
+- `hhi`     → `results/hhi_1024_transfer/score_based.ckpt`
+
+| ckpt    | file index | motion-index | output                  |
+|---------|------------|--------------|-------------------------|
+| hhi_phy | 0000       | 168          | f0000_m168.mp4          |
+| hhi_phy | 0001       | 50           | f0001_m050.mp4          |
+| hhi_phy | 0001       | 142          | f0001_m142.mp4          |
+| hhi_phy | 0002       | 9            | f0002_m009.mp4          |
+| hhi_phy | 0002       | 267          | f0002_m267.mp4          |
+| hhi_phy | 0003       | 12           | f0003_m012.mp4          |
+| hhi_phy | 0003       | 223          | f0003_m223.mp4          |
+| hhi_phy | 0004       | 74           | f0004_m074.mp4          |
+| hhi_phy | 0004       | 144          | f0004_m144.mp4          |
+| hhi_phy | 0005       | 116          | f0005_m116.mp4          |
+| hhi_phy | 0005       | 259          | f0005_m259.mp4          |
+| hhi_phy | 0006       | 27           | f0006_m027.mp4          |
+| hhi_phy | 0006       | 139          | f0006_m139.mp4          |
+| hhi_phy | 0007       | 11           | f0007_m011.mp4          |
+| hhi_phy | 0007       | 241          | f0007_m241.mp4          |
+| hhi_phy | 0008       | 53           | f0008_m053.mp4          |
+| hhi_phy | 0008       | 147          | f0008_m147.mp4          |
+| hhi_phy | 0009       | 30           | f0009_m030.mp4          |
+| hhi_phy | 0009       | 153          | f0009_m153.mp4          |
+| hhi_phy | 0010       | 70           | f0010_m070.mp4          |
+| hhi_phy | 0010       | 238          | f0010_m238.mp4          |
+| hhi_phy | 0011       | 7            | f0011_m007.mp4          |
+| hhi_phy | 0011       | 274          | f0011_m274.mp4          |
+| hhi_phy | 0012       | 15           | f0012_m015.mp4          |
+| hhi_phy | 0012       | 187          | f0012_m187.mp4          |
+| hhi_phy | 0013       | 80           | f0013_m080.mp4          |
+| hhi_phy | 0013       | 279          | f0013_m279.mp4          |
+| hhi_phy | 0014       | 7            | f0014_m007.mp4          |
+| hhi_phy | 0014       | 277          | f0014_m277.mp4          |
+| hhi_phy | 0015       | 74           | f0015_m074.mp4          |
+| hhi_phy | 0015       | 231          | f0015_m231.mp4          |
+| hhi     | 0000       | 41           | f0000_m041.mp4          |
+| hhi     | 0000       | 168          | f0000_m168.mp4          |
+| hhi     | 0001       | 50           | f0001_m050.mp4          |
+| hhi     | 0001       | 142          | f0001_m142.mp4          |
+| hhi     | 0002       | 9            | f0002_m009.mp4          |
+| hhi     | 0002       | 267          | f0002_m267.mp4          |
+| hhi     | 0003       | 12           | f0003_m012.mp4          |
+| hhi     | 0003       | 223          | f0003_m223.mp4          |
+| hhi     | 0004       | 74           | f0004_m074.mp4          |
+| hhi     | 0004       | 144          | f0004_m144.mp4          |
+| hhi     | 0005       | 116          | f0005_m116.mp4          |
+| hhi     | 0005       | 259          | f0005_m259.mp4          |
+| hhi     | 0006       | 27           | f0006_m027.mp4          |
+| hhi     | 0006       | 139          | f0006_m139.mp4          |
+| hhi     | 0007       | 11           | f0007_m011.mp4          |
+| hhi     | 0007       | 241          | f0007_m241.mp4          |
+| hhi     | 0008       | 53           | f0008_m053.mp4          |
+| hhi     | 0008       | 147          | f0008_m147.mp4          |
+| hhi     | 0009       | 30           | f0009_m030.mp4          |
+| hhi     | 0009       | 153          | f0009_m153.mp4          |
+| hhi     | 0010       | 70           | f0010_m070.mp4          |
+| hhi     | 0010       | 238          | f0010_m238.mp4          |
+| hhi     | 0011       | 7            | f0011_m007.mp4          |
+| hhi     | 0011       | 274          | f0011_m274.mp4          |
+| hhi     | 0012       | 15           | f0012_m015.mp4          |
+| hhi     | 0012       | 187          | f0012_m187.mp4          |
+| hhi     | 0013       | 80           | f0013_m080.mp4          |
+| hhi     | 0013       | 279          | f0013_m279.mp4          |
+| hhi     | 0014       | 7            | f0014_m007.mp4          |
+| hhi     | 0014       | 277          | f0014_m277.mp4          |
+| hhi     | 0015       | 74           | f0015_m074.mp4          |
+| hhi     | 0015       | 231          | f0015_m231.mp4          |
