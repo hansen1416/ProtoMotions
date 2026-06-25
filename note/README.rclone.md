@@ -109,3 +109,11 @@ rclone copy ./tmp r2:proto-data/ckpt/ \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress
+
+
+rclone copy /media/hlz/R/stage2_data/ r2:proto-data/hhi_stage2/ \
+    --transfers=4 \
+    --multi-thread-streams=16 \
+    --multi-thread-chunk-size=128M \
+    --progress
+    
