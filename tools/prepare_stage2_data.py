@@ -296,13 +296,17 @@ def main() -> None:
         # ── Step 1: Gather .pt files ─────────────────────────────────────────
         log(f"\n[{batch_name}] Step 1/5  Gather .pt files")
 
-        # Copy from local cache first
+        # Copy from local cache first (hard-link if same filesystem, else copy)
         cached, missing = [], []
         for kid in batch_ids:
             if args.local_humos_cache:
                 src = args.local_humos_cache / f"{kid}.pt"
                 if src.exists():
-                    shutil.copy2(src, raw_dir / f"{kid}.pt")
+                    dst = raw_dir / f"{kid}.pt"
+                    try:
+                        os.link(src, dst)
+                    except OSError:
+                        shutil.copy2(src, dst)
                     cached.append(kid)
                     continue
             missing.append(kid)
