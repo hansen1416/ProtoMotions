@@ -223,9 +223,10 @@ def main() -> None:
         if not p.exists():
             sys.exit(f"Tool not found: {p}")
 
+    _conda_available = shutil.which("conda") is not None
     offset_python = (
         f"conda run -n {args.isaacgym_env} --no-capture-output python"
-        if args.isaacgym_env else "python"
+        if args.isaacgym_env and _conda_available else "python"
     )
     local_mode = args.output_dir is not None
 
