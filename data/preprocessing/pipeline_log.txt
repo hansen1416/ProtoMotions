@@ -1,0 +1,28 @@
+2026-06-24 15:45:59  batch_0000  STARTED  512 clips
+2026-06-24 17:15:34  batch_0000  DONE  512 clips  8 shards  cached=155  downloaded=357
+2026-06-24 17:15:34  batch_0001  STARTED  512 clips
+2026-06-24 22:02:59  batch_0001  STARTED  512 clips
+2026-06-24 23:10:17  batch_0001  DONE  512 clips  8 shards  cached=178  downloaded=334
+2026-06-24 23:10:17  batch_0002  STARTED  512 clips
+2026-06-25 00:20:32  batch_0002  DONE  512 clips  8 shards  cached=164  downloaded=348
+2026-06-25 00:20:32  batch_0003  STARTED  512 clips
+2026-06-25 01:31:34  batch_0003  DONE  512 clips  8 shards  cached=176  downloaded=336
+2026-06-25 01:31:34  batch_0004  STARTED  512 clips
+2026-06-25 02:43:23  batch_0004  DONE  512 clips  8 shards  cached=151  downloaded=361
+2026-06-25 02:43:23  batch_0005  STARTED  512 clips
+2026-06-25 03:58:16  batch_0005  DONE  512 clips  8 shards  cached=157  downloaded=355
+2026-06-25 03:58:16  batch_0006  STARTED  512 clips
+2026-06-25 05:12:44  batch_0006  DONE  512 clips  8 shards  cached=168  downloaded=344
+2026-06-25 05:12:44  batch_0007  STARTED  512 clips
+2026-06-25 06:27:57  batch_0007  DONE  512 clips  8 shards  cached=162  downloaded=350
+2026-06-25 06:27:57  batch_0008  STARTED  512 clips
+2026-06-25 07:45:44  batch_0008  DONE  512 clips  8 shards  cached=169  downloaded=343
+2026-06-25 07:45:44  batch_0009  STARTED  512 clips
+2026-06-25 09:07:28  batch_0009  DONE  512 clips  8 shards  cached=155  downloaded=357
+2026-06-25 09:07:28  batch_0010  STARTED  512 clips
+2026-06-25 13:09:35  batch_0010  STARTED  512 clips
+2026-06-25 15:05:29  batch_0010  DONE  512 clips  8 shards  cached=170  downloaded=342
+2026-06-25 15:05:29  batch_0011  STARTED  512 clips
+2026-06-25 19:12:53  batch_0011  STARTED  512 clips
+2026-06-26 07:02:28  batch_0011  STARTED  512 clips
+2026-06-26 08:09:52  batch_0011  STARTED  512 clips

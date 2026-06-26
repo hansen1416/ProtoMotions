@@ -370,7 +370,8 @@ def main() -> None:
                 f"--out-motion-file {out_path} "
                 f"--limit -1 --overwrite"
             )
-        shutil.rmtree(proto_dir)
+            chunk.unlink()  # free proto shard immediately after offset is written
+        proto_dir.rmdir()
         log(f"  proto_dir deleted.")
 
         # ── Step 5: Save output ───────────────────────────────────────────────
