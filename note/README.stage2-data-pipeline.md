@@ -229,12 +229,12 @@ python tools/prepare_stage2_data.py \
     --device cuda
 
 
-python tools/prepare_stage2_data.py \
+nohup python tools/prepare_stage2_data.py \
       --valid-ids /workspace/ProtoMotions/data/preprocessing/valid_ids_sorted_by_difficulty.txt \
       --workspace /workspace/stage2_prep \
       --proto-root /workspace/ProtoMotions \
       --asset-root /workspace/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
       --r2-dest r2:proto-data/hhi_stage2 \
-      --batch-clips 4096 \
+      --batch-clips 512 \
       --isaacgym-env isaacgym \
-      --device cuda
+      --device cuda > /workspace/stage2_prep/run.log 2>&1 &
