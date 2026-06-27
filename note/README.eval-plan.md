@@ -1,38 +1,58 @@
 # Metrics & Experiments Plan — Preliminary Paper
 
-## What we have
+## Primary evaluation targets
 
-| Checkpoint | Arch | Epochs run | Training reward | Inference smoke test (8 envs) |
+| Checkpoint | Arch | Status |
+|---|---|---|
+| `hhi_20946_neutral` | MLP + raw betas (neutral, β=0) | **Stage 1 — running** |
+| `hhi_stage2_transfer` | MLP + TBD morphology repr | **Stage 2 — blocked on data** |
+
+Pilot checkpoints are available on R2 for ablation comparison:
+
+| Checkpoint | Arch | Epochs | Reward | Inference (8 envs) |
 |---|---|---|---|---|
-| `hhi_1024_motion` | MLP + raw betas (11-dim) | ~12,021 | ≈ 0.84 | — (baseline, not tested) |
-| `hhi_1024_transfer` | MLP + raw betas (11-dim) | 12,021 → 21,400 | ≈ 0.84 | **0/8 followed** |
-| `hhi_phy_1024_transfer` | MLP + physics features (15-dim) | 6,801 → 17,000 | ≈ 0.84 | **5/8 followed** |
+| `hhi_1024_motion` | MLP + raw betas | 12,021 | 0.84 | — |
+| `hhi_1024_transfer` | MLP + raw betas | 21,400 | 0.84 | **0/8** |
+| `hhi_phy_1024_transfer` | MLP + physics features | 17,000 | 0.84 | **5/8** |
 
-Both transfer runs plateaued at ~190–210 failed motions/epoch (4 ranks combined), indicating rough convergence. The central claim for the paper is: **physics features provide causally grounded conditioning; raw betas collapse under transfer pressure despite equal training reward**. All experiments below exist to quantify and decompose that claim.
+The evaluation methodology below (E1–E7) targets the Stage 2 checkpoint. Run the same pipeline
+against pilot checkpoints if ablation comparison is needed.
 
 ---
 
-## Status update after T1 (2026-06-22)
+## Key finding from pilot (T1, 2026-06-22)
 
-T1 showed both transfer checkpoints have nearly identical binary failure rates (177 vs 167 persistent clips). Binary pass/fail does NOT explain the 0/8 vs 5/8 visual inference gap. **Continuous metrics are the primary differentiator.** Consequently:
-- E3 (smoothness) is promoted from Tier 2 → Tier 1: implement it before running E1 so we collect jerk in the same RunPod session.
-- E3 caveat: compute jerk separately for stable episodes (`max_body_dist < 100m`) vs all episodes, since physics explosions dominate the jerk average and would confound the comparison.
+Pilot transfer runs had nearly identical binary failure rates (177 vs 167 clips). Binary pass/fail
+does NOT explain the 0/8 vs 5/8 visual inference gap between physics features and raw betas.
+**Continuous metrics are the primary differentiator.** Consequently:
+- Implement E3 (smoothness columns) before running E1 so jerk is captured in the same RunPod session.
+- Report jerk separately for stable episodes (`max_body_dist < 100m`) vs all episodes, since
+  physics explosions dominate the jerk average and confound the comparison.
 
 ---
 
 ## Tier 1 — Core (must-have for paper, RunPod required)
 
-### E1 — Full CSV evaluation on all three checkpoints (RunPod, 2–4 hrs each, can run in parallel)
+### E1 — Full CSV evaluation (RunPod, 2–4 hrs, implement E3 augmentation first)
 
-Run `evaluate_hhi_faults.py` against the full 1024 × 128 dataset for all three checkpoints. This single step unlocks E2–E6, S1, S2 as pure pandas post-processing — no further simulation needed.
+Run `evaluate_hhi_faults.py` against the full Stage 2 dataset. This single step unlocks
+E2–E6, S1, S2 as pure pandas post-processing — no further simulation needed.
 
+**Primary target (Stage 2 checkpoint):**
 ```bash
-# run three in parallel on RunPod (separate tmux panes)
 nohup python -u protomotions/evaluate_hhi_faults.py \
-    --checkpoint results/hhi_1024_motion/last.ckpt \
-    --motion-file /workspace/merged4/humos_slurmrank.pt \
-    --num-envs 128 --output evaluation/hhi_1024_motion_full.csv &
+    --checkpoint results/hhi_stage2_transfer/last.ckpt \
+    --simulator isaacgym \
+    --motion-file /workspace/stage2_data/stage2_slurmrank.pt \
+    --num-envs 128 \
+    --output evaluation/hhi_stage2_transfer_full.csv \
+    --progress-every 50 \
+    > /tmp/eval_stage2.log 2>&1 &
+```
 
+**Pilot ablation (optional, run on 1024×128 dataset):**
+```bash
+# run in parallel on RunPod (separate tmux panes)
 nohup python -u protomotions/evaluate_hhi_faults.py \
     --checkpoint results/hhi_1024_transfer/last.ckpt \
     --motion-file /workspace/merged4/humos_slurmrank.pt \

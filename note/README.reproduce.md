@@ -25,12 +25,13 @@ All permanent/large data lives at `r2:proto-data/`. Run `rclone ls r2:proto-data
 
 | R2 path | Size | Contents | Status |
 |---|---|---|---|
-| `merged4/humos_{0-3}.pt` | 57 GB | Stage 2 training data (1024 clips × 128 shapes, merged shards) | ✓ uploaded |
+| `merged4/humos_{0-3}.pt` | 57 GB | **Pilot** training data (1024 clips × 128 shapes, merged shards) | ✓ uploaded |
 | `20946_neutral_offset/humanml3d_neutral_20946_000X.pt` | 16 GB | Stage 1 training data (20,946 neutral motions, 6 shards) | ✓ uploaded |
-| `difficult-motions/failed_clips.pt` | 10 GB | Hard-clip fine-tune set (192 clips × 128 shapes) | ✓ uploaded |
-| `ckpt/hhi_1024_transfer.zip` | 932 MB | Stage 2 transfer checkpoint | ✓ uploaded |
-| `ckpt/hhi_1024_phy_transfer.zip` | 1.1 GB | Physics-feature transfer checkpoint | ✓ uploaded |
-| `ckpt/20951_neutral.zip` | 117 MB | Old 199-epoch neutral checkpoint (pre-fix, DO NOT use for Stage 1 warm-start) | ✓ uploaded |
+| `hhi_stage2/` | ~1.1 TB projected | **Stage 2** full training data (20,946 clips × 128 shapes) | In progress — see `README.stage2-data-pipeline.md` |
+| `difficult-motions/failed_clips.pt` | 10 GB | Pilot hard-clip fine-tune set (192 clips × 128 shapes) | ✓ uploaded |
+| `ckpt/hhi_1024_transfer.zip` | 932 MB | Pilot transfer checkpoint (raw betas) — ablation reference | ✓ uploaded |
+| `ckpt/hhi_1024_phy_transfer.zip` | 1.1 GB | Pilot transfer checkpoint (physics features) — ablation reference | ✓ uploaded |
+| `ckpt/20951_neutral.zip` | 117 MB | Old 199-epoch neutral checkpoint (pre-fix, **do not** use for Stage 1 warm-start) | ✓ uploaded |
 | `humos_output/` | 36 GB | HUMOS inference output for 128 shapes × 1024 clips | **NOT UPLOADED** |
 | `humos_output/interp/` | (part of above) | HUMOS inference for 16 interp held-out betas (717 files) | **NOT UPLOADED** |
 
@@ -230,6 +231,28 @@ rsync -avz protomotions/data/assets/mjcf/smpl_mor_neutral/ \
 
 ---
 
+## Pipeline D — Stage 2 Full Dataset (20,946 clips × 128 shapes ≈ 1.1 TB)
+
+Final output on R2: `hhi_stage2/batch_NNNN_MMMM_offset.pt` (~335 shards × 3.4 GB)
+
+See `README.stage2-data-pipeline.md` for the full pipeline spec and run commands.
+
+```bash
+# Local (R drive), resumable:
+python tools/prepare_stage2_data.py \
+    --valid-ids /home/hlz/repos/hhi/data-processing/valid_ids_sorted_by_difficulty.txt \
+    --workspace /media/hlz/R/stage2_prep \
+    --proto-root /home/hlz/repos/ProtoMotions \
+    --asset-root /home/hlz/repos/ProtoMotions/protomotions/data/assets/mjcf/smpl_mor \
+    --output-dir /media/hlz/R/stage2_data \
+    --local-humos-cache /media/hlz/R/humos_output \
+    --batch-clips 512 --isaacgym-env isaacgym --device cuda
+```
+
+Progress is tracked in `{workspace}/pipeline_log.txt` and re-run resumes automatically.
+
+---
+
 ## Pipeline C — Held-out Beta Evaluation (E7 generalization)
 
 Final output: `heldout_interp_offset.pt` + `heldout_extrap_offset.pt` (to RunPod for eval)
@@ -306,7 +329,7 @@ rsync -avz /home/hlz/datasets/heldout_interp_offset.pt runpod:/workspace/
 rsync -avz /home/hlz/datasets/heldout_extrap_offset.pt runpod:/workspace/
 ```
 
-See `README.eval-transfer.md` Part 1b Step 6 for the IsaacGym eval commands.
+See `README.heldout-pipeline.md` for the IsaacGym eval commands.
 
 ---
 

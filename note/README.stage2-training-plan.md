@@ -5,7 +5,7 @@
 Stage 2 trains a morphology-conditioned policy on the full 20,946 HumanML3D clips × 128 SMPL body shapes = 2.68M motions, transferred from the Stage 1 neutral checkpoint.
 
 **Data:** 328 `.pt` files × 3.4 GB each ≈ 1.1 TB total.  
-**Status as of 2026-06-25:** 12/41 batches generated (~270 GB, ~80 files).  
+**Status:** ongoing — check `/workspace/stage2_prep/pipeline_log.txt` (or local `data/preprocessing/pipeline_log.txt`) for current batch progress.  
 **Each file:** 8,192 motions = 128 shapes × 64 clips. All 128 shapes are present in every single file.
 
 ---
@@ -92,7 +92,7 @@ Computed once at training start, saved to disk for reproducibility and resume.
 |---|---|---|
 | Learning rate | Stage 1 LR × 0.1 | Standard fine-tuning |
 | Normalizer | Reset + 500-step warm-up | Stage 1 stats are β=0 only |
-| Morphology rep | Physics features (15-dim z-scored) | More generalizable than raw betas for E7 held-out eval |
+| Morphology rep | **TBD** — raw betas (11-dim) or physics features (15-dim); see `README.note.md` §[Physics Features vs Raw Betas — Transfer Inference Finding] and §[Design Decision] Q1 | Open design decision |
 | Steps per file (P) | ~2,000 | Enough for all 8,192 motions to be visited; adjust based on episode length |
 
 ---

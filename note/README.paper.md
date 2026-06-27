@@ -112,19 +112,27 @@ These experiments show the policy has learned physically meaningful shape-condit
 
 ## Experiment Status
 
-| Experiment | Status | ETA |
-|---|---|---|
-| MLP physics training (`hhi_1024_motion`) | Running, ~8k steps, reward 0.84 | ~+2 days |
-| Kimodo beta-conditioning fine-tune (3.2) | Not started | Weeks 1–3 |
-| Kimodo generation quality eval (4.1) | Not started — needs fine-tuned Kimodo | After Kimodo fine-tune |
-| Per-shape physics eval on 128 betas (4.2) | Not started — needs checkpoint | After MLP converges |
-| Held-out beta generation (4.3) | Not started — can run now | This week |
-| Held-out generalization eval (4.3) | Not started | After held-out data ready |
-| Torque / energy analysis (4.4a) | Not started — needs checkpoint | Weeks 3–4 |
-| Stability / COM analysis (4.4b) | Not started — needs checkpoint | Weeks 3–4 |
-| Contact quality analysis (4.4c) | Not started — needs checkpoint | Weeks 3–4 |
-| Shape extremity correlation (4.4d) | Not started | Weeks 4–5 |
-| Qualitative visualization (4.5) | Not started | Weeks 5–6 |
+| Experiment | Status |
+|---|---|
+| Architecture search (MLP, FiLM, ShapeEmbed, physics features — 4 runs) | **Done** |
+| Baseline pilot training — 1024×128, `hhi_1024_motion` | **Done** — reward 0.84, 12,021 epochs |
+| Hard-clip fine-tune — `hhi_1024_motion_tune` | **Done** — abandoned (jerk + catastrophic forgetting) |
+| Transfer: raw betas — `hhi_1024_transfer` | **Done** — 21,400 epochs |
+| Transfer: physics features — `hhi_phy_1024_transfer` | **Done** — 17,200 epochs |
+| T1 clip overlap analysis | **Done** — 10-clip net difference, p=0.55 (not significant by binary metric) |
+| Visual inference smoke test (8 envs) | **Done** — 5/8 vs 0/8 (physics features vs raw betas) |
+| **Stage 1: 20,946 neutral clips — `hhi_20946_neutral`** | **Running** |
+| Stage 2 data generation (20,946 clips × 128 shapes) | **In progress** — see `README.stage2-data-pipeline.md` |
+| **Stage 2 transfer — `hhi_stage2_transfer`** | **Blocked on data** |
+| E1 full CSV evaluation (Stage 2 checkpoint) | Not yet — needs Stage 2 checkpoint |
+| E3 smoothness evaluator augmentation | Not yet |
+| E7 held-out beta generalization | Partial — interp HUMOS inference done (717 files); pipeline incomplete |
+| Kimodo beta-conditioning fine-tune (§3.2) | Not started |
+| Kimodo generation quality eval (§4.1) | Not started — needs fine-tuned Kimodo |
+| Per-shape physics eval (§4.2) | Not yet — needs Stage 2 checkpoint |
+| Held-out beta eval (§4.3) | Not yet — needs pipeline + Stage 2 checkpoint |
+| Torque / energy / contact / COM analysis (§4.4) | Not yet |
+| Qualitative visualization (§4.5) | Not yet |
 
 ---
 

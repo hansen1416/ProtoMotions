@@ -213,15 +213,15 @@ Status: interpolation HUMOS inference done locally (22,459 files). Needs upload 
 | Item | Status |
 |---|---|
 | Architecture search (4 runs) | **Done** — MLP flat-concat chosen |
-| Baseline training (1024×128) | **Done** — reward 0.84, 12,021 epochs |
+| Baseline pilot training (1024×128) | **Done** — reward 0.84, 12,021 epochs |
 | Hard clip fine-tune | **Done** — abandoned (jerk + forgetting) |
 | Transfer run: raw betas | **Done** — 21,400 epochs |
 | Transfer run: physics features | **Done** — 17,200 epochs |
-| T1 clip overlap analysis | **Done** — 10 clip net difference, not significant |
-| Visual inference test (8 envs) | **Done** — 5/8 vs 0/8, not quantified |
-| Stage 1 neutral training (20,946 clips) | **In progress** |
-| HUMOS inference for 20,946×128 (Stage 2 data) | **Not yet** — ~20× pilot scale |
-| Stage 2 transfer (full 20,946×128) | **Not yet** — blocked on data |
-| E1 full CSV evaluation (1024×128) | **Not yet** — needs RunPod |
-| E3 smoothness augmentation (evaluator) | **Not yet** — local code change |
-| E7 held-out beta generalization | **Not yet** — data pipeline incomplete |
+| T1 clip overlap analysis | **Done** — 10-clip net difference, p=0.55 |
+| Visual inference smoke test (8 envs) | **Done** — 5/8 vs 0/8, not yet quantified |
+| Stage 1 neutral training (`hhi_20946_neutral`) | **Running** — 20,946 clips on RunPod |
+| Stage 2 data generation (20,946×128) | **In progress** — see `README.stage2-data-pipeline.md` |
+| Stage 2 transfer (`hhi_stage2_transfer`) | **Blocked on data** |
+| E1 full CSV evaluation (Stage 2 checkpoint) | **Not yet** — needs Stage 2 checkpoint |
+| E3 smoothness evaluator augmentation | **Not yet** — local code change |
+| E7 held-out beta generalization | **Partial** — interp inference done (717 files); pipeline incomplete |

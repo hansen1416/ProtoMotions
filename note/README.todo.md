@@ -1,52 +1,80 @@
 # TODO
 
-## Training
+## Current Status
 
-- ~~**A1 (HIGH)** Residual PD: change `q_target = q_neutral + scale * action` → `q_target = q_ref + scale * action` using `EnvContext.mimic.ref_state.dof_pos`~~ *(ProtoMotions does not use residual PD and achieves its results without it; PHC claim does not transfer)*
-- **A2 (HIGH)** Contact reward: extend `contact_bodies` to include `L_Knee`, `R_Knee`, `L_Wrist`, `R_Wrist` for crawl/kneel clips
-- **A3 (MED)** Phase obs: add `φ = frame_idx / total_frames ∈ [0,1]` as observation key
-- **A4 (MED)** Per-shape RunningMeanStd: 128 separate buffers keyed by `asset_id`
-- **A5 (MED)** PopArt per-shape return normalization for critic value head
-- **A6 (LOW)** TVS difficulty re-scoring: replace current difficulty score with torque variation score (arXiv 2512.07248)
+| | |
+|---|---|
+| Stage 1 (`hhi_20946_neutral`) | **Running** — 20,946 neutral motions, `smpl_mor_neutral` + `mlp.py`, 6 shards on RunPod |
+| Stage 2 data pipeline | **In progress** — `tools/prepare_stage2_data.py`; check `pipeline_log.txt` for batch progress |
+| Stage 2 training | **Blocked** on data |
 
-## Analysis (no new training)
+---
 
-- **B1 (CRITICAL)** Held-out eval: generate 16–32 interpolation betas + extrapolation betas via HUMOS; eval `hhi_1024_motion` and `hhi_1024_motion_tune` checkpoints; plot tracking error vs beta L2 distance
-- **B2 (HIGH)** Embodiment probe: record actor hidden activations for 128 shapes; fit linear regression → `[mass, com_height, limb_lengths]`; report R² per property
-- **B3 (MED)** Stride analysis: measure stride length/frequency across 128 shapes for a walking clip
+## Active — Pre-Stage-2
 
-================================================================================
+- **N1 (CRITICAL)** When Stage 1 converges: inspect normalizer before Stage 2
+  ```bash
+  python tools/reset_morphology_normalizer.py \
+      --checkpoint results/hhi_20946_neutral/last.ckpt --dry-run
+  # expect var[-10:] ≈ 0 on all beta dims; var[-11] (gender) ≈ 1.0
+  python tools/reset_morphology_normalizer.py \
+      --checkpoint results/hhi_20946_neutral/last.ckpt \
+      --output results/hhi_20946_neutral/last_morph_reset.ckpt
+  ```
+- **N2 (OPEN)** Morphology representation for Stage 2: raw betas (11-dim) or physics features
+  (15-dim); see `README.note.md` §[Physics Features vs Raw Betas — Transfer Inference Finding]
+  and §[Design Decision] Q1
+- **N3** When Stage 2 data ready and Stage 1 converged: launch `hhi_stage2_transfer`
+  with 10× lower LR, from the reset checkpoint
 
-## Evaluation — `hhi_1024_motion_tune` (systematic)
+---
 
-### Tier 1 — Standard motion imitation metrics (no new code needed)
+## Training Improvements (Stage 2)
 
-- **E1 (CRITICAL)** Run `evaluate_hhi_faults.py` on the current checkpoint — produces per-(gender, beta_key) CSV with mean/max body distance, root distance, min root height
-- **E2 (HIGH)** Post-process CSV: apply thresholds (`min_root_height > 0.5 m` AND `mean_body_dist < 0.5 m`) to compute **success rate** per shape and overall — primary headline number for paper comparison
-- **E3 (MED)** Confirm motion smoothness is logged (already in `MimicEvaluator._register_smoothness_plugin`); extract action jitter / body jerk from eval run
+- **A2 (MED)** Contact reward: extend `contact_bodies` to include `L_Knee`, `R_Knee`,
+  `L_Wrist`, `R_Wrist` — needed for crawl/kneel/squat clips which are the main failure class
+- **A3 (MED)** Phase obs: add `φ = frame_idx / total_frames ∈ [0,1]` as an observation key
+  to resolve temporal aliasing in periodic motions
 
-### Tier 2 — Multi-shape specific metrics (novel contribution, ~50 lines pandas each)
+---
 
-- **E4 (HIGH)** **Per-shape success rate distribution**: histogram of success rate across 128 (gender, beta_key) pairs; report 5th-percentile worst shape → core Table 1 / Figure for section 4.1
-- **E5 (HIGH)** **Cross-shape variance**: for each clip `c`, compute `std_β(mean_body_dist(c, β))` across all 128 shapes; report mean and max — low variance = policy adapted to morphology, not averaging
-- **E6 (HIGH)** **Shape extremity correlation**: scatter `‖β‖₂` vs `mean_body_dist` per shape; fit linear regression; small slope = uniform generalization → section 4.3d
-- **E7 (HIGH)** **Held-out shape generalization**: run same evaluation on 16–32 interpolation betas (same range, new seed) + extrapolation betas (±5 range); compare success rate vs training shapes → section 4.2 *(see B1)*
+## Evaluator Augmentation (needed before first Stage 2 eval run)
 
-### Tier 3 — Physical analysis (section 4.3, high paper value, needs augmented rollout)
+Add to `HHIFaultEvaluator` / `evaluate_hhi_faults.py` CSV output:
+- **E3-a** `mean_normalized_jerk` — via existing `SmoothnessCalculator.compute_normalized_jerk_from_pos`
+- **E3-b** `high_jerk_frame_pct` — % of 0.4s windows exceeding NJ threshold 6500
+- **E3-c** `beta_l2` = `‖β‖₂` per motion (one-liner from `motion_lib.motion_betas[id].norm()`)
+- **E3-d** `explosion_frame` — first frame where body_dist > 5 m; −1 if none
+- **E3-e** `completed` bool — all frames ran without explosion
 
-- **E8 (MED)** **Joint torque × body mass** (4.3a): augment evaluator to record per-step joint torques; for the same clip, compare torques across lightest/heaviest shapes; heavier → higher torques validates shape-awareness
-- **E9 (MED)** **Contact timing adaptation** (4.3c): record per-step foot contact states; measure contact onset timing across shapes for same locomotion clip; does foot contact shift with body height?
-- **E10 (MED)** **Motion type × shape heatmap** (S1): categorise 1024 clips by keyword (locomotion / dynamic / manipulation / static) using `data-processing/motion_id_text.json`; compute mean body distance per (motion category, beta-L2 bucket) cell; output 2D heatmap
-- **E11 (MED)** **Failure mode taxonomy** (S3): from rollout data classify failures into fall / COM drift / joint-limit violation / contact failure; plot distribution per shape extremity bucket and motion category
-- **E12 (LOW)** **Stride length vs body height** (S4): locomotion clips only; measure stride length/frequency per shape from root XY trajectory; positive correlation with body height = implicit retargeting *(see B3)*
+See `README.eval-plan.md` §Part 3 for the full implementation spec.
 
-### Execution order
+---
 
-1. E1 → E2 → E4 → E5 → E6 (all from one CSV, can be done now)
-2. E7 / B1 (needs held-out beta generation via HUMOS first)
-3. E8 → E9 → E10 → E11 (needs augmented rollout loop)
-4. E12 / B3, B2 (lowest priority, do if time allows)
+## Evaluation (primary target: Stage 2 checkpoint)
 
-## Scale-up (conditional on A gains)
+Run after Stage 2 converges. All post-E1 analyses are pure pandas from the CSV — no re-simulation.
 
-- **C** Full-data run: 20,951 motions from `valid_motions.txt`, `num_envs=8192`, `batch_size=32768`
+| # | Task | Blocker |
+|---|---|---|
+| E1 | Full CSV evaluation on RunPod (2–4 hrs per checkpoint) | Stage 2 checkpoint |
+| E2 | Success/failure table: `success = root_height>0.3m AND body_dist<0.5m` | E1 |
+| E4 | Per-shape success rate: group by `(gender, beta_key)` → 128 rates → histogram | E1 |
+| E5 | Cross-shape variance: `std(mean_body_dist)` per clip across 128 betas | E1 |
+| E6 | Shape extremity: scatter `‖β‖₂` vs `mean_body_dist`, fit OLS slope | E1 + E3-c |
+| E7 | Held-out beta generalization (interp + extrap) | interp inference done; see `README.heldout-pipeline.md` |
+
+---
+
+## Analysis
+
+- **B1 (HIGH)** Embodiment probe: record actor hidden activations for all 128 shapes; fit
+  linear regression to predict physical properties (mass, COM height, limb lengths); report R²
+- **B2 (MED)** Stride analysis: stride length/frequency vs body height for a locomotion clip
+
+---
+
+## Pilot Checkpoints (ablation)
+
+`hhi_1024_transfer` and `hhi_phy_1024_transfer` are on R2 (`r2:proto-data/ckpt/`). Run E1
+against the 1024×128 pilot dataset if needed for ablation comparison against Stage 2.
