@@ -229,6 +229,11 @@ python tools/prepare_stage2_data.py \
     --device cuda
 
 
+
+mkdir /workspace/stage2_prep
+
+cp data/preprocessing/pipeline_log.txt /workspace/stage2_prep/
+
 nohup python tools/prepare_stage2_data.py \
       --valid-ids /workspace/ProtoMotions/data/preprocessing/valid_ids_sorted_by_difficulty.txt \
       --workspace /workspace/stage2_prep \
