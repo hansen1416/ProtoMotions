@@ -21,9 +21,9 @@
       --checkpoint results/hhi_20946_neutral/last.ckpt \
       --output results/hhi_20946_neutral/last_morph_reset.ckpt
   ```
-- **N2 (OPEN)** Morphology representation for Stage 2: raw betas (11-dim) or physics features
-  (15-dim); see `README.note.md` §[Physics Features vs Raw Betas — Transfer Inference Finding]
-  and §[Design Decision] Q1
+- **N2 (DECIDED 2026-06-27)** Morphology rep: **raw betas (11-dim)** — gravity-core eval shows
+  physics features only 0.018 m better (< 0.05 m threshold), not worth obs-dim change. See
+  `README.gravity-core-eval.md` for full analysis.
 - **N3** When Stage 2 data ready and Stage 1 converged: launch `hhi_stage2_transfer`
   with 10× lower LR, from the reset checkpoint
 

@@ -219,6 +219,7 @@ Status: interpolation HUMOS inference done locally (22,459 files). Needs upload 
 | Transfer run: physics features | **Done** — 17,200 epochs |
 | T1 clip overlap analysis | **Done** — 10-clip net difference, p=0.55 |
 | Visual inference smoke test (8 envs) | **Done** — 5/8 vs 0/8, not yet quantified |
+| Gravity-core evaluation (88 clips × 128 shapes) | **Done** — phy 0.6730 m vs raw 0.6909 m; gap 0.018 m < threshold; **raw betas chosen** |
 | Stage 1 neutral training (`hhi_20946_neutral`) | **Running** — 20,946 clips on RunPod |
 | Stage 2 data generation (20,946×128) | **In progress** — see `README.stage2-data-pipeline.md` |
 | Stage 2 transfer (`hhi_stage2_transfer`) | **Blocked on data** |

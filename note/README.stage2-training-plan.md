@@ -92,7 +92,7 @@ Computed once at training start, saved to disk for reproducibility and resume.
 |---|---|---|
 | Learning rate | Stage 1 LR × 0.1 | Standard fine-tuning |
 | Normalizer | Reset + 500-step warm-up | Stage 1 stats are β=0 only |
-| Morphology rep | **TBD** — raw betas (11-dim) or physics features (15-dim); see `README.note.md` §[Physics Features vs Raw Betas — Transfer Inference Finding] and §[Design Decision] Q1 | Open design decision |
+| Morphology rep | **Raw betas (11-dim)** — same as Stage 1; decided 2026-06-27 from gravity-core eval (gap 0.018 m < 0.05 m threshold); see `README.gravity-core-eval.md` | Clean Stage 1 → Stage 2 transfer, no arch change |
 | Steps per file (P) | ~2,000 | Enough for all 8,192 motions to be visited; adjust based on episode length |
 
 ---
