@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import re
 import traceback
 import xml.etree.ElementTree as ET
@@ -818,6 +819,9 @@ def main():
         )
 
         print("[DONE]")
+        # IsaacGym's PhysX destructor segfaults on teardown; since all work
+        # is already saved, bypass cleanup with a hard exit.
+        os._exit(0)
 
     except Exception:
         traceback.print_exc()
