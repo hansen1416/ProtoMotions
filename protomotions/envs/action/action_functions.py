@@ -413,6 +413,60 @@ def make_bm_pd_action_config(robot_config) -> Dict[str, Any]:
     }
 
 
+def make_residual_pd_action_config(
+    robot_config,
+    residual_scale: float = 0.3,
+    action_transform: ActionTransform = "tanh",
+    clamp_value: float = 1.0,
+) -> Dict[str, Any]:
+    """Create action config for residual PD control.
+
+    At inference time: q_target = q_ref + residual_scale * tanh(action)
+    where q_ref is the current-frame reference DOF positions from the motion clip.
+
+    When action=0 the controller already tracks the reference exactly — the policy
+    only needs to output small corrections for dynamics and contacts. This eliminates
+    the large sustained outputs required by standard PD for non-default poses (crawl,
+    kneel, squat), which is the root cause of jerk in fine-tuning runs.
+
+    The residual_scale is uniform across all DOFs (in radians). 0.3 rad (~17°) is a
+    good starting point; reduce if large-output instability is observed at fine-tune
+    epoch 0.
+
+    Args:
+        robot_config: Robot configuration with kinematic_info and control fields.
+        residual_scale: Maximum per-joint correction magnitude (radians). Default 0.3.
+        action_transform: How to bound actions - "tanh" (default), "clamp", or None.
+        clamp_value: Max absolute value for clamp mode.
+
+    Returns:
+        Action config dict with use_residual_pd=True flag consumed by _process_action.
+    """
+    joint_names = robot_config.kinematic_info.dof_names
+    num_dofs = len(joint_names)
+
+    stiffness = torch.tensor(
+        [robot_config.control.control_info[j].stiffness for j in joint_names],
+        dtype=torch.float32,
+    )
+    damping = torch.tensor(
+        [robot_config.control.control_info[j].damping for j in joint_names],
+        dtype=torch.float32,
+    )
+    pd_action_scale = torch.full((num_dofs,), residual_scale, dtype=torch.float32)
+
+    return {
+        "fn": normalized_pd_fixed_gains_action,
+        "pd_action_offset": torch.zeros(num_dofs, dtype=torch.float32),  # placeholder; replaced at runtime
+        "pd_action_scale": pd_action_scale,
+        "stiffness": stiffness,
+        "damping": damping,
+        "action_transform": action_transform,
+        "clamp_value": clamp_value,
+        "use_residual_pd": True,
+    }
+
+
 def make_passthrough_pd_action_config(robot_config) -> Dict[str, Any]:
     """Create action config dict for passthrough PD control.
 

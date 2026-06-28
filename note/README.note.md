@@ -1428,3 +1428,64 @@ Checkpoint paths:
 | hhi     | 0014       | 277          | f0014_m277.mp4          |
 | hhi     | 0015       | 74           | f0015_m074.mp4          |
 | hhi     | 0015       | 231          | f0015_m231.mp4          |
+
+================================================================================
+
+## 12. Stage 1 Neutral Training — `hhi_20946_neutral` (2026-06-28)
+
+### [Results] Training Progress at Epoch ~20,400 (~174 hours)
+
+**Result dir:** `results/hhi_20946_neutral/`
+**Dataset:** 20,946 neutral-body HumanML3D motions (betas=0, `smpl_mor_neutral`)
+**Hardware:** 6× GPU (6 ranks), 4096 envs/rank, batch 16384
+
+#### Success Rate Trajectory
+
+| Epoch | Success Rate |
+|-------|-------------|
+| 200   | 0.4%        |
+| 1000  | 29.1%       |
+| 4200  | 50.8%       |
+| 7400  | 65.9%       |
+| 10400 | 71.4% (mid-plateau) |
+| 15400 | 80.1%       |
+| 18600 | 83.5%       |
+| 20200 | **84.9%** (peak) |
+| 20400 | 84.2%       |
+
+Rapid gains through ~epoch 5000, then slow climb through 70–80%, now oscillating 82–85%. Confirmed plateau in last ~5000 steps (+3–4 pp gain).
+
+#### Key Metrics (epoch 20400)
+
+| Metric | Start | Current |
+|--------|-------|---------|
+| `eval/success_rate` | 0.4% | **84.2%** |
+| `rewards/unnormalized_task_rewards` | 0.659 | **0.845** (flat) |
+| `eval/gt_error/mean` (translation) | 1.32 m | **0.195 m** |
+| `eval/gr_error/mean` (rotation) | 1.51 | **0.287** |
+| `eval/gt_error/failure_rate` | 99.6% | **15.8%** |
+| `info/episode_length` | ~5 steps | **~205 steps** |
+| `env/terminate_mean` | 20.4% | **0.1%** |
+| `times/training_hours` | — | **174 h** |
+
+#### Reward Component Breakdown (raw, unnormalized)
+
+| Reward | Start | Current | Status |
+|--------|-------|---------|--------|
+| `gt_rew` (translation) | 0.791 | 0.838 | Nearly flat |
+| `gr_rew` (rotation) | 0.325 | **0.682** | Biggest remaining gap |
+| `gv_rew` (velocity) | 0.456 | 0.910 | Well converged |
+| `gav_rew` (angular velocity) | 0.250 | 0.732 | Converged |
+| `rh_rew` (root height) | 0.805 | 0.924 | Converged |
+| `contact_match_rew` | 0.411 | 1.545 | Converged |
+| `pow_rew` (power) | 1134 | **196** | Good reduction |
+
+#### Failure Analysis
+
+- Unique failed motions at epoch 20400: **2,271** (from `failed_motions/`)
+- Persistent failures (fail in all 5 most recent evals): **1,834** = **8.8%** of 20,946 dataset
+- Inconsistent / borderline failures: ~437
+
+#### Assessment
+
+Plateau is real. Rotation tracking (`gr_rew`, `gr_error`) is the primary remaining bottleneck — converged more slowly than translation and velocity components. The ~16% failure rate is concentrated in ~1,800 hard motions (likely floor-contact poses: crawl/kneel/squat/backward, consistent with prior `hhi_1024_motion` findings). Diminishing returns suggest this is near the practical ceiling for Stage 1. Recommend using this checkpoint (or `epoch_20000.ckpt` / `score_based.ckpt`) as the Stage 2 warm-start.

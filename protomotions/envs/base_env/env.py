@@ -503,9 +503,20 @@ class BaseEnv:
             self._action_config_device_ready = True
 
         fn = self.config.action_config["fn"]
-        # Extract all params except "fn"
-        params = {k: v for k, v in self.config.action_config.items() if k != "fn"}
+        # Extract all params except "fn" and control flags
+        params = {
+            k: v
+            for k, v in self.config.action_config.items()
+            if k not in ("fn", "use_residual_pd")
+        }
         params["action"] = action
+
+        # Residual PD: replace static offset with current-frame reference DOF positions.
+        # q_target = q_ref(t) + scale * tanh(action), so action=0 tracks reference exactly.
+        if self.config.action_config.get("use_residual_pd", False):
+            if context is not None and context.mimic is not None:
+                params["pd_action_offset"] = context.mimic.ref_state.dof_pos
+
         return fn(**params)
 
     ###############################################################
