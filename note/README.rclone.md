@@ -87,12 +87,6 @@ rclone copy /home/hlz/datasets/humos_proto/failed \
 
 rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
     --transfers=4 \
-    --s3-download-concurrency=16 \
-    --s3-chunk-size=128M \
-    --progress
-
-rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
-    --transfers=4 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress

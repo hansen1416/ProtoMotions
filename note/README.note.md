@@ -1431,6 +1431,48 @@ Checkpoint paths:
 
 ================================================================================
 
+## 13. Residual PD Control (commit 5ac91ae6b3afd1eabb0c062f76b6f5e4e059251b)
+
+**Motivation:** Standard PD uses `q_target = q_neutral_mid + scale * tanh(action)`. For floor-contact poses (crawl/kneel/squat), joints are far from neutral so the policy must sustain large outputs every step → jerk and instability. Residual PD sets `q_target = q_ref(t) + residual_scale * tanh(action)`, so `action=0` already tracks the reference exactly and the policy only corrects for dynamics.
+
+### Code changes
+
+| File | Change |
+|---|---|
+| `protomotions/envs/action/action_functions.py` | Added `make_residual_pd_action_config(robot_config, residual_scale=0.3)` — builds action config with uniform 0.3 rad scale and `use_residual_pd=True` flag |
+| `protomotions/envs/action/__init__.py` | Exported `make_residual_pd_action_config` |
+| `protomotions/envs/base_env/env.py` | Modified `_process_action` to inject `context.mimic.ref_state.dof_pos` as `pd_action_offset` when `use_residual_pd=True` |
+| `examples/experiments/mimic/mlp_residual_pd.py` | New experiment config identical to `mlp.py` but using `make_residual_pd_action_config` |
+
+### Smoke test command (8 envs, local)
+
+```bash
+python protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_residual_pd.py \
+    --experiment-name hhi_pd_test \
+    --motion-file /home/hlz/datasets/humos_proto/humos_8_offset.pt \
+    --num-envs 8 --batch-size 16
+```
+
+### Fine-tune command (RunPod, from Stage 1 checkpoint)
+
+```bash
+python protomotions/train_agent.py \
+    --robot-name smpl_mor_neutral \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_residual_pd.py \
+    --experiment-name hhi_stage1_residual_pd \
+    --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
+    --checkpoint results/hhi_20946_neutral/last.ckpt \
+    --num-envs 4096 --batch-size 16384
+```
+
+**Watch at epoch 0:** `env/terminate_mean` should stay ~0.001 and `info/episode_length` ~200. A spike to termination rate >0.3 means epoch-0 action overshoot — reduce `residual_scale` to 0.1 or rescale the loaded actor's final-layer weights by `old_pd_scale / residual_scale`.
+
+================================================================================
+
 ## 12. Stage 1 Neutral Training — `hhi_20946_neutral` (2026-06-28)
 
 ### [Results] Training Progress at Epoch ~20,400 (~174 hours)
@@ -1489,3 +1531,38 @@ Rapid gains through ~epoch 5000, then slow climb through 70–80%, now oscillati
 #### Assessment
 
 Plateau is real. Rotation tracking (`gr_rew`, `gr_error`) is the primary remaining bottleneck — converged more slowly than translation and velocity components. The ~16% failure rate is concentrated in ~1,800 hard motions (likely floor-contact poses: crawl/kneel/squat/backward, consistent with prior `hhi_1024_motion` findings). Diminishing returns suggest this is near the practical ceiling for Stage 1. Recommend using this checkpoint (or `epoch_20000.ckpt` / `score_based.ckpt`) as the Stage 2 warm-start.
+
+================================================================================
+
+## 14. Residual PD Transfer — `hhi_20946_neutral_rpd` (2026-06-29)
+
+Fine-tune `hhi_20946_neutral/score_based.ckpt` (84.9% success) with residual PD on the same neutral dataset.
+Adapts the policy to the new action mode before Stage 2 multi-shape transfer.
+
+### [Command] Download checkpoint from R2 (RunPod)
+
+```bash
+rclone copy r2:proto-data/ckpt/20946_neutral.zip /workspace/ProtoMotions/ \
+    --transfers=1 \
+    --multi-thread-streams=16 \
+    --multi-thread-chunk-size=128M \
+    --progress
+```
+
+### [Command] Training (RunPod)
+
+```bash
+nohup python -u protomotions/train_agent.py \
+    --robot-name smpl_mor_neutral \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_residual_pd.py \
+    --experiment-name hhi_20946_neutral_rpd \
+    --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
+    --checkpoint results/hhi_20946_neutral/score_based.ckpt \
+    --num-envs 6144 --batch-size 24576 \
+    --ngpu 6 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_neutral_rpd > /tmp/train_neutral_rpd.log 2>&1 &
+```
