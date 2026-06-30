@@ -1566,3 +1566,262 @@ nohup python -u protomotions/train_agent.py \
     --wandb-entity yugoamaryl \
     --wandb-group hhi_neutral_rpd > /tmp/train_neutral_rpd.log 2>&1 &
 ```
+
+================================================================================
+
+## 15. Full RL Training Process — Deep Dive (2026-06-30)
+
+### 1. The Training Loop (`BaseAgent.fit()`)
+
+Each epoch is two phases: **rollout** (data collection, `torch.no_grad()`) then **optimization** (gradient steps).
+
+```
+for epoch in range(max_epochs):
+    # Phase 1: Collect num_steps timesteps from num_envs parallel envs
+    for step in range(num_steps):
+        obs_td = env.reset(done_indices)          # reset terminated envs
+        actor_output = model(obs_td)              # policy forward: action, mean_action, neglogp, value
+        next_obs, rewards, dones, ... = env.step(actor_output["action"])
+        experience_buffer.store(obs, action, reward, done, value, next_value)
+
+    # Phase 2: Optimize on the collected batch
+    normalize_rewards_in_buffer()
+    pre_process_dataset()   # compute GAE advantages + returns
+    optimize_model()        # multiple mini-epochs of PPO updates
+```
+
+**Scale in training runs:** 4096 envs × 32 steps × 6 GPUs = 786,432 samples/epoch. `max_epochs` is computed from `training_max_steps // world_size // num_envs // num_steps`.
+
+---
+
+### 2. Observation Vector
+
+The actor sees a flat concatenation of 4 key groups:
+
+| Key | ~Dim | Content |
+|---|---|---|
+| `max_coords_obs` | ~362 | global body pos/rot/vel/angvel, root height, contact flags |
+| `mimic_target_poses` | ~similar | reference body poses + velocities (future targets) |
+| `previous_actions` | 63 | last action output (SMPL DOFs) |
+| `morphology_obs` | 11 | `[gender_id, beta_1/3, …, beta_10/3]` |
+
+Total ~1014 dims. One `RunningMeanStd` normalizes the whole vector. **This is why the normalizer reset tool is critical before Stage 2** — beta dims have variance ≈ 0 after Stage 1, which would saturate them to ±167 before the clamp.
+
+The critic gets the same keys (including `morphology_obs`), so it is not blind to body shape.
+
+---
+
+### 3. Action Pipeline — Standard PD vs Residual PD
+
+**Standard PD** (`make_pd_action_config`, all runs before `hhi_20946_neutral_rpd`):
+
+```python
+# build_pd_action_offset_scale() computes from joint limits:
+pd_action_offset = 0.5 * (lim_high + lim_low)   # joint midpoint ("neutral")
+pd_action_scale  = 0.5 * (lim_high - lim_low)   # × action_scale
+
+# At inference:
+q_target = pd_action_offset + pd_action_scale * tanh(action)
+```
+
+For a crawling pose, `q_ref` is far from `pd_action_offset`. The policy must output a large sustained `action` every step just to fight the offset — hence jerk and instability.
+
+**Residual PD** (`make_residual_pd_action_config`, `mlp_residual_pd.py`):
+
+```python
+# pd_action_scale = uniform 0.3 rad across all DOFs
+# pd_action_offset = REPLACED at runtime by context.mimic.ref_state.dof_pos
+
+# At inference (env.py:_process_action):
+if use_residual_pd:
+    params["pd_action_offset"] = context.mimic.ref_state.dof_pos   # q_ref(t)
+
+q_target = q_ref(t) + 0.3 * tanh(action)
+```
+
+When `action = 0`, the joint target is exactly the reference pose. The policy only needs to output small corrections for dynamics, contacts, and physics error. This structurally eliminates large sustained outputs for floor-contact poses.
+
+**The `pd_action_offset` in the config dict is a placeholder `zeros` tensor** — it gets replaced by `context.mimic.ref_state.dof_pos` every step via `_process_action()` (`env.py:516-518`).
+
+---
+
+### 4. Reward Components (`mlp.py`)
+
+| Component | Signal | Notes |
+|---|---|---|
+| `gt_rew` | Global translation matching | Position of all 24 SMPL bodies |
+| `gr_rew` | Global rotation matching | Orientation of all 24 bodies (biggest gap in Stage 1) |
+| `gv_rew` | Global velocity matching | Body velocities — well converged |
+| `gav_rew` | Global angular velocity matching | Body angular velocities — converged |
+| `rh_rew` | Root height matching | Pelvis height |
+| `contact_match_rew` | Contact flag matching | Foot/hand contact alignment with reference |
+| `pow_rew` | Power penalty | Energy efficiency (reduced 1134 → 196 in Stage 1) |
+| `action_smoothness` | `‖a_t - a_{t-1}‖₂ × -0.02` | Jerk suppression |
+
+Reward normalization (`normalize_rewards=True`) uses a running mean/std over discounted returns. Values are stored un-normalized in the buffer; normalization is applied before advantage computation.
+
+---
+
+### 5. PPO Update — What Happens in `optimize_model()`
+
+**Step A: `pre_process_dataset()` — GAE advantages**
+
+```python
+# discount_values() implements Generalized Advantage Estimation (Schulman 2016)
+delta[t] = reward[t] + gamma * V(s[t+1]) * (1 - done[t]) - V(s[t])
+advantages[t] = delta[t] + (gamma * tau) * delta[t+1] + ...
+
+returns = advantages + values
+```
+
+Parameters: `gamma=0.99`, `tau=0.95` (GAE λ — controls bias/variance trade-off).
+
+Advantages are EMA-normalized (`alpha=0.05`, clamp ±4σ) before the policy update to stabilize gradients.
+
+**Step B: multiple mini-epochs over minibatches**
+
+```
+for mini_epoch in range(num_mini_epochs):
+    for batch in shuffle(experience_buffer):
+        actor_step(batch)   # PPO clipped surrogate loss
+        critic_step(batch)  # value MSE loss
+```
+
+**Actor loss (PPO clipped surrogate, `agent.py:actor_step`):**
+
+```python
+ratio = exp(old_neglogp - current_neglogp)   # importance weight
+surr1 = advantages * ratio
+surr2 = advantages * clamp(ratio, 1 - e_clip, 1 + e_clip)
+ppo_loss = max(-surr1, -surr2).mean()        # conservative: use the worse bound
+
+actor_loss = ppo_loss + bounds_loss + extra_loss
+# bounds_loss penalizes |mean_action| > 1 (keeps outputs in valid range)
+```
+
+`e_clip = 0.2`. If `clip_frac > 0.6` in a batch, the entire remaining mini-epoch skips actor updates — the policy has already moved too far from the rollout distribution.
+
+**Critic loss (clipped value, `agent.py:critic_step`):**
+
+```python
+critic_loss_unclipped = (V_new - returns)²
+V_clipped = V_old + clamp(V_new - V_old, -e_clip, e_clip)
+critic_loss_clipped = (V_clipped - returns)²
+critic_loss = max(critic_loss_unclipped, critic_loss_clipped).mean()
+```
+
+**Learning rates:** Actor `2e-5`, Critic `1e-4` (defaults). Adaptive KL scheduling is available but disabled in current runs. Stage 2 transfer uses 10× lower: actor `2e-6`, critic `1e-5`.
+
+---
+
+### 6. Two-Stage Curriculum — Current Position
+
+```
+Stage 1: hhi_20946_neutral  (DONE, epoch ~20,400, 174 h)
+  ├── 20,946 HumanML3D clips, betas=0, smpl_mor_neutral
+  ├── 84.9% success rate, reward 0.845, plateau confirmed
+  ├── Failure: ~1,834 hard clips (crawl/kneel/squat/backward) = 8.8%
+  └── score_based.ckpt → uploaded to R2 as ckpt/20946_neutral.zip
+
+Stage 1.5: hhi_20946_neutral_rpd  (IN PROGRESS on RunPod)
+  ├── Fine-tune Stage 1 ckpt with residual PD, same neutral dataset
+  ├── Action space: q_ref(t) + 0.3·tanh(a)  vs old: q_neutral + scale·tanh(a)
+  ├── Goal: adapt policy to new action mode before multi-shape transfer
+  └── Watch epoch-0: terminate_mean should stay ~0.001; if >0.3 reduce scale to 0.1
+
+Stage 2: hhi_stage2_transfer  (PLANNED)
+  ├── Start from Stage 1.5 checkpoint
+  ├── Multi-shape dataset: humos_slurmrank.pt (1024 clips × 128 shapes)
+  ├── --robot-name smpl_mor, LR 10× lower (actor 2e-6, critic 1e-5)
+  └── Run reset_morphology_normalizer.py on Stage 1.5 ckpt first
+```
+
+**Why Stage 1.5 is the right bridge:** Switching directly to residual PD + multi-shape in Stage 2 would give the policy two simultaneous shocks — new action semantics AND new body shapes. Stage 1.5 on the familiar neutral dataset isolates the action-space change, letting the policy recalibrate before body-shape variation is introduced.
+
+---
+
+### 7. Key Design Decisions — Summary
+
+| Decision | Choice | Reason |
+|---|---|---|
+| Architecture | `mlp.py` flat concat | FiLM fanout bottleneck (12,288 conditioner outputs); ShapeEmbed/physics matched baseline |
+| Morphology input | Physics features (15-dim) over raw betas (11-dim) | Transfer inference: 5/8 vs 0/8 success — physics features causally meaningful |
+| Evaluator strategy | `eval_one_shape_per_motion` | Covers every clip per cycle; `max_eval_motions=2000` missed 13% of clips |
+| Curriculum propagation | All 128 shape variants updated when any shape fails a clip | Prevents cross-shape weight inconsistency |
+| Action control | Residual PD (`residual_scale=0.3` rad) | Eliminates sustained large outputs for floor-contact poses; root cause of jerk |
+| Two-stage curriculum | Stage 1 neutral → Stage 1.5 RPD → Stage 2 multi-shape | Separates motion learning from shape adaptation; clean E7 shape-generalisation test |
+
+---
+
+### 8. Why the Normalizer Reset is Critical Before Stage 2
+
+#### What the normalizer does
+
+`RunningMeanStd` (`protomotions/agents/utils/normalization.py`) maintains two buffers per observation dimension — `mean` and `var` — updated via Welford's algorithm across every rollout step seen during training. At every policy forward pass:
+
+```python
+normalized = (obs - mean) / sqrt(var + 1e-5)
+# then clamped to [-5, 5]
+```
+
+This keeps all input dimensions in roughly the same scale so gradients are not dominated by large-magnitude dims.
+
+#### What happens to the beta dims during Stage 1
+
+In Stage 1, `smpl_mor_neutral` is used — all bodies have betas = 0. So for all 4096 envs × every step of all 174 training hours, the 10 beta dims of `morphology_obs` receive the **exact same constant value: 0.0**.
+
+The running variance of a constant signal is by definition zero:
+
+```
+var[beta_1] ≈ 0.0
+var[beta_2] ≈ 0.0
+...
+var[beta_10] ≈ 0.0
+```
+
+The sample count after Stage 1 is enormous: `4096 envs × 32 steps × 6 GPUs × ~20,400 epochs ≈ 1.6 × 10¹⁰`. Welford's algorithm gives this accumulated statistic enormous inertia.
+
+#### The saturation problem at Stage 2 start
+
+When Stage 2 starts and real betas (e.g., `beta_3 = 1.8`) flow in, the normalizer divides by the accumulated `sqrt(var + 1e-5)` for that dim:
+
+```python
+normalized_beta_3 = (1.8 - 0.0) / sqrt(0.0 + 1e-5)
+                  = 1.8 / 0.00316
+                  ≈ 569
+```
+
+Then the clamp fires:
+
+```python
+clamp(569, -5, 5) → 5.0   # always maxed out
+```
+
+Every beta value — positive or negative, large or small — gets clamped to ±5. The network sees a binary signal ("max" or "min") with no information about actual beta magnitudes. The policy cannot learn any shape-conditioned behavior.
+
+#### Why the running stats won't fix themselves naturally
+
+Welford's combination formula for adding a new batch of N samples to an existing count C:
+
+```
+new_var = (old_var × C + batch_var × N + delta² × C×N / (C+N)) / (C+N)
+weight of new data = N / (C + N)
+```
+
+With `C = 1.6e10` and `N = 4096 × 32 = 131,072`:
+
+```
+weight of new data ≈ 131072 / 1.6e10 ≈ 8 × 10⁻⁶
+```
+
+Each Stage 2 epoch moves the beta variance by eight-millionths of the way toward the true value. Going from `var ≈ 0` to `var ≈ 1.0` would require roughly **125,000 Stage 2 epochs** — more than Stage 1 itself took.
+
+#### The fix: `tools/reset_morphology_normalizer.py`
+
+```python
+mean[-11:] = 0.0    # reset morphology dims (gender + betas)
+var[-11:]  = 1.0    # restore unit variance so normalization is identity
+# count left untouched — locomotion dims keep their full momentum
+```
+
+After the reset, the beta dims start from a sensible prior (identity transform). Within a few hundred Stage 2 epochs the normalizer converges to true Stage 2 statistics. The first ~1003 locomotion dims are completely unaffected — their `count` and `var` are preserved, so the hard-won normalizer state from 174 hours of Stage 1 is not disturbed.
