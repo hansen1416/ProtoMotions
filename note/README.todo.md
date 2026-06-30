@@ -74,6 +74,36 @@ Run after Stage 2 converges. All post-E1 analyses are pure pandas from the CSV �
 
 ---
 
+## Future Training Architecture (from 2026-06-30 training strategy review)
+
+- **T-B1 (MED)** Pre-initialise obs normalizer from dataset statistics before Stage 2 starts.
+  Since all 128 body shapes are loaded at startup, compute `mean` and `var` of `morphology_obs`
+  / `physics_obs` across the full shape set and write them directly into the checkpoint normalizer
+  buffers before training begins. Avoids the hundreds of epochs needed for online accumulation to
+  reach correct scale, and gives correct-scale inputs from epoch 0 for Stage 2.
+  Implementation: add a `--pre-init-morphology-normalizer` flag to `train_agent.py` that reads
+  the motion file's `motion_betas` / physics feature tensor, computes mean/var, and patches the
+  loaded checkpoint before the training loop starts.
+
+- **T-B3 (LOW)** Separate value heads per reward component.
+  The current critic outputs a single scalar V(s) that must fit 8 reward terms with different
+  timescales (contact spikes vs smooth power penalty). Multi-head critics — one V per reward
+  term, summed for GAE — reduce the critic's regression burden and may stabilise advantage
+  estimates. Non-trivial: requires per-term reward storage in the experience buffer and separate
+  critic out-keys. Worth revisiting if Stage 2 training shows unstable critic loss.
+
+- **T-C3 (RESEARCH)** Online body-dynamics estimator for in-context shape adaptation.
+  The current policy receives a static physics feature vector at episode start and has no
+  mechanism to update its internal model mid-episode based on observed dynamics. Testable
+  hypothesis: compare (a) static physics features only (current) vs (b) physics features +
+  a lightweight online estimator that infers body parameters from recent force/velocity
+  residuals (e.g., a small RNN or attention over the last K steps of `(action, dof_vel, root_accel)`).
+  The key experiment is the held-out beta (E7) evaluation: if static conditioning plateaus on
+  unseen shapes, the online estimator is the natural next step. Implement only if E7 results
+  show a clear shape-generalisation gap.
+
+---
+
 ## Pilot Checkpoints (ablation)
 
 `hhi_1024_transfer` and `hhi_phy_1024_transfer` are on R2 (`r2:proto-data/ckpt/`). Run E1

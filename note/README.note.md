@@ -1825,3 +1825,66 @@ var[-11:]  = 1.0    # restore unit variance so normalization is identity
 ```
 
 After the reset, the beta dims start from a sensible prior (identity transform). Within a few hundred Stage 2 epochs the normalizer converges to true Stage 2 statistics. The first ~1003 locomotion dims are completely unaffected — their `count` and `var` are preserved, so the hard-won normalizer state from 174 hours of Stage 1 is not disturbed.
+
+================================================================================
+
+## 16. Implementation — Phase Variable φ and Contact Bodies Extension (2026-06-30)
+
+### A2. Phase Variable φ
+
+**Motivation:** Periodic and quasi-periodic motions (squat, kneel, walk) exhibit temporal aliasing — the policy sees the same proprioceptive state at two different points in the clip (e.g., descending into a squat and ascending out of it look identical in joint-space). Without a phase signal, the policy cannot disambiguate and may output contradictory actions. Adding φ = `motion_time / clip_length ∈ [0, 1]` as a 1-dim obs resolves this.
+
+**Files changed:**
+
+| File | Change |
+|---|---|
+| `protomotions/envs/context_views.py` | Added `motion_phase: Tensor = FieldPath()` descriptor to `MimicContext`; added `motion_phase` param to `__init__` |
+| `protomotions/envs/control/mimic_control.py` | Computed `motion_phase` in `populate_context` after `motion_lengths` is already available; passed to `MimicContext` |
+| `protomotions/envs/obs/humanoid.py` | Added `compute_motion_phase_obs(motion_phase)` pass-through |
+| `protomotions/envs/component_factories.py` | Added `motion_phase_obs_factory()` binding `EnvContext.mimic.motion_phase`; exported in `__all__` |
+| `examples/experiments/mimic/mlp_residual_pd.py` | Imported factory; added `"motion_phase_obs"` to `observation_components` and to all four `in_keys` lists (actor, actor mu_model, critic, model) |
+
+**Key implementation detail — computation in `mimic_control.py`:**
+
+```python
+motion_lengths = self.env.motion_lib.get_motion_length(motion_ids)
+future_times = torch.minimum(future_times, motion_lengths.unsqueeze(-1))
+
+# Phase: clamp denominator to avoid div-by-zero on zero-length clips
+motion_phase = (motion_times / motion_lengths.clamp(min=1e-6)).clamp(0.0, 1.0).unsqueeze(-1)  # [num_envs, 1]
+```
+
+`motion_lengths` was already computed on that line for future-time clamping — the phase adds no extra motion lib query. The `unsqueeze(-1)` gives shape `[num_envs, 1]` so it concatenates cleanly with the other obs groups. `LazyLinear` absorbs the extra dim on the first forward pass with no architecture change.
+
+---
+
+### A3. Contact Bodies Extension
+
+**Motivation:** `contact_match_rew` penalises mismatches between the policy's contact flags and the reference motion's contact flags. With only feet in `contact_bodies`, the reward has no signal for floor-contact poses — the policy gets zero guidance toward putting knees on the floor during a kneel or hands on the floor during a crawl. Adding knees and wrists to `contact_bodies` gives direct reward signal for those contact events.
+
+**Design decisions:**
+
+- Changes are confined to `mlp_residual_pd.py` — not baked into the robot config — so standard walking experiments are unaffected.
+- `non_termination_contact_bodies` must also be extended; otherwise the termination checker fires the moment a knee or wrist touches the ground, which would immediately reset the env and prevent the policy from ever learning these poses.
+- `non_termination_contact_bodies` is set directly (not via `update_fields`) because `update_fields` only reprocesses `contact_bodies` through `abstract_names_to_body_names`. The literal SMPL body names work as-is.
+- The cached property `non_termination_contact_body_ids` in `env.py` is computed lazily after env creation, so setting `non_termination_contact_bodies` in `configure_robot_and_simulator` (which runs before env creation) is safe.
+
+**File changed — `examples/experiments/mimic/mlp_residual_pd.py`:**
+
+```python
+def configure_robot_and_simulator(robot_cfg, simulator_cfg, args):
+    robot_cfg.update_fields(
+        contact_bodies=[
+            "all_left_foot_bodies",   # L_Ankle, L_Toe
+            "all_right_foot_bodies",  # R_Ankle, R_Toe
+            "L_Knee", "R_Knee",       # kneel / squat floor contact
+            "L_Wrist", "R_Wrist",     # crawl floor contact
+        ]
+    )
+    robot_cfg.non_termination_contact_bodies = [
+        "R_Ankle", "L_Ankle", "R_Toe", "L_Toe",
+        "L_Knee", "R_Knee", "L_Wrist", "R_Wrist",
+    ]
+```
+
+**Effect on reward:** `contact_match_rew` now fires on 8 bodies instead of 4. For a crawl clip where the reference has both wrists and both ankles contacting the floor, the reward will be non-zero as soon as the policy achieves any of those contacts — providing a gradient toward the correct configuration from the very start of an episode.
