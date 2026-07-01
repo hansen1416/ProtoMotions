@@ -209,12 +209,18 @@ class BaseAgent:
     def create_optimizers(self, model: nn.Module):
         pass
 
-    def load(self, checkpoint: Path, load_env: bool = True):
+    def load(self, checkpoint: Path, load_env: bool = True, warm_start: bool = False):
         if checkpoint is not None:
             self.fabric.call("on_load_checkpoint_start")
             path_before_resolve = Path(checkpoint)
             checkpoint = path_before_resolve.resolve()
             print(f"Loading model from checkpoint: {checkpoint}")
+
+            # Exposed to load_parameters() overrides so they can distinguish a
+            # warm start (new run, possibly different action config) from a
+            # resume (continuing this exact run) without changing that method's
+            # signature across every subclass override.
+            self._is_warm_start = warm_start
 
             state_dict = torch.load(
                 checkpoint, map_location=self.device, weights_only=False

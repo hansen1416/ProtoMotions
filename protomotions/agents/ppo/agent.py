@@ -28,7 +28,7 @@ References:
 """
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from tensordict import TensorDict
 
 import logging
@@ -188,6 +188,28 @@ class PPO(BaseAgent):
         self.actor_optimizer.load_state_dict(state_dict["actor_optimizer"])
         self.critic_optimizer.load_state_dict(state_dict["critic_optimizer"])
 
+        # Warm-starting into residual PD from a checkpoint trained under a
+        # different action parameterization (e.g. standard PD) reuses the
+        # actor's pretrained output layer, but that layer's weights encode
+        # offsets/scales for the OLD action config (e.g. joint-limit-midpoint
+        # offset, multi-radian range). Under residual PD the same raw outputs
+        # get reinterpreted as small corrections around the reference pose
+        # (uniform +/- residual_scale), producing incorrect targets from the
+        # first step and collapsing performance instead of transferring it.
+        # Zeroing the final layer makes the policy start at action=0, i.e.
+        # exactly tracking the reference pose, which is the safe starting
+        # point residual PD is meant to provide. Done after the optimizer
+        # states are loaded so the stale Adam moments for that layer (from
+        # training under the old action config) are cleared too, not just the
+        # weights.
+        action_config = self.env.config.action_config
+        if (
+            getattr(self, "_is_warm_start", False)
+            and action_config is not None
+            and action_config.get("use_residual_pd", False)
+        ):
+            self._reset_actor_output_layer()
+
         # Restore adaptive LR state
         if self.config.adaptive_lr.enabled and "adaptive_lr" in state_dict:
             self.actor_lr = state_dict["adaptive_lr"]["actor_lr"]
@@ -206,6 +228,31 @@ class PPO(BaseAgent):
                 self.adv_mean_ema.copy_(state_dict["adv_mean_ema"])
             if "adv_std_ema" in state_dict:
                 self.adv_std_ema.copy_(state_dict["adv_std_ema"])
+
+    def _reset_actor_output_layer(self):
+        """Zero-init the actor's final linear layer and clear its optimizer state.
+
+        Used when warm-starting into a residual PD action config from a checkpoint
+        trained under a different action parameterization. See the call site in
+        load_parameters() for why reusing the pretrained output layer verbatim is
+        unsafe in that case.
+        """
+        last_linear = None
+        for module in self.actor.mu.modules():
+            if isinstance(module, nn.Linear):
+                last_linear = module
+        if last_linear is None:
+            print("WARNING: could not find a linear output layer in actor.mu to reset")
+            return
+
+        nn.init.zeros_(last_linear.weight)
+        nn.init.zeros_(last_linear.bias)
+        self.actor_optimizer.state.pop(last_linear.weight, None)
+        self.actor_optimizer.state.pop(last_linear.bias, None)
+        print(
+            "Zero-initialized actor output layer (weights, bias, and Adam moments) "
+            "for warm start into residual PD."
+        )
 
     # -----------------------------
     # Model Saving and State Dict
