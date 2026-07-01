@@ -215,9 +215,23 @@ def agent_config(
 def configure_robot_and_simulator(
     robot_cfg: RobotConfig, simulator_cfg: SimulatorConfig, args: argparse.Namespace
 ):
+    # Extend contact bodies to include knees and wrists so the contact_match_rew
+    # provides direct reward signal for floor-contact clips (crawl, kneel, squat).
     robot_cfg.update_fields(
-        contact_bodies=["all_left_foot_bodies", "all_right_foot_bodies"]
+        contact_bodies=[
+            "all_left_foot_bodies",
+            "all_right_foot_bodies",
+            "L_Knee",
+            "R_Knee",
+            "L_Wrist",
+            "R_Wrist",
+        ]
     )
+    # Allow knee and wrist contact without triggering termination.
+    robot_cfg.non_termination_contact_bodies = [
+        "R_Ankle", "L_Ankle", "R_Toe", "L_Toe",
+        "L_Knee", "R_Knee", "L_Wrist", "R_Wrist",
+    ]
 
 
 def apply_inference_overrides(
