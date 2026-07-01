@@ -193,6 +193,9 @@ nohup python -u protomotions/train_agent.py \
 ```bash
 docker run --gpus all --ulimit memlock=-1:-1 --ulimit stack=67108864:67108864 --ipc=host --shm-size=16g hansen1416/hhi-protomotions-isaacgym:v1 /bin/bash
 ```
+
+
+nohup python -u protomotions/train_agent.py       --robot-name smpl_mor_neutral       --simulator isaacgym       --experiment-path examples/experiments/mimic/mlp_residual_pd.py       --experiment-name hhi_20946_neutral_rpd       --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt       --num-envs 6144 --batch-size 24576 --ngpu 6       --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl --wandb-group hhi_neutral_rpd > /tmp/train_neutral_rpd.log 2>&1 &
 ----
 
 

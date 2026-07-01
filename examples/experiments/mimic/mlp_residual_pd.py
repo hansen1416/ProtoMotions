@@ -149,7 +149,7 @@ def agent_config(
 
     actor_config = PPOActorConfig(
         num_out=robot_config.kinematic_info.num_dofs,
-        actor_logstd=-2.9,
+        actor_logstd=-2.0,
         in_keys=["max_coords_obs", "mimic_target_poses", "previous_actions", "morphology_obs"],
         mu_key="actor_trunk_out",
         mu_model=MLPWithConcatConfig(
