@@ -833,7 +833,7 @@ def main():
 
     agent.setup()
     agent.fabric.strategy.barrier()
-    agent.load(args.checkpoint, warm_start=(mode == "warm_start"))
+    agent.load(args.checkpoint)
 
     # ===================================================================
     # 6. Save Configs (First Run Only - Warm Start or Fresh)
