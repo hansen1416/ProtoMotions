@@ -92,8 +92,8 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
     --progress
 
 
-rclone copy /home/hlz/datasets/humos_proto_neutral/offset r2:proto-data/20946_neutral_offset/ \
-    --transfers=4 \
+rclone copy r2:proto-data/ckpt/20946_neutral.zip ./results \
+    --transfers=1 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress

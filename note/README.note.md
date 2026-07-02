@@ -1888,3 +1888,116 @@ def configure_robot_and_simulator(robot_cfg, simulator_cfg, args):
 ```
 
 **Effect on reward:** `contact_match_rew` now fires on 8 bodies instead of 4. For a crawl clip where the reference has both wrists and both ankles contacting the floor, the reward will be non-zero as soon as the policy achieves any of those contacts — providing a gradient toward the correct configuration from the very start of an episode.
+
+
+================================================================================
+
+Second transfer residual pd attempt
+
+```bash
+nohup python -u protomotions/train_agent.py \
+    --robot-name smpl_mor_neutral \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_residual_pd.py \
+    --experiment-name hhi_20946_neutral_rpd \
+    --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
+    --checkpoint results/hhi_20946_neutral/score_based.ckpt \
+    --num-envs 6144 --batch-size 24576 \
+    --ngpu 6 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_neutral_rpd > /tmp/train_neutral_rpd.log 2>&1 &
+```
+
+At the very first eval point (right after load, before any real training):
+- With action=0 → q_target=q_ref exactly, the character starts by directly tracking the reference pose with the pretrained
+PD gains — no learned dynamic corrections yet, but also no wrong/overshot targets.
+- Expect eval/gt_error/mean and eval/success_rate to open in a moderate, non-collapsed range — clearly worse than the mlp.py
+baseline's 0.84 success / 0.195 error (since it hasn't learned the contact/balance corrections residual PD exists to add),
+but nowhere near the 0.001 success / 1.29 error catastrophic floor from the checkpoint-mismatch run.
+- eval/action_delta_mean_deg should start very low (actions near zero → very smooth), rising gradually as the policy learns
+real corrections — unlike before, where it was already climbing from step 1 because the actor was fighting its own bad
+starting point.
+- info/episode_reward should open noticeably above the ~12 we saw last time, likely closer to the mid-to-high range, since
+action_smoothness reward is near-max and tracking is roughly plausible.
+
+
+Over training:
+  - Because the policy only needs to learn small corrections (not relearn the whole task), convergence should be much faster
+  than the ~5,200 epochs it took last time just to claw back to 0.64. I'd expect it to pass the mlp.py baseline's 0.84 success
+  rate well before that, if the approach is working as intended — that's the actual point of residual PD.
+  - One thing not fixed by our change: the critic wasn't reset, so its value estimates are still calibrated to the standard-PD
+  reward/dynamics landscape. Expect possibly noisier losses/critic_loss, adv_norm/*, or actor/clip_frac in the first handful
+  of epochs while it recalibrates — this is minor and self-correcting, not a red flag on its own.
+
+  Red flag to check immediately after launch: pull up the very first eval/success_rate / eval/gt_error/mean point in wandb. If
+  it's back near 0.001 / 1.29 (i.e., looks like the collapsed run), the fix didn't actually engage — worth double-checking
+  the run picked warm_start mode (log line should say WARM START: Using checkpoint for initialization: ...) rather than
+  silently resuming.
+
+It was failed, the results was the same as residual pd transfer, no improvement
+
+================================================================================
+
+## 17. Failed-Motion Analysis — `hhi_20946_neutral` (2026-07-02)
+
+**Context:** After the residual-PD transfer (`hhi_20946_neutral_rpd`) failed, examined the base
+`hhi_20946_neutral` checkpoint it was fine-tuned from more closely to determine which motions
+persistently fail and whether they are the physically difficult ones.
+
+### [Method]
+
+612 failure logs at `results/hhi_20946_neutral/failed_motions/` (epochs 1000–20400, 6 ranks).
+Single neutral body shape (β=0) — no beta multiplication, so `motion_id` indexes directly into
+each rank's 3,491-motion shard (`/home/hlz/datasets/humos_proto_neutral/offset/humanml3d_neutral_20946_000{0-5}.pt`).
+Analyzed the 18 most recent epochs (≥17000), joined against
+`/home/hlz/repos/hhi/data-processing/motion_id_text.json` for clip descriptions.
+
+Ranked output: `results/hhi_20946_neutral/persistent_failures.txt` (6,772 ranked clips)
+Full note: `note/README.failed-motions-20946-neutral.md`
+
+### [Results] Overall Failure Scale
+
+`eval/success_rate` plateaus ≈82–85% at late epochs (consistent with §12's 84.9% peak).
+- **1,818 / 20,946 clips (8.7%)** fail in **all** 18 analyzed epochs
+- **3,502 clips (16.7%)** fail in ≥50% of analyzed epochs
+
+### [Results] Category Breakdown (top 100 worst clips, all 18/18 epochs failed)
+
+| Category | Count |
+|---|---|
+| single-leg balance / kick / leg-swing / stretch | 40 |
+| crawl / all-fours | 20 |
+| balance on object / beam / climb | 14 |
+| squat / crouch | 8 |
+| sit | 7 |
+| backward motion | 6 |
+| kneel | 5 |
+| lie down / get up / push-up | 3 |
+| unclassified (fast walk/run, crab-walk outliers) | ~7 |
+
+### [Analysis] Are the failures the physically difficult ones? — Yes
+
+~93% of the worst clips are physically hard motions. Crawl/kneel/squat/sit/backward — the same
+classes found in the earlier `hhi_1024_motion` pilot (§1, `note/README.failed-motions.md`) — are
+still severe. But a **new dominant category** emerges at full 20,946-clip scale that was barely
+present in the smaller 1024-clip pilot subset: **single-leg dynamic balance** (standing on one
+foot, leg kicks/swings/circles, knee-to-chest) — 40% of worst clips.
+
+Root cause interpretation: both failure families share a narrow/unstable base-of-support
+problem — COM-drop clips (crawl/kneel/squat) vs. narrowed-support-polygon clips (single-leg).
+
+### [Relevance] Connection to the `hhi_20946_neutral_rpd` Transfer Failure
+
+The RPD transfer was fine-tuned from this checkpoint at epoch 20000, when 8.7–16.7% of clips
+were already persistently failing, concentrated in exactly the categories residual PD targets
+(crawl/kneel/squat — see §13/§16 A3 contact-body extension) plus the newly-found
+single-leg-balance class residual PD was not designed for. Residual PD's `q_ref(t) + scale·tanh(action)`
+fixes the "policy must fight a distant PD offset" problem for floor-contact poses, but does
+nothing structurally for single-leg balance, where the difficulty is dynamic COM control over a
+narrow support polygon rather than distance from the PD neutral pose.
+
+**Next step (not yet done):** re-run the same failure analysis against
+`results/hhi_20946_neutral_rpd/failed_motions/` for a direct before/after comparison against
+this baseline.
