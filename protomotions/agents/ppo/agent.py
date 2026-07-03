@@ -28,6 +28,7 @@ References:
 """
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 from tensordict import TensorDict
 
@@ -528,6 +529,25 @@ class PPO(BaseAgent):
                     "actor/l2c2_weighted": l2c2_weighted.detach(),
                     "actor/l2c2_input_dist": input_dist.detach(),
                     "actor/l2c2_output_dist": output_dist.detach(),
+                }
+            )
+
+        # --- MoE load balancing (Switch-Transformer/GShard style) ---
+        if self.config.moe_load_balance.enabled:
+            gate_probs = batch_td[self.config.moe_load_balance.gate_probs_key]  # [B, K]
+            num_experts = gate_probs.shape[-1]
+            expert_selection = gate_probs.argmax(dim=-1)
+            f_i = F.one_hot(expert_selection, num_classes=num_experts).float().mean(dim=0)
+            p_i = gate_probs.mean(dim=0)
+            load_balance_loss = num_experts * torch.sum(f_i * p_i)
+            load_balance_weighted = self.config.moe_load_balance.lambda_lb * load_balance_loss
+
+            extra_loss = extra_loss + load_balance_weighted
+            log_dict.update(
+                {
+                    "actor/moe_load_balance_loss": load_balance_loss.detach(),
+                    "actor/moe_load_balance_weighted": load_balance_weighted.detach(),
+                    "actor/moe_expert_utilization_std": f_i.std().detach(),
                 }
             )
 

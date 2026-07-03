@@ -2001,3 +2001,163 @@ narrow support polygon rather than distance from the PD neutral pose.
 **Next step (not yet done):** re-run the same failure analysis against
 `results/hhi_20946_neutral_rpd/failed_motions/` for a direct before/after comparison against
 this baseline.
+
+================================================================================
+
+## 18. Architecture Decision — GMT-Style MoE (motion axis only)
+
+**Context:** Literature survey (GMT/PMCP/FARM/HyperDistill — full detail in memory
+`architecture_research.md`) led to training **from scratch**, no checkpoint reuse — this retires
+FARM (frozen-base advantage moot with nothing to protect) and PMCP (train→mine-failures→freeze→
+retrain→compose pipeline too much operational complexity for a first attempt). **GMT-style MoE**
+is the motion-axis structure. HyperDistill (body-shape axis) was designed and implemented, then
+reverted for scope (2026-07-03) — **no code remains in this repo**; full design preserved in
+memory (`architecture_research.md`) if revisited later.
+
+### [Decision] Motion axis — GMT-style MoE + load-balancing loss
+
+K parallel expert trunks + a gate, blended `a = Σᵢ pᵢaᵢ`, trained jointly in one PPO pass. Added a
+Switch-Transformer/GShard-style load-balancing loss to fix GMT's RL-specific collapse risk (an
+unconstrained gate can collapse onto 1-2 experts under noisy RL gradients):
+```
+f_i = fraction of minibatch routed to expert i (argmax of gate)
+P_i = mean gate probability assigned to expert i over the minibatch
+L_lb = K · Σᵢ f_i · P_i                         # minimized → uniform utilization
+L_actor_total = L_ppo_clip + λ_lb · L_lb        # λ_lb ≈ 0.01
+```
+This only prevents degenerate collapse — it doesn't guarantee experts specialize along the axis
+we care about (crawl/kneel/squat/single-leg-balance vs. everything else, §17); check post-hoc via
+`expert_selection` against the known failure taxonomy.
+
+**Why this should work — interference, not capacity:** `hhi_1024_motion` (1024 clips × 128
+shapes = 131k instances, monolithic 6×1024 trunk) converged to reward ≈0.84; `hhi_20946_neutral`
+(same trunk, 20,946 clips, shape count *reduced* to 1) plateaus at 82-85% with 8.7% persistent
+failures. Shape diversity went *down* in that comparison, so the degradation isolates to
+motion-count scaling, not capacity — gradient interference between incompatible motion types
+(majority "easy" motions dominate shared-weight updates), not insufficient parameters. Separate
+weights per behavior cluster is MoE's actual justification.
+
+**K=8**, chosen without the scaling-curve diagnostic (proposed to calibrate K empirically by
+training unmodified `mlp.py` on clip-count subsets — skipped for time). Only two data points
+exist — 1024 clips works, 20,946 clips fails, nothing in between — so `20946/1024≈21` is a
+conservative upper bound (1024 is a confirmed floor, not a measured ceiling), not a calibrated
+target. K=8 is a middle-point bet: enough to meaningfully stress-test the load-balancing loss
+beyond a trivial K=2 (easy to hit a 50/50 split without the loss doing real work), without paying
+~21× per-step actor compute (`moe_mlp.py` evaluates all K experts every forward pass — compute
+scales with K directly, not just parameter count). Driven by a new target run — 20,946 clips ×
+{2,4} shapes, generating on `r2:proto-data/hhi_stage2/` (38/41 batches as of 2026-07-03) — which
+sits in the same clip-count regime as the failing `hhi_20946_neutral` run, unlike the 1024-clip
+pilot, so it's the real stress test of whether MoE helps.
+
+### [Decision] Shape axis — flat concat (unchanged from baseline)
+
+`morphology_obs` stays a plain concatenated input, same as `mlp.py`. Known not to be sufficient
+on its own — `hhi_1024_motion` (flat-concat): 1028 persistent failures; `hhi_se_1024_motion`
+(nonlinear-encode-then-concat): 1026, no real improvement — but fixing it is out of scope for
+this round. HyperDistill design (mechanism, math, LazyLinear workaround) preserved in memory
+(`architecture_research.md`) if this needs revisiting.
+
+**Also out of scope:** Residual PD (confirmed orthogonal, `action_functions.py:416` — separate
+ablation once the capacity story is validated), critic restructuring (stays flat-concat), PMCP
+(fallback only if MoE fails to move the persistent-failure cluster).
+
+### [Plan] Implementation — what's built (2026-07-03)
+
+1. **`protomotions/agents/common/moe_mlp.py`** — `MoEMLPConfig` + `MoEMLP`. K expert trunks +
+   gate, blended. `gate_mode: "learned"|"hard"` (hard mode routes via a precomputed per-env
+   assignment instead of a gate net — all K experts still evaluated either way; skipping
+   unselected experts' compute in hard mode is a possible follow-up, not implemented). Writes
+   `gate_probs`/`expert_selection`. Config lives alongside the module (matches
+   `film_mlp.py`/`shape_embed_mlp.py` precedent, not centralized in `agents/common/config.py`).
+2. **`protomotions/agents/ppo/config.py`** — `MoELoadBalanceConfig` (mirrors `L2C2Config`),
+   `moe_load_balance` field on `PPOAgentConfig`.
+3. **`protomotions/agents/ppo/agent.py`** — `calculate_extra_actor_loss` extended with the
+   load-balancing term (same extension point already used for L2C2).
+4. **`examples/experiments/mimic/mlp_moe.py`** — `mlp.py` + `MoEMLPConfig(num_experts=8,
+   expert_layers=[1024]×6)`, `moe_load_balance.enabled=True`. Morphology flat-concat, critic
+   unchanged, standard PD, trained from scratch.
+5. **`examples/experiments/mimic/mlp_moe_wide.py`** — capacity-matched ablation control, see below.
+
+Verified on CPU (dummy TensorDict): forward/backward through experts and gate, both `gate_mode`
+variants, load-balancing loss numerics, full `PPOActor` integration at the real `num_envs=4096`
+batch size. Not yet run on GPU/IsaacGym.
+
+### [Ablation] Capacity vs. routing
+
+K=8 experts have ~8× the baseline trunk's parameter count in the part of the network that
+matters — so a plain MoE-vs-baseline comparison can't tell "the routing structure helped" apart
+from "the network just got bigger." `mlp_moe_wide.py` is the control: same extra parameter
+budget, poured into **one** trunk instead of eight (`layers=[2896]×6`, `w=1024·√8`, no gate, no
+load-balancing loss). Verified empirically, not just analytically: MoE (K=8) expert-stack params
+= 45,326,520; widened trunk = 43,130,151 — **95% match** (gap is the gate's own 166K params).
+Critic unchanged in both files.
+
+| Run | Config | Isolates |
+|---|---|---|
+| `hhi_moe_1024_motion` | `mlp_moe.py`, K=8 | MoE, the actual proposal |
+| `hhi_moe_wide_1024_motion` | `mlp_moe_wide.py`, width 2896, no MoE | raw capacity, no routing |
+
+Baselines on record (same 1024-motion subset): `hhi_1024_motion` (flat-concat) — 1028 persistent
+failures; `hhi_se_1024_motion` (shape-embed) — 1026. Reading order: widened-trunk vs. baselines
+tests whether capacity alone beats flat-concat; MoE vs. widened-trunk tests whether routing adds
+anything beyond matched capacity — that's the actual question. Check the
+**crawl/kneel/squat/backward category** specifically (`note/README.failed-motions.md`), not just
+the aggregate count. Same pair should also run on the 20,946×{2,4}-shape data once it lands —
+that run, not the 1024-motion pilot, sits in the actual failure regime this design targets.
+
+================================================================================
+
+## 19. Stage 1 v2 — Filtering 20,946×128 Down to 20,946×2 (2026-07-03)
+
+**Why:** `hhi_20946_neutral` (the original "Stage 1," single neutral shape) didn't meet
+expectations (§17 — 8.7% persistent failures). `r2:proto-data/hhi_stage2/` (20,946×128, full
+Stage 2 data) is generating now. Rather than wait for the full 128-shape set to test the MoE
+work from §18, filter it down to 2 shapes now — **this becomes the new Stage 1**, reusing the
+name deliberately since the old one is being superseded, not run alongside it.
+
+**Script: `tools/extract_stage1_shapes.py` (2026-07-03, done).** Same schema/extraction pattern
+as `tools/extract_gravity_core_clips.py` (`FRAME_KEYS`/`PER_MOTION_TENSOR_KEYS`/
+`PER_MOTION_TUPLE_KEYS` are identical), but filtering by `motion_asset_ids` (shape) instead of
+`motion_clip_ids` — keep all 20,946 clips, keep only `--asset-ids` (default
+`male_71fbbe41 female_71fbbe41`) per shard. Adds R2 I/O the reference script doesn't have:
+per-shard `rclone copy` down from `--r2-source` (default `r2:proto-data/hhi_stage2/`) → filter in
+memory → save → `rclone copy` up to `--r2-dest` (default `r2:proto-data/hhi_stage1/`) → delete
+local copy (same bounded-disk pattern as `prepare_stage2_data.py`, ~3.4GB resident at a time),
+with the same `{workspace}/filter_log.txt` resume convention. Sequential, no shard-processing
+parallelism (bandwidth-bound anyway, matches `prepare_stage2_data.py`'s own approach — flagged in
+the script docstring as a place to speed up later if needed, not implemented now).
+
+**Verified against a real Stage 2 shard** (`/media/hlz/R/stage2_data/batch_0000_0000_offset.pt`,
+64 clips × 128 shapes = 8192 motions): filtered to exactly 128 motions (64 clips × 2 shapes, as
+expected), frame data spot-checked identical after re-slicing (`gts` tensor byte-for-byte match
+against the original for a sampled motion), `length_starts` recomputed consistently,
+`motion_weights` reset to fresh 1.0. Not yet run against R2 (needs the remote server).
+
+Output stays shard-per-shard; consolidation into a slurmrank pointer is a separate step reusing
+`tools/merge_motion_shards.py`, not built into this script. **Bandwidth note:** download cost is
+unavoidably the full ~1.1TB regardless of N —
+each shard bundles all 128 shapes of its clips together, so getting all 20,946 clips means
+pulling every shard either way. Savings are on storage/upload/everything downstream, not download.
+
+**Shapes chosen: `male_71fbbe41` + `female_71fbbe41`** (same beta_key, opposite genders). Not
+extremes — deliberately close to the population center (`physics_features.pt`, 128 shapes):
+
+| | mass | height | mass percentile (within gender) |
+|---|---|---|---|
+| population median | 68.3 kg | 1.394 m | — |
+| `male_71fbbe41` | 68.8 kg | 1.409 m | 39th |
+| `female_71fbbe41` | 72.6 kg | 1.439 m | 64th |
+
+Reasoning: the shape axis is explicitly out of scope for the current round (§18 — flat-concat,
+no HyperDistill). Picking extreme bodies (e.g. lightest/heaviest, 26–144kg range) would introduce
+a confound unrelated to what this run is testing — an extreme body may be inherently harder to
+control with PD gains tuned for average bodies, making any failure ambiguous between "motion-count
+interference" (the actual question) and "this particular body is hard." Same-beta-key,
+opposite-gender keeps gender as the one clearly isolated shape variable while staying physically
+close to the population `hhi_1024_motion`/`hhi_20946_neutral` were already evaluated against.
+
+
+python tools/extract_stage1_shapes.py \
+      --r2-source r2:proto-data/hhi_stage2/ \
+      --r2-dest r2:proto-data/hhi_stage1/ \
+      --workspace /workspace/stage1_prep

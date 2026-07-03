@@ -128,6 +128,22 @@ class L2C2Config:
 
 
 @dataclass
+class MoELoadBalanceConfig:
+    """Load-balancing loss for MoEMLP actor/critic trunks (Switch-Transformer/GShard style).
+
+    Penalizes uneven gate utilization across a minibatch so the gate doesn't collapse onto
+    1-2 experts under noisy RL gradients. Reads `gate_probs`/`expert_selection` written by
+    MoEMLP (protomotions/agents/common/moe_mlp.py) into the actor's TensorDict.
+    """
+
+    enabled: bool = field(default=False, metadata={"help": "Enable the MoE load-balancing loss."})
+    lambda_lb: float = field(default=0.01, metadata={"help": "Load-balancing loss coefficient."})
+    gate_probs_key: str = field(
+        default="gate_probs", metadata={"help": "TensorDict key holding the [B, num_experts] gate distribution."}
+    )
+
+
+@dataclass
 class PPOAgentConfig(BaseAgentConfig):
     """Main configuration class for PPO Agent."""
 
@@ -155,6 +171,11 @@ class PPOAgentConfig(BaseAgentConfig):
     # L2C2 regularization
     l2c2: L2C2Config = field(
         default_factory=L2C2Config, metadata={"help": "L2C2 settings."}
+    )
+
+    # MoE load-balancing regularization
+    moe_load_balance: MoELoadBalanceConfig = field(
+        default_factory=MoELoadBalanceConfig, metadata={"help": "MoE load-balancing settings."}
     )
 
     # Adaptive learning rate
