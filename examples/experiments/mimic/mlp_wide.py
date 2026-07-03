@@ -14,12 +14,14 @@
 # limitations under the License.
 #
 """
-Mimic Environment — Capacity-Matched Control for mlp_moe.py (no MoE)
+Mimic Environment — Wide Monolithic Trunk (capacity-matched control, no MoE)
 =========================================================================
 
 Same as mlp.py in every respect except the actor trunk is widened from 1024 to 2896
-units per layer — no MoE, no gate, no load-balancing loss, just a bigger monolithic
-MLPWithConcat trunk, identical in structure to mlp.py.
+units per layer. No MoE, no gate, no load-balancing loss, no dependency on moe_mlp.py
+at all — just a bigger monolithic MLPWithConcat trunk, identical in structure to mlp.py.
+(Named mlp_wide.py, not mlp_moe_wide.py — it has no MoE structure, "moe" in the name
+was actively misleading; see note/README.note.md #18.)
 
 Exists to isolate "MoE routing helped" from "the network just got bigger" when reading
 mlp_moe.py's results: mlp_moe.py's K=8 experts (each 6x1024) have roughly 8x the trunk's
@@ -40,17 +42,17 @@ corresponding mlp_moe.py run for a valid comparison.
     # 1024-motion pilot control:
     python protomotions/train_agent.py \\
         --robot-name smpl_mor --simulator isaacgym \\
-        --experiment-path examples/experiments/mimic/mlp_moe_wide.py \\
-        --experiment-name hhi_moe_wide_1024_motion \\
+        --experiment-path examples/experiments/mimic/mlp_wide.py \\
+        --experiment-name hhi_wide_1024_motion \\
         --motion-file <path-to-1024-clip-motion-file> \\
         --num-envs 4096 --batch-size 16384
 
-    # 20,946-motion x {2,4}-shape control (once the filtered motion file is ready):
+    # Stage 1 v2 control (20,946 clips x 2 shapes, once hhi_stage1 data is ready):
     python protomotions/train_agent.py \\
         --robot-name smpl_mor --simulator isaacgym \\
-        --experiment-path examples/experiments/mimic/mlp_moe_wide.py \\
-        --experiment-name hhi_moe_wide_20946_Nshape \\
-        --motion-file <path-to-20946-clip-Nshape-motion-file> \\
+        --experiment-path examples/experiments/mimic/mlp_wide.py \\
+        --experiment-name hhi_wide_stage1 \\
+        --motion-file <path-to-hhi_stage1-slurmrank-file> \\
         --num-envs 4096 --batch-size 16384
 """
 from protomotions.robot_configs.base import RobotConfig

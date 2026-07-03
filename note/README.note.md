@@ -2076,7 +2076,11 @@ ablation once the capacity story is validated), critic restructuring (stays flat
 4. **`examples/experiments/mimic/mlp_moe.py`** — `mlp.py` + `MoEMLPConfig(num_experts=8,
    expert_layers=[1024]×6)`, `moe_load_balance.enabled=True`. Morphology flat-concat, critic
    unchanged, standard PD, trained from scratch.
-5. **`examples/experiments/mimic/mlp_moe_wide.py`** — capacity-matched ablation control, see below.
+5. **`examples/experiments/mimic/mlp_wide.py`** — capacity-matched ablation control, see below.
+   (Renamed from `mlp_moe_wide.py`, 2026-07-03 — it has no MoE structure at all, plain
+   `MLPWithConcatConfig` same as `mlp.py` just wider, and the old name actively implied
+   otherwise. Repo convention names files after their own mechanism, not what they're a
+   control for — that relationship belongs in the docstring/note, not the filename.)
 
 Verified on CPU (dummy TensorDict): forward/backward through experts and gate, both `gate_mode`
 variants, load-balancing loss numerics, full `PPOActor` integration at the real `num_envs=4096`
@@ -2086,24 +2090,26 @@ batch size. Not yet run on GPU/IsaacGym.
 
 K=8 experts have ~8× the baseline trunk's parameter count in the part of the network that
 matters — so a plain MoE-vs-baseline comparison can't tell "the routing structure helped" apart
-from "the network just got bigger." `mlp_moe_wide.py` is the control: same extra parameter
+from "the network just got bigger." `mlp_wide.py` is the control: same extra parameter
 budget, poured into **one** trunk instead of eight (`layers=[2896]×6`, `w=1024·√8`, no gate, no
-load-balancing loss). Verified empirically, not just analytically: MoE (K=8) expert-stack params
-= 45,326,520; widened trunk = 43,130,151 — **95% match** (gap is the gate's own 166K params).
-Critic unchanged in both files.
+load-balancing loss, no dependency on `moe_mlp.py`). Verified empirically, not just
+analytically: MoE (K=8) expert-stack params = 45,326,520; widened trunk = 43,130,151 —
+**95% match** (gap is the gate's own 166K params). Critic identical in both files (3,544,065
+params either way) — MoE total 49,036,993 vs. wide total 46,674,216, a 5.1% gap overall.
 
 | Run | Config | Isolates |
 |---|---|---|
 | `hhi_moe_1024_motion` | `mlp_moe.py`, K=8 | MoE, the actual proposal |
-| `hhi_moe_wide_1024_motion` | `mlp_moe_wide.py`, width 2896, no MoE | raw capacity, no routing |
+| `hhi_wide_1024_motion` | `mlp_wide.py`, width 2896, no MoE | raw capacity, no routing |
 
 Baselines on record (same 1024-motion subset): `hhi_1024_motion` (flat-concat) — 1028 persistent
 failures; `hhi_se_1024_motion` (shape-embed) — 1026. Reading order: widened-trunk vs. baselines
 tests whether capacity alone beats flat-concat; MoE vs. widened-trunk tests whether routing adds
 anything beyond matched capacity — that's the actual question. Check the
 **crawl/kneel/squat/backward category** specifically (`note/README.failed-motions.md`), not just
-the aggregate count. Same pair should also run on the 20,946×{2,4}-shape data once it lands —
-that run, not the 1024-motion pilot, sits in the actual failure regime this design targets.
+the aggregate count. Same pair should also run on the Stage 1 v2 data (20,946 clips × 2 shapes,
+§19) once it lands — that run, not the 1024-motion pilot, sits in the actual failure regime this
+design targets.
 
 ================================================================================
 
