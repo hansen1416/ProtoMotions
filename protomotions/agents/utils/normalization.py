@@ -212,14 +212,14 @@ class RunningMeanStd(nn.Module):
         if self.fabric.global_rank == 0:
             self.update_from_moments(batch_mean, batch_var, batch_count)
 
-        # Broadcast updated parameters to all ranks
-        updated_mean = self.fabric.broadcast(self.mean, src=0)
-        updated_var = self.fabric.broadcast(self.var, src=0)
-        updated_count = self.fabric.broadcast(self.count, src=0)
-
-        self.mean.copy_(updated_mean)
-        self.var.copy_(updated_var)
-        self.count.fill_(updated_count.item())
+        # Broadcast updated parameters to all ranks.
+        # NOTE: fabric.broadcast() round-trips through torch.distributed.broadcast_object_list
+        # (pickle-based generic object broadcast), which is not a reliable way to repeatedly
+        # broadcast large CUDA tensors under NCCL. Use a native in-place tensor broadcast instead.
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.broadcast(self.mean, src=0)
+            torch.distributed.broadcast(self.var, src=0)
+            torch.distributed.broadcast(self.count, src=0)
 
 
 def combine_moments(means: List[Tensor], vars: List[Tensor], counts: List[Tensor]):
