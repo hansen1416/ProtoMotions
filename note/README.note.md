@@ -2163,7 +2163,7 @@ opposite-gender keeps gender as the one clearly isolated shape variable while st
 close to the population `hhi_1024_motion`/`hhi_20946_neutral` were already evaluated against.
 
 
-python tools/extract_stage1_shapes.py \
+nohup python -u tools/extract_stage1_shapes.py \
       --r2-source r2:proto-data/hhi_stage2/ \
       --r2-dest r2:proto-data/hhi_stage1/ \
-      --workspace /workspace/stage1_prep
+      --workspace /workspace/stage1_prep > /tmp/stage1data.log 2>&1 &
