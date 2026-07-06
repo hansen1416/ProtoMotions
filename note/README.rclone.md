@@ -99,7 +99,7 @@ rclone copy r2:proto-data/ckpt/20946_neutral.zip ./results \
     --progress
 
 rclone copy ./tmp r2:proto-data/ckpt/ \
-    --transfers=2 \
+    --transfers=1 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress
@@ -110,4 +110,17 @@ rclone copy /media/hlz/R/stage2_data/ r2:proto-data/hhi_stage2/ \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress
+
+scp -O -i ~/.ssh/id_ed25519 \
+    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/key_joint_probe_clips.pt \
+    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/key_joint_probe_meta.json \
+    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/diff_key_joint_errors.py \
+    jx5oigi3zbipsh-64411958@ssh.runpod.io:/workspace/ProtoMotions/results/hhi_moe_20946_2shape
+
+rsync -avz -e "ssh -i ~/.ssh/id_ed25519" \
+    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/key_joint_probe_clips.pt \
+    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/key_joint_probe_meta.json \
+    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/diff_key_joint_errors.py \
+    jx5oigi3zbipsh-64411958@ssh.runpod.io:/workspace/ProtoMotions/results/hhi_moe_20946_2shape/
+
     

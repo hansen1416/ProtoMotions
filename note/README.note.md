@@ -2167,3 +2167,150 @@ nohup python -u tools/extract_stage1_shapes.py \
       --r2-source r2:proto-data/hhi_stage2/ \
       --r2-dest r2:proto-data/hhi_stage1/ \
       --workspace /workspace/stage1_prep > /tmp/stage1data.log 2>&1 &
+
+================================================================================
+
+## 20. Key-Joint Tracking Idea — Per-Joint Error Breakdown (2026-07-05)
+
+**Theoretical foundation (verified against source papers, 2026-07-06):**
+
+- **DeepMimic** (Peng et al., SIGGRAPH/TOG 2018) — original precedent for splitting the imitation
+  reward into separate weighted terms instead of one blended pose error: pose (0.5), velocity
+  (0.05), **end-effector (0.15)**, root (0.1), center-of-mass (0.2). Establishes that end-effector
+  position error deserves its own dedicated, separately-weighted reward term — the root idea behind
+  "key-joint" reweighting.
+- **H2O** (He et al., IROS 2024, arXiv:2403.04436) — tracks a sparse set of **8 key bodies**
+  (shoulders, elbows, hands, ankles) as the reward/observation target instead of the full ~20+
+  body set. Direct precedent for "a small key-joint set is enough to define the task." Verified
+  detail: H2O applies **uniform** weighting across all 8 key bodies — it does not itself argue for
+  weighting wrists over ankles.
+- **ExBody** (Cheng et al., 2024, arXiv:2402.16796) — the actual source of an upper-body-priority
+  split: upper body directly imitates reference pose/keypoints, while the legs are "relaxed" to
+  track a velocity command instead of copying joint angles, justified by "the mechanical
+  limitations and stability requirements" of a real bipedal robot. This assumption — legs handled
+  by a separate stability-oriented control path rather than dense pose tracking — is exactly why
+  it doesn't transfer to our setup: we have no separate balance controller, everything is dense
+  pose-tracking in sim, and legs are the joints failing *hardest*, not the ones that need relaxing.
+- **ExBody2** (2024, arXiv:2412.13196) — reports upper-body vs. lower-body tracking error (MPJPE)
+  as separate metrics rather than one blended number. Direct precedent for this section's own
+  grouped per-body-region error table methodology.
+- **OmniH2O** (He et al., CoRL 2024, arXiv:2406.08858) — same lineage as H2O; adds
+  teacher-student distillation and stability-shaping regularization rewards (feet-height/air-time
+  curricula). Adjacent context, not additional evidence on per-joint weighting.
+- **Classical grounding**: operational-space / task-priority control (Khatib, 1987) — the
+  control-theoretic argument that end-effector task-space error is the quantity to prioritize,
+  with proximal/redundant joints treated as lower-priority null-space DOFs. DeepMimic's and H2O's
+  key-body reward terms are RL-flavored descendants of this idea.
+
+**Our own experiment support:** ran a per-body-joint error breakdown on the 60 worst
+persistent-failure clips of `hhi_moe_20946_2shape` (root-relative position error against
+`last.ckpt`, epoch 5460) to check whether root/ankle error actually dominates over wrist error.
+This 60-clip subset is still only 6.7% success (56/60 fail) at epoch 5460 — genuinely stuck, not
+slow-converging. Grouped mean root-relative position error, worst to best:
+
+| group | mean err (m) |
+|---|---|
+| ankles+toes | 0.214 |
+| wrists+hands | 0.139 |
+| knees | 0.117 |
+| elbows | 0.117 |
+| shoulders+thorax | 0.111 |
+| spine/torso/neck/head | 0.093 |
+| hips | 0.036 |
+
+Ankle/toe error is ~54% larger than wrist/hand error, and both sit well above the rest — i.e. the
+key-joint set proposed (root + wrists + ankles) is exactly the two worst-tracked extremity groups,
+so the idea is well-supported: prioritizing those and loosening knees/elbows/shoulders/spine/hips
+doesn't sacrifice anything that's currently working. This directly contradicts ExBody's
+upper-body-priority design (see Theoretical foundation above — earlier draft of this note
+misattributed that design to H2O): ExBody's leg-relaxation assumes a separate real-robot balance
+controller, which doesn't apply here, so ankles should get equal-or-more weight than wrists, not
+less. **Net: the literature supports "track a sparse key-body set" (H2O) and "measure/report error
+by body region separately" (ExBody2), but no paper found actually argues wrists should outweigh
+ankles — that asymmetry (ExBody) rests on a real-robot-balance-controller assumption that doesn't
+hold here. The ankle-over-wrist ordering in this project is evidenced by our own epoch-5460 data,
+not by any cited paper.**
+
+**Why:** `hhi_moe_20946_2shape` (§18's MoE stress test) judged plateaued around epoch 5000+
+(minimal gain over several hundred epochs), prompting the reward-reweighting idea above.
+
+**Implementation: done (2026-07-06).** Steps 1-5 below were implemented and unit-verified (not
+yet trained/launched — that's a separate step). One deviation from the plan as originally written:
+step 5 said to edit `mlp_moe.py` directly; instead created a new sibling experiment file
+`examples/experiments/mimic/mlp_moe_keyjoint.py` (copy of `mlp_moe.py` + the `gt_body_weights`
+wiring) so the baseline config used by the still-referenced `hhi_moe_20946_2shape` run stays
+untouched, matching this repo's existing pattern of one experiment file per isolated variant
+(`mlp.py`, `mlp_wide.py`, `mlp_film.py`, `mlp_moe.py`, ...). Reward-body aggregation was
+unweighted everywhere before this change — confirmed by reading the actual code, not assumed:
+
+1. `protomotions/envs/rewards/base.py` — `mean_squared_error_exp()` (line 42-79) does
+   `per_body = diff_sq.mean(dim=-1)` then plain `per_body.mean(dim=-1)` (line 71/73) — an
+   unweighted mean over the body axis. This is the actual place per-body weighting has to be
+   injected. Add an optional `body_weights: Optional[Tensor] = None` param; when given, replace
+   the unweighted mean with a **normalized weighted mean**:
+   `(per_body * body_weights).sum(-1) / body_weights.sum()` — normalizing by the weight sum keeps
+   the reward on the same scale, so existing `coefficient` values (e.g. `gt_coef=-25.0` in this
+   experiment) don't need retuning. `rotation_error_exp()` (line 82-113) has the identical pattern
+   (`angle_diff_sq.mean(dim=-1)`, line 111) for a second-order test on rotation tracking — not
+   needed for the first test (see scope below).
+2. `protomotions/envs/rewards/tracking.py` — `compute_gt_rew()` (line 58-77) is the only kernel
+   that needs to change for the first test: add `body_weights: Optional[Tensor] = None` and pass
+   it into `mean_squared_error_exp(..., body_weights=body_weights)`.
+3. `protomotions/envs/component_factories.py` — `gt_rew_factory()` (line 462-481) add
+   `body_weights: Optional[Tensor] = None` and put it in `static_params` alongside `weight`/
+   `coefficient` (the `MdpComponent`/`resolve_args` machinery in `mdp_component.py` already passes
+   `static_params` straight through as kwargs and auto-moves any `Tensor` value to the right device
+   — no framework changes needed, confirmed via `mdp_component.py:167-276`). Then
+   `mimic_tracking_rewards_factory()` (line 572+) needs a pass-through `body_weights` param forwarded
+   into `gt_rew_factory(...)`.
+4. New small helper (put near the other factories in `component_factories.py`, or inline in the
+   experiment file since it's a 5-line one-off): `build_key_body_weights(kinematic_info, key_bodies,
+   key_weight, other_weight=1.0)` returning a `[num_bodies]` tensor. **Must** resolve indices via
+   `kinematic_info.body_names.index(name)` at env-config-build time, not hardcoded indices/order —
+   the 24-body order used in `diff_key_joint_errors.py`'s `BODY_NAMES` happens to match this robot's
+   MJCF depth-first traversal order (smpl_mor), but a different robot (G1, H1_2) has a different
+   body count/order, so hardcoding would silently misindex on any other robot config.
+5. Wired up in `examples/experiments/mimic/mlp_moe_keyjoint.py`'s `env_config()`:
+   `mimic_tracking_rewards_factory(..., gt_body_weights=build_key_body_weights(robot_cfg.kinematic_info,
+   key_bodies=["Pelvis","L_Wrist","R_Wrist","L_Ankle","R_Ankle"], key_weight=3.0))`. `key_weight=3.0`
+   is an arbitrary first guess, not derived from theory or data — a hyperparameter to sweep once the
+   first test result is in.
+6. **Must be a new run, not a resume**: per this repo's resume semantics, `resolved_configs.pt` is
+   loaded directly and the experiment file is *not* re-executed on resume, and `body_weights` is a
+   Tensor (can't be expressed via scalar `--overrides`) — so this has to launch as a fresh
+   `--experiment-name` from the edited `mlp_moe.py`, not a resume of `hhi_moe_20946_2shape`.
+7. **First-test scope** (keep it a single isolated change, per earlier agreement to test one thing
+   at a time): only `gt_rew` (position tracking); leave `gr_rew`/`gv_rew`/`gav_rew`/`rh_rew`
+   untouched, since the per-joint diagnostic above only measured position error. `key_bodies` =
+   root + 2 wrists + 2 ankles (5 of 24 bodies) — the originally-proposed set, not the broader
+   toe/hand groupings used only for the analysis table above.
+8. **Pre-existing dead code found during this investigation, do not reuse for this**:
+   `protomotions/envs/base_env/utils.py:combine_rewards()` already accepts a `region_weights`
+   param (docstring: "per-body weights based on anatomical regions") and `protomotions/envs/
+   base_env/env.py` already computes `self._density_weights` via `compute_body_density_weights()`
+   (`protomotions/components/pose_lib.py:204`) and passes it in — but `combine_rewards()` never
+   actually applies `region_weights` to anything; it's a fully unused parameter. Don't repurpose it
+   for key-joint weighting — its intended semantics (down-weighting anatomically dense regions like
+   finger chains) is a different concept from "make root/wrists/ankles matter more." Separate,
+   pre-existing dead-code cleanup, unrelated to this task.
+
+**Diagnostic method used above (historical, already run):** built a 60-clip probe motion file from
+the worst persistent failures (recent-window, epochs 2600-3600), ran
+`inference_agent.py --full-eval` on `last.ckpt` (epoch 5460) to dump
+`predicted_motion_lib_epoch_5460.pt`, then diffed per-body position error against the probe ground
+truth (`results/hhi_moe_20946_2shape/diff_key_joint_errors.py`). Two gotchas hit along the way: (1)
+naive diffing gave nonsense ~180m uniform error because the saved rollout carries each parallel
+env's world-grid placement offset — fixed by recentering both trajectories to root-relative
+position before diffing; (2) `MimicEvaluator._update_motion_sampling_weights` assumes every shape
+has an equal-size clip list and crashes on this unbalanced 29/31-shape probe subset — worked around
+with a throwaway no-op monkeypatch for this run only, not a repo change. Ran locally (laptop RTX
+4060, 8GB) — IsaacGym works locally for small one-off `--full-eval` checks like this
+(`num_envs<=8`, `simulator.sim.physx.default_buffer_size_multiplier=1.0` to avoid OOM), no RunPod
+round-trip needed.
+
+**Caveat:** measured on the worst-60 subset, which skews toward crawl/kneel/squat clips by
+construction (§17/[[failed_motions_20946_neutral]]), so the gap may be smaller on the full dataset.
+
+**Status:** code is implemented and unit-verified (see Implementation above). **Launching the
+actual `hhi_moe_20946_2shape_keyjoint` training run is a separate step, not yet started —
+deferred until next session.**

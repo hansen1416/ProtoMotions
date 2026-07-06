@@ -45,6 +45,7 @@ def mean_squared_error_exp(
     coefficient: float,
     indices: Optional[Tensor] = None,
     mean_before_exp: bool = True,
+    body_weights: Optional[Tensor] = None,
 ) -> Tensor:
     """Mean squared error with exponential transformation.
 
@@ -57,6 +58,10 @@ def mean_squared_error_exp(
         coefficient: Exponential coefficient (typically negative)
         indices: Optional body indices to subset
         mean_before_exp: If True, mean before exp (more stable)
+        body_weights: Optional per-body weights [num_bodies] (only used when x is
+            3-D). Aggregated as a weighted mean normalized by the weight sum, so
+            the reward stays on the same scale as the unweighted mean and
+            `coefficient` does not need retuning.
 
     Returns:
         Reward [num_envs] in range (0, 1] for negative coefficient
@@ -64,15 +69,24 @@ def mean_squared_error_exp(
     if indices is not None:
         x = x[:, indices]
         ref_x = ref_x[:, indices]
+        if body_weights is not None:
+            body_weights = body_weights[indices]
 
     diff_sq = (x - ref_x).pow(2)
 
     if diff_sq.dim() == 3:
         per_body = diff_sq.mean(dim=-1)
         if mean_before_exp:
-            return per_body.mean(dim=-1).mul(coefficient).exp()
+            if body_weights is not None:
+                body_error = (per_body * body_weights).sum(dim=-1) / body_weights.sum()
+            else:
+                body_error = per_body.mean(dim=-1)
+            return body_error.mul(coefficient).exp()
         else:
-            return per_body.mul(coefficient).exp().mean(dim=-1)
+            per_body_reward = per_body.mul(coefficient).exp()
+            if body_weights is not None:
+                return (per_body_reward * body_weights).sum(dim=-1) / body_weights.sum()
+            return per_body_reward.mean(dim=-1)
     elif diff_sq.dim() == 2:
         return diff_sq.mean(dim=-1).mul(coefficient).exp()
     else:
@@ -85,6 +99,7 @@ def rotation_error_exp(
     coefficient: float,
     indices: Optional[Tensor] = None,
     mean_before_exp: bool = True,
+    body_weights: Optional[Tensor] = None,
 ) -> Tensor:
     """Quaternion rotation error with exponential transformation.
 
@@ -97,6 +112,9 @@ def rotation_error_exp(
         coefficient: Exponential coefficient (typically negative)
         indices: Optional body indices to subset
         mean_before_exp: If True, mean before exp (more stable)
+        body_weights: Optional per-body weights [num_bodies]. Aggregated as a
+            weighted mean normalized by the weight sum, so the reward stays on
+            the same scale as the unweighted mean.
 
     Returns:
         Reward [num_envs] in range (0, 1] for negative coefficient
@@ -104,13 +122,22 @@ def rotation_error_exp(
     if indices is not None:
         q = q[:, indices]
         ref_q = ref_q[:, indices]
+        if body_weights is not None:
+            body_weights = body_weights[indices]
 
     angle_diff_sq = quat_angle_diff_norm(q, ref_q, w_last=True)
 
     if mean_before_exp:
-        return angle_diff_sq.mean(dim=-1).mul(coefficient).exp()
+        if body_weights is not None:
+            body_error = (angle_diff_sq * body_weights).sum(dim=-1) / body_weights.sum()
+        else:
+            body_error = angle_diff_sq.mean(dim=-1)
+        return body_error.mul(coefficient).exp()
     else:
-        return angle_diff_sq.mul(coefficient).exp().mean(dim=-1)
+        per_body_reward = angle_diff_sq.mul(coefficient).exp()
+        if body_weights is not None:
+            return (per_body_reward * body_weights).sum(dim=-1) / body_weights.sum()
+        return per_body_reward.mean(dim=-1)
 
 
 def power_consumption_exp(
