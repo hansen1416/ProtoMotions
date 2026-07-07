@@ -2314,3 +2314,148 @@ construction (§17/[[failed_motions_20946_neutral]]), so the gap may be smaller 
 **Status:** code is implemented and unit-verified (see Implementation above). **Launching the
 actual `hhi_moe_20946_2shape_keyjoint` training run is a separate step, not yet started —
 deferred until next session.**
+
+================================================================================
+
+## 21. Future Idea (parked) — Self-Triggered Progressive Expert Growth (2026-07-06)
+
+MoE (§18/[[architecture_research]]) validated the K=8 bet (~8x faster to matched success-rate vs
+the monolithic baseline) but still plateaus on the same persistent-failure cluster. [[architecture_research]]
+already earmarked PMCP (progressive primitives, mine-failures → freeze → add-primitive → compose)
+as the fallback for exactly this trigger — but PMCP's manual staged-run pipeline is cumbersome.
+
+**Idea:** automate PMCP's staging inside one continuous run — detect when an expert/data-subset has
+"saturated" (smoothed per-motion success rate plateaus) and only then grow/reallocate capacity
+(bias gate toward a fresh or under-used expert for the remaining unsaturated motions), instead of
+externally mining failures and launching a new job per primitive.
+
+Open design questions: what saturation signal triggers growth (some variant of the existing
+`motion_weights_update_success_discount` machinery, but as a trigger not just a sampling reweight);
+how to bias routing so a newly-grown expert actually receives gradient (PMCP solves this by
+weight-initializing the new primitive from the previous one, not randomly); freeze vs. keep-training
+old experts (forgetting risk vs. losing GMT's joint-training benefit).
+
+**Not started** — no validated precedent found yet for this exact combination (auto-triggered
+capacity growth + MoE gate + physics-based motion imitation RL); closest analogs are PMCP itself
+(this exact domain, but externally-staged) and continual-learning capacity-expansion work (e.g.
+dynamically-expandable-networks-style triggers, but for sequential task boundaries, not a shared
+RL router). **Needs a literature pass before design — parked, revisit later.**
+
+### [Literature] Pass Complete (2026-07-07)
+
+**PMCP (Luo et al., ICCV 2023, arXiv:2305.06456) directly answers all three open design
+questions** — verified against the paper's Section 3.2 / Appendix B.3 / Algorithm 1, not just
+re-cited from memory:
+- **Trigger:** automatic, performance-based — convergence defined as "success rate on the current
+  hard subset no longer increases," then the primitive is evaluated on the full motion set and
+  failures form the next hard subset. Structurally identical to the plateau-on-a-hard-subset idea
+  above, and this project's existing infra (`motion_weights_update_success_discount` EMA,
+  `failed_motions/` dumps, §17's persistence-counting method) is already most of the way to
+  measuring this signal.
+- **Init:** confirmed — PMCP tested both random init (PNN-style) and warm-starting the new
+  primitive from the previous primitive's weights, and kept the warm-start version.
+- **Freeze:** confirmed — the old primitive is fully frozen before the new one is created. Zero
+  forgetting, at the cost of GMT's joint-training benefit for old experts.
+
+**Structural mismatch (why this isn't just "go implement PMCP"):** PMCP's composer/gate trains
+once, at the end, over fully-assembled frozen primitives — sequential frozen experts stitched
+together after the fact, not a live, jointly-trained gate that grows in place the way GMT's MoE
+gate does here. Also: PMCP's own GitHub README (not the paper) states training is **not
+automated** — a human runs `forward_pmcp.py` to mine hard sequences and manually restarts training
+per primitive. This confirms the "cumbersome" framing above is accurate to the real
+implementation, not just the paper's clean Algorithm-1 presentation — automating this inside one
+continuous run is a genuine, unaddressed gap.
+
+**DynMoE (ICLR 2025, arXiv:2405.14297)** — closest MoE-native precedent for growing expert count
+*during* training. Its trigger is **coverage-based**, not performance-based: a token that
+activates zero experts (all gate scores below a learned threshold) triggers adding a new expert;
+an expert activated by no tokens gets removed. No analog to this in the current codebase (no
+per-token routing failure signal exists). Init/freeze policy could not be confirmed (PDF
+extraction failed repeatedly) — flagged as unconfirmed, not guessed. Supervised/vision/LM only, no
+RL discussion.
+
+**Progressive Neural Networks (Rusu et al. 2016) and Self-Controlled Dynamic Expansion Model
+(2025, arXiv:2504.10561)** — both **require externally-supplied discrete task boundaries/IDs**
+(SCDEM explicitly instantiates a new expert "for a given task," no drift/saturation detection).
+Negative evidence supporting this project's framing: continuous single-curriculum RL with no task
+IDs doesn't fit the classical continual-learning template, which is exactly why PMCP's
+subset-eval-based trigger (no task ID needed) fits better.
+
+**"Mixture of Experts in a Mixture of RL Settings" (arXiv:2406.18420)** — most on-topic MoE+RL
+paper found: studies fixed-K MoE inside actor-critic DRL under non-stationarity (helps with
+dormant-neuron issues) but does **not** discuss or propose growing expert count. Its silence on
+growth is itself weak evidence that this combination is unaddressed in the RL+MoE literature, not
+just overlooked by this project's own search.
+
+**Di-SkilL (arXiv:2403.06966)** — curriculum RL with per-expert context auto-adaptation, found but
+not deeply verified (time-boxed); likely fixed-K, not growing K. Follow-up read, not asserted.
+
+**Verdict: no direct precedent for the exact combination** (auto-triggered growth + live MoE gate
++ RL). Recombines pieces from different domains: PMCP has the right trigger/init/freeze answers
+but the wrong architecture (sequential frozen + one-shot gate); DynMoE has the live-gate growth
+mechanism but the wrong trigger (coverage, not performance) and unconfirmed init/freeze, in a
+non-RL setting.
+
+**Recommendation — worth pursuing, framed as porting PMCP's validated choices into GMT's live-gate
+architecture, not as implementing an existing method:**
+- **Trigger:** PMCP's success-rate-plateau-on-current-hard-subset signal, direct reuse — this
+  project's per-motion success EMA and `failed_motions/` logs are already closer to this than to
+  DynMoE's per-token coverage signal, which has no analog here.
+- **Init:** warm-start the new expert from whichever existing expert is currently most responsible
+  for routing the unsaturated motions (PMCP's confirmed choice, adapted from "one primitive" to
+  "clone one of K experts"). **Load-bearing, not cosmetic**: under the existing load-balancing loss
+  (§18), a freshly randomly-initialized expert competing against 8 already-converged experts would
+  likely never get picked at all — clone-init is probably required for the new expert to receive
+  any gradient.
+- **Freeze:** PMCP's answer (freeze old experts) is the safer starting point, consistent with this
+  project's own lesson that RL gradients are noisy and coupled moving parts are risky (§18's
+  load-balancing loss exists for exactly this failure class). A partial-freeze (reduced LR instead
+  of full freeze) is a plausible middle ground but is **extrapolation, not validated by any
+  surveyed paper** — flagged explicitly, not presented as a finding.
+
+Still parked — this is a design sketch, not an implementation plan. Revisit if/when the current
+key-joint MoE run (§20) is evaluated and still plateaus on the same cluster.
+
+(AMP/ASE discriminator was also discussed as an alternative — `MimicADD(AMP)` already exists in
+`protomotions/agents/mimic/agent_add.py` and is unused by current mimic experiments, which run
+plain PPO. Judged not intriguing enough to pursue now: current failures look like precision
+failures, not the recovery/off-reference gap AMP is best evidenced for — not parked, just not
+pursuing.)
+
+================================================================================
+
+## 22. Deep Research — Additional Solutions for the Persistent-Failure Cluster (2026-07-07)
+
+Deep research pass (3 parallel literature angles) for solutions beyond everything already tried
+(§16/§18/§20/§21). Of the findings, two are judged the real candidates — the rest were reward/
+curriculum tweaks that optimize within the existing paradigm rather than questioning a premise of
+it (full list preserved in memory `hard_motion_solutions_survey.md` if needed later).
+
+**1. Physics-corrected reference distillation** (InterMimic arXiv:2502.20390, 2025; ReActor ACM
+TOG July 2026; PhysDiff ICCV 2023 oral; PARC arXiv:2505.04002 — convergent finding across sources).
+Imitating a physics-refined rollout instead of the raw kinematic reference: InterMimic reports
+23.9%→90.7% (train) / 9.6%→95.5% (test) success on the same motions; ReActor gets 97.45% vs 95.51%
+success / 4.22° vs 6.62° joint RMSE over retarget-then-freeze, explicitly fixing motions "otherwise
+infeasible." Questions a premise none of our other attempts have: that the raw AMASS/HumanML3D
+reference is itself a valid target. Supports the hypothesis that some of our ~1,818
+persistent-failure clips are hard because the reference is borderline-infeasible for the tracked
+body, not purely a policy-capacity problem — though no source quantifies this fraction for our
+dataset (don't oversell as "our data is X% broken").
+**Implementation sketch**: re-run the hard-clip fine-tune (already done once, `hhi_1024_motion_tune`),
+dump its converged rollouts (reuse the `predicted_motion_lib_epoch_*.pt` pattern from the §20
+key-joint diagnostic), splice them back into the motion library as the new reference for those
+clips. Existing infra (`extract_failed_motions.py`, rollout-dump pattern) covers most of the
+plumbing. **Cost: moderate**, data-pipeline work, no GPU needed until the validation run.
+
+**2. Residual PD, retried differently.** Not a new idea — already failed twice (§13/§14, and the
+RPD failure-log comparison in memory `failed_motions_20946_neutral.md` showed a collapse-at-
+warm-start pattern both times) — but "What Makes Value Learning Efficient in Residual RL?" (Ma et
+al., arXiv:2602.10539, 2026 — the paper's own proposed fix was extracted as paraphrase, not
+verbatim; diagnosis treated as solid, prescription as directional) names the likely mechanism:
+**critic miscalibration under action-space semantic shift** — the critic's value estimates,
+calibrated to standard-PD dynamics, misguide the actor from step one of an abrupt switch to
+residual actions. Both our attempts did exactly that abrupt switch with no critic reset. Standard
+residual-RL mitigation: reset/pretrain the critic on the new action semantics first, and ramp
+`residual_scale` gradually (e.g. 0→0.3 rad over epochs) instead of switching the whole action
+config at epoch 0. **Cost: medium** — worth one more attempt with these two changes, kept in the
+note for the citation/mechanism even though it's a retry, not a fresh axis.

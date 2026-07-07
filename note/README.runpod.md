@@ -29,7 +29,7 @@ rclone copy r2:proto-data/20946_neutral_offset/ /workspace/20946_neutral_offset/
     --multi-thread-chunk-size=128M \
     --progress
 
-mkdir -p /workspace/hhi_stage1_merged6
+<!-- copy 20946 with 2 shapes -->
 rclone copy r2:proto-data/hhi_stage1_merged6/ /workspace/hhi_stage1_merged6/ \
     --transfers=4 \
     --multi-thread-streams=16 \
@@ -213,7 +213,22 @@ nohup python -u protomotions/train_agent.py \
     --wandb-group hhi_moe_20946_2shape > /tmp/hhi_moe_20946_2shape.log 2>&1 &
 ```
 
-nohup python -u protomotions/train_agent.py       --robot-name smpl_mor_neutral       --simulator isaacgym       --experiment-path examples/experiments/mimic/mlp_residual_pd.py       --experiment-name hhi_20946_neutral_rpd       --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt       --num-envs 6144 --batch-size 24576 --ngpu 6       --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl --wandb-group hhi_neutral_rpd > /tmp/train_neutral_rpd.log 2>&1 &
+```bash
+nohup python -u protomotions/train_agent.py \
+    --robot-name smpl_mor \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_moe_keyjoint.py \
+    --experiment-name hhi_moe_20946_2shape_keyjoint \
+    --motion-file /workspace/hhi_stage1_merged6/hhi_stage1_41892_slurmrank.pt \
+    --num-envs 6144 \
+    --batch-size 24576 \
+    --ngpu 6 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_moe_20946_2shape_keyjoint > /tmp/hhi_moe_20946_2shape_keyjoint.log 2>&1 &
+```
+
 ----
 
 
