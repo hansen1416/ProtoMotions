@@ -213,22 +213,6 @@ nohup python -u protomotions/train_agent.py \
     --wandb-group hhi_moe_20946_2shape > /tmp/hhi_moe_20946_2shape.log 2>&1 &
 ```
 
-```bash
-nohup python -u protomotions/train_agent.py \
-    --robot-name smpl_mor \
-    --simulator isaacgym \
-    --experiment-path examples/experiments/mimic/mlp_moe_keyjoint.py \
-    --experiment-name hhi_moe_20946_2shape_keyjoint \
-    --motion-file /workspace/hhi_stage1_merged6/hhi_stage1_41892_slurmrank.pt \
-    --num-envs 6144 \
-    --batch-size 24576 \
-    --ngpu 6 \
-    --use-wandb \
-    --wandb-project hhi-protomotions \
-    --wandb-entity yugoamaryl \
-    --wandb-group hhi_moe_20946_2shape_keyjoint > /tmp/hhi_moe_20946_2shape_keyjoint.log 2>&1 &
-```
-
 ----
 
 

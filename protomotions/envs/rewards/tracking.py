@@ -59,7 +59,6 @@ def compute_gt_rew(
     current_rigid_body_pos: Tensor,
     ref_rigid_body_pos: Tensor,
     coefficient: float = -100.0,
-    body_weights: Optional[Tensor] = None,
 ) -> Tensor:
     """Position tracking reward (exponential MSE).
 
@@ -67,8 +66,6 @@ def compute_gt_rew(
         current_rigid_body_pos: Current body positions [num_envs, num_bodies, 3].
         ref_rigid_body_pos: Reference body positions [num_envs, num_bodies, 3].
         coefficient: Exponential coefficient for error.
-        body_weights: Optional per-body weights [num_bodies] to emphasize a
-            key-joint subset (e.g. root/wrists/ankles) over the rest.
 
     Returns:
         Reward tensor [num_envs].
@@ -77,7 +74,6 @@ def compute_gt_rew(
         current_rigid_body_pos,
         ref_rigid_body_pos,
         coefficient,
-        body_weights=body_weights,
     )
 
 

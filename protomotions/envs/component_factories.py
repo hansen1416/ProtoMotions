@@ -462,46 +462,15 @@ def action_smoothness_factory(weight: float = -0.02) -> MdpComponent:
     )
 
 
-def build_key_body_weights(
-    kinematic_info: Any,
-    key_bodies: List[str],
-    key_weight: float,
-    other_weight: float = 1.0,
-) -> Tensor:
-    """Build a per-body reward weight tensor emphasizing a key-joint subset.
-
-    Looks up indices by name via `kinematic_info.body_names` rather than
-    assuming a fixed body ordering, since body ordering is robot-specific
-    (depends on each robot's MJCF asset).
-
-    Args:
-        kinematic_info: `KinematicInfo` for the robot (has `body_names: List[str]`).
-        key_bodies: Body names to weight more heavily (e.g. root/wrists/ankles).
-        key_weight: Weight assigned to bodies in `key_bodies`.
-        other_weight: Weight assigned to every other body.
-
-    Returns:
-        Tensor [num_bodies] of per-body weights.
-    """
-    weights = torch.full((len(kinematic_info.body_names),), other_weight, dtype=torch.float32)
-    for name in key_bodies:
-        weights[kinematic_info.body_names.index(name)] = key_weight
-    return weights
-
-
 def gt_rew_factory(
     weight: float = 0.5,
     coefficient: float = -100.0,
-    body_weights: Optional[Tensor] = None,
 ) -> MdpComponent:
     """Factory for position tracking reward.
 
     Args:
         weight: Reward weight.
         coefficient: Exponential coefficient for error.
-        body_weights: Optional per-body weights [num_bodies] to emphasize a
-            key-joint subset (e.g. root/wrists/ankles) over the rest. Build
-            with `build_key_body_weights()`.
 
     Returns:
         MdpComponent configured for position tracking.
@@ -517,7 +486,6 @@ def gt_rew_factory(
         static_params={
             "weight": weight,
             "coefficient": coefficient,
-            "body_weights": body_weights,
         },
     )
 
@@ -621,7 +589,6 @@ def mimic_tracking_rewards_factory(
     gv_coef: float = -0.5,
     gav_coef: float = -0.1,
     rh_coef: float = -100.0,
-    gt_body_weights: Optional[Tensor] = None,
 ) -> Dict[str, MdpComponent]:
     """Factory for standard mimic tracking reward bundle.
 
@@ -638,15 +605,12 @@ def mimic_tracking_rewards_factory(
         gv_coef: Velocity coefficient.
         gav_coef: Angular velocity coefficient.
         rh_coef: Root height coefficient.
-        gt_body_weights: Optional per-body weights [num_bodies] for `gt_rew`
-            (position tracking), to emphasize a key-joint subset. Build with
-            `build_key_body_weights()`.
 
     Returns:
         Dict of MdpComponent instances for tracking rewards.
     """
     return {
-        "gt_rew": gt_rew_factory(weight=gt_weight, coefficient=gt_coef, body_weights=gt_body_weights),
+        "gt_rew": gt_rew_factory(weight=gt_weight, coefficient=gt_coef),
         "gr_rew": gr_rew_factory(weight=gr_weight, coefficient=gr_coef),
         "gv_rew": gv_rew_factory(weight=gv_weight, coefficient=gv_coef),
         "gav_rew": gav_rew_factory(weight=gav_weight, coefficient=gav_coef),

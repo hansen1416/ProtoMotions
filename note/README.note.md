@@ -2459,3 +2459,181 @@ residual-RL mitigation: reset/pretrain the critic on the new action semantics fi
 `residual_scale` gradually (e.g. 0→0.3 rad over epochs) instead of switching the whole action
 config at epoch 0. **Cost: medium** — worth one more attempt with these two changes, kept in the
 note for the citation/mechanism even though it's a retry, not a fresh axis.
+
+================================================================================
+
+## 23. Idea (parked, not researched) — Curve-Shape Matching Instead of Pointwise-in-Time Tracking (2026-07-07)
+
+**The idea:** every tracking reward (`gt_rew`, `gr_rew`, `gv_rew`, `gav_rew`) currently compares
+policy state at time `t` to the reference at the *same* `t` — strict phase-locked correspondence.
+Proposal: reward matching the *shape* of the joint trajectory (curve) rather than the exact
+value-at-exact-time — the motion doesn't need to be identical, just similarly-shaped, allowing
+local timing slack.
+
+**Why this matters more here than in fixed-body papers (PHC/GMT/H2O/etc.):** how fast a body can
+execute a movement is a function of its mass/moment of inertia. We retarget one captured
+joint-angle-vs-time curve across 128 SMPL shapes spanning 26-144 kg. A heavier body decelerating
+out of a squat needs more time to dissipate the same relative momentum than a lighter one, even
+with an equally good policy. Forcing exact-time correspondence onto every body shape may demand a
+target that's positionally reachable but not *on that schedule* for that particular mass — a
+distinct infeasibility mechanism from §22's dynamics-infeasibility (target unreachable at all).
+This is invisible to any fixed-body paper's evaluation, so no amount of citing their results
+confirms or refutes it for us specifically.
+
+**Related known techniques (general knowledge, not a fresh literature search — unlike §21/§22):**
+- Dynamic Time Warping / Soft-DTW (Cuturi & Blondel, ICML 2017) — differentiable curve-shape loss
+  tolerant of local time-warp.
+- Motion Matching / phase-based animation (Holden et al.'s PFNN and successors) — game-animation
+  characters driven by matching motion *features*/phase rather than exact frame correspondence.
+- AMP/ASE — already unused in this repo (`MimicADD(AMP)`, `protomotions/agents/mimic/agent_add.py`)
+  — a different mechanism for a related idea: a discriminator judges whether motion snippets look
+  like the *distribution* of real motion, no exact-time correspondence to a specific reference at
+  all. Previously deprioritized (§21) on grounds that current failures look like precision
+  failures, not a recovery/off-reference gap — worth revisiting that call if this idea is pursued,
+  since "precision failure" and "wrong governance of timing" aren't obviously the same claim.
+
+**Implementation shapes considered (not built):**
+1. Bounded local time-warp / windowed best-match — compare against whichever frame in a small
+   window `[t-δ, t+δ]` best matches, instead of exactly `t`. Cheap, bounded (avoids unconstrained
+   reward hacking). Natural extension of the existing `motion_phase` observation (§16 A2) from
+   "observation only" to "also drives reward alignment."
+2. Soft-DTW as a proper differentiable trajectory loss — more correct, more expensive, more new
+   code in a vectorized IsaacGym reward pipeline.
+3. Feature/shape-based terms (velocity direction, contact order) instead of raw time-aligned
+   position/velocity — `gv_rew`/`gav_rew` are already a step toward "shape" over "exact pose" but
+   remain exact-time.
+
+**Key risk:** timing is not always dispensable — for genuinely fast/dynamic motions (a kick, a
+fast transition) timing *is* the skill. Over-relaxing the warp window risks the policy learning a
+shape-similar but qualitatively slower/lazier version of the motion — a reward-hacking mode
+specific to this fix. The right warp-window bound is an empirical question, not obvious upfront.
+
+**Relationship to §22:** complementary, not competing. Physics-corrected reference distillation
+fixes "target unreachable at all, at any schedule." Curve-shape matching fixes "target reachable,
+but not exactly on this schedule for this body." Both could matter for the same failure cluster,
+for different frames — not mutually exclusive fixes.
+
+**Status:** parked, not researched or implemented. No literature pass run yet on
+"time-warp-tolerant imitation reward for morphology-varying bodies" specifically — revisit with a
+proper search before building anything, per this project's own standard for distinguishing
+verified findings from first-principles reasoning.
+
+### [Refinement] Continuous Progress Variable Instead of a Fixed Window (2026-07-07)
+
+Follow-up idea: instead of a bounded `[t-δ, t+δ]` window (implementation shape 1 above), let the
+reference-alignment pointer be a **continuously-growing state variable** — "grow the curve from
+the root" — rather than snapped to wall-clock time or reset each window. Monotonic, starts at the
+clip's start, advances based on tracking quality rather than 1:1 with simulation time.
+
+**Named precedent (general knowledge, not freshly searched):**
+- **Path-following control** (vs. trajectory tracking) in robotics — a path parameter `s` (e.g.
+  Lapierre & Soetanto, ship/AUV path-following) evolves by its own adaptive dynamics rather than
+  being locked to wall-clock time; canonical distinction between "hit x_ref(t) at time t" and
+  "follow the shape of x_ref(s), advance s as fast as tracking allows."
+- **Online score-following** (Dannenberg 1984 onward; Arzt & Widmer) — live music performance
+  tracked against a reference score via incremental/online DTW; score position is a state variable
+  advanced by current match quality, monotonic, never resets backward.
+
+**Why stronger than the fixed window for this project's actual motivation:** a fixed small window
+only absorbs local jitter. A body that needs to be uniformly slower through an *entire* squat
+(mass/inertia-driven, not incidental) will drift outside any reasonably small δ well before the
+motion ends, since the mismatch accumulates over time. A continuously-growing progress variable
+has no such ceiling — it can run persistently slower/faster for as long as needed, which is the
+actual shape of the mass-driven timing problem, not just occasional desync.
+
+**Candidate advance rules for `ref_progress` (replacing `motion_manager.py`'s rigid
+`motion_times += env_dt`):**
+1. **Reactive/error-gated** — advance at nominal rate when tracking error is low, slow or hold
+   when error is high, resume once caught up. Pure feedback, no biomechanical assumptions.
+2. **Principled/mass-scaled** — scale nominal advance rate by a per-body dynamic-similarity factor
+   derived up front, not reactively. Connects directly to an already-flagged-but-unimplemented
+   idea in §4's physics-features table: `T_step_natural = 2π√(l_leg/g)` (Froude-style natural
+   timing formula). Only covers the mass-driven component, not general "policy currently behind."
+   Could combine both: principled baseline pace, reactively adjusted.
+
+**Critical risk — reward hacking via deliberate stalling.** If the policy can influence how fast
+its own reference advances, it can learn to track badly on purpose to keep the reference stuck on
+an easy early frame indefinitely, harvesting reward without ever finishing the clip — the same
+pathology as the well-known CoastRunners boat-racing RL example (agent loops for points instead of
+finishing the race, because the reward didn't actually require finishing). Any "reference waits
+for you" mechanism needs a countervailing force from day one: a hard cap on total allowable lag
+between `ref_progress` and wall-clock `t`, and/or a fixed episode time limit so stalling
+accumulates strictly less total reward than progressing. Not an afterthought — has to be in the
+initial design.
+
+**Architectural cost, higher than the fixed-window version.** `motion_times` is currently literal
+elapsed simulation time and is load-bearing well beyond the reward: termination
+(`done_clip = (motion_times + dt) >= end_times`), future-target queries in `mimic_control.py`, the
+evaluator's success-window bookkeeping, and the `motion_phase` observation (§16 A2) — which would
+itself need to be redefined in terms of `ref_progress` rather than wall-clock time, or it
+reintroduces the exact temporal-aliasing problem that feature was built to fix. A bigger lift than
+implementation shape 1, touching multiple subsystems, not a drop-in reward change.
+
+**Status:** parked, liked directionally, needs careful design before any implementation attempt —
+explicitly flagged (by the user) as one to be very careful with, given the reward-hacking risk
+above is not hypothetical-and-unlikely, it's a well-documented RL failure mode this exact
+mechanism invites by construction.
+
+### [Refinement 2] Reward Mechanism — Future Window as Observation, History Window as Reward (2026-07-07)
+
+Continues the Refinement above, working out concretely how `ref_progress` (`s_t`: a
+time-into-clip value, same unit as `motion_times`, monotonic, always `≤` wall-clock `t`) actually
+feeds the reward, split into two separate jobs rather than one mechanism.
+
+**Split:**
+- **Future window `[s_t, s_t+w]` → observation only.** Not new machinery — `protomotions/envs/
+  obs/target_poses.py`'s `build_max_coords_target_poses_future_rel()` already builds this (future
+  reference frames, root-relative, `future_steps` param), currently anchored to `motion_times`.
+  Only change needed: re-anchor to `s_t`.
+- **History window `[t-k, t]` → reward.** No search: direct pairing `x_τ` vs `y(s_τ)` at each past
+  `τ`, using whatever `s_τ` the (still-undecided) advance rule already committed to at that step.
+  All time-warp tolerance comes from `s_τ` lagging `t`, not from any search/DTW inside the reward.
+
+**Insufficient history (`t < k`, e.g. right after episode reset):** fixed-size `[num_envs, k]`
+window always (needed for GPU batching across envs that reset at different times), zero-padded
+when `t<k`. Pad slots must be masked out of any average — a raw 0-vs-0 pad slot reads as a fake
+perfect match otherwise (seq2seq padding analogy, but padding alone isn't sufficient without the
+mask, same as `ignore_index`/attention-masking in that setting). History buffer must also be
+cleared on env reset (mid-episode termination+respawn), or the window would straddle two unrelated
+attempts — check existing `HistoricalView` (state-history-buffer infra) for reset-clearing
+precedent before building new.
+
+**Two-regime comparison:**
+1. `t < k`: plain masked pointwise position error (today's `exp(-error/σ)` via
+   `mean_squared_error_exp`), unchanged.
+2. `t ≥ k`: switch to genuine **curve-shape** comparison — masked pointwise error, even windowed,
+   is still fundamentally a position-difference metric, not a shape metric.
+
+**Shape metric chosen for the `t ≥ k` regime: Lin's Concordance Correlation Coefficient (CCC),
+not bare Pearson correlation.**
+
+`CCC = (2·ρ·σ_x·σ_y) / (σ_x² + σ_y² + (μ_x−μ_y)²)`
+
+computed per joint/dimension channel over the window's real (unmasked) frames, then averaged
+across channels. Chosen over bare correlation because correlation alone is blind to amplitude/
+offset (a joint moving in perfect sync at half amplitude still scores `ρ=1`) — CCC folds the
+amplitude/offset penalty into the denominator directly, no separate hand-rolled amplitude term
+needed. Discrete Fréchet distance (the rigorous "dog on a leash" curve-distance formulation)
+considered as the more-correct alternative; deprioritized as the cheap option to try first.
+
+**Known gaps, not resolved this pass:**
+- Per-channel zero-variance guard — a near-static joint gives `σ≈0`, CCC denominator breaks.
+  Needs a clamp/skip.
+- Minimum real-frame count for CCC to be meaningful (correlation on 1-2 points is noise) — may
+  need its own threshold, possibly stricter than `t≥k` alone implies.
+- Which joints feed this at all — separate open question, see base idea above (§23's key-joint
+  tracking is a different purpose than this progress-gate/reward question; tentatively considered
+  root+knee chain for the progress-gate role vs. root+wrists+ankles for the reward-weighting role
+  in §20, not settled).
+- The advance rule itself (what actually sets `s_τ` each step) — still undecided. Tentatively
+  floated: reuse this same history CCC/error signal to gate how fast `s_t` advances, not committed.
+
+**Status:** design in progress, not implemented. **Next open question, paused mid-discussion
+(2026-07-07):** the advance rule (what formula actually sets `s_τ`/`s_t` each step, replacing
+`motion_manager.py`'s fixed `motion_times += env_dt`) — discussion got confusing distinguishing
+"the window `[t-k,t]`" (fixed-length, already settled) from "`s_τ`, a value that must be freshly
+computed every step of the whole episode, not just inside the window" (the actual unsolved part),
+and separately from "wall-clock sim time `t`" (stays fixed, untouched) vs. "which reference frame
+to show" (currently wrongly hard-locked to `t` via `motion_times`, the thing `s_t` is meant to
+unlock). Revisit with a clearer/simpler explanation before continuing — possibly a worked numeric
+example across a full short episode rather than abstract formulas.
