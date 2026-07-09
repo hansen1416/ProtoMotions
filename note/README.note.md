@@ -2637,3 +2637,68 @@ and separately from "wall-clock sim time `t`" (stays fixed, untouched) vs. "whic
 to show" (currently wrongly hard-locked to `t` via `motion_times`, the thing `s_t` is meant to
 unlock). Revisit with a clearer/simpler explanation before continuing — possibly a worked numeric
 example across a full short episode rather than abstract formulas.
+
+## 24. `mlp_moe_stable.py` — PPO Update-Stability Guard Rails (2026-07-09)
+
+**Context:** `hhi_moe_20946_neutral` (§18's K=8 MoE run) hit a transient dip at epoch ~7540-7600
+(`eval/success_rate` 92.5%→88.3%, self-corrected by epoch 7900). Diagnosed as an outsized PPO
+update, not the earlier NaN-broadcast bug (`critic/bad_grads_count` stayed 0) — see memory
+`moe_20946_neutral_run.md` for full evidence. `examples/experiments/mimic/mlp_moe_stable.py` tests
+whether two already-implemented-but-unused PPO safety knobs prevent a repeat.
+
+**What changed vs. `mlp_moe.py`** (architecture identical — same K=8 `MoEMLPConfig`, same critic,
+same env/rewards):
+1. `adaptive_lr=AdaptiveLRConfig(enabled=True, desired_kl=0.01)` — was fully disabled in
+   `mlp_moe.py`. Halves actor/critic LR when post-update KL > 2×`desired_kl`, grows it back ×1.5
+   (capped at `max_lr`) when KL is well under target.
+2. `actor_clip_frac_threshold` tightened `0.6 → 0.4` — skip remaining actor minibatch updates for
+   the epoch earlier, before a large fraction of the batch is already clipped.
+
+Both are guard rails only (no effect on well-behaved epochs), deliberately isolated from any
+exploration/entropy change (`learnable_std` was considered, held back for a separate ablation to
+avoid confounding — go/1+2 decision).
+
+**Launch mode — warm start, not from scratch:** `--checkpoint results/hhi_moe_20946_neutral/
+last.ckpt` + new `--experiment-name hhi_moe_20946_neutral_stable`. `train_agent.py`'s
+`detect_checkpoint_mode()` treats new-name+checkpoint as "warm_start" (executes this file fresh,
+so the config changes actually apply; only weights are loaded) — different from same-name
+"resume" (reloads pickled config, ignores CLI/file changes). Chosen to directly test recovery
+from the current ~90%+ state for a fraction of the compute, at the cost of not re-testing whether
+this also fixes the early-training clip_frac instability (epochs 247-931).
+
+**Status (2026-07-09):** launched, running, looking good so far. See memory
+`moe_20946_neutral_run.md` for live metrics as they come in.
+
+## 25. Persistent-Failure-Cluster Overlap — MoE vs. Baseline (2026-07-09)
+
+**Question:** does GMT-MoE (§18) specifically fix `hhi_20946_neutral`'s known hard cluster
+(§17 — crawl/kneel/squat/sit/backward/single-leg-balance, 1,818/20,946 clips failing all 18
+analyzed epochs), or just improve everywhere uniformly?
+
+**Method:** same indexing scheme as §17 (`global_clip_idx = rank*3491 + motion_id`, verified to
+still apply — both runs use the identical shard scheme). Same 18-analyzed-epochs method, but only
+epochs 3000-6400 were locally available for `hhi_moe_20946_neutral` (pod was reassigned to the
+`_stable` warm-start job before syncing later epochs) — **numbers below are a lower bound**,
+`eval/success_rate` was still rising past epoch 6400. Output: `results/hhi_moe_20946_neutral/
+persistent_failures.txt`.
+
+**Result — MoE roughly halves the persistent-failure set, unevenly across categories:**
+- 18/18-persistent count: baseline 1,818 (8.7%) → MoE 916 (4.4%), **-49.6%**.
+- 861 clips (47.4% of baseline's set) still fail under both — the genuinely hard core.
+- Only 55 new persistent failures appeared under MoE that weren't in baseline (6.0% of MoE's
+  set) — minimal new regressions, this is a real fix, not a shuffle.
+- **Fix rate by category (of baseline's members; corrected after fixing a regex bug that missed
+  gerunds/plurals — "crawls," "kneeling," "balancing" — in the first pass):** single-leg-balance
+  63% fixed, lie/get-up/push-up 59%, kneel 55%, sit 55%, squat/crouch 53%,
+  balance-on-object/beam 43%, backward 39%, **crawl/all-fours only 24% (272→208 clips) — the one
+  clear outlier, every other category improved 39-63%**.
+
+**Takeaway:** MoE is not "too weak to learn these" in general — most categories responded well to
+more capacity/routing with zero reward changes, which argues against a blanket "too complicated"
+explanation. Crawl/all-fours is the exception: capacity alone barely moved it, so it likely needs
+a different mechanism, not just more experts. Best next candidate: physics-corrected reference
+distillation (hard-motion-solutions-survey rec. 4) — tests directly whether crawl's raw mocap
+references are borderline-infeasible for this body (a real possibility for hands-and-knees mocap,
+prone to foot-penetration/self-collision on retarget) rather than a policy-capacity problem.
+
+results/hhi_moe_20946_neutral/persistent_failures_18of18.txt
