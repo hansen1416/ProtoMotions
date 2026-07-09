@@ -22,7 +22,7 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
   --multi-thread-chunk-size=128M \
   --progress
 
-<!-- copy 20951 neutral -->
+<!-- copy 20946 neutral -->
 rclone copy r2:proto-data/20946_neutral_offset/ /workspace/20946_neutral_offset/ \
     --transfers=4 \
     --multi-thread-streams=16 \
@@ -199,19 +199,33 @@ nohup python -u protomotions/train_agent.py \
 
 ```bash
 nohup python -u protomotions/train_agent.py \
-    --robot-name smpl_mor \
+    --robot-name smpl_mor_neutral \
     --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp_moe.py \
-    --experiment-name hhi_moe_20946_2shape \
-    --motion-file /workspace/hhi_stage1_merged6/hhi_stage1_41892_slurmrank.pt \
+    --experiment-name hhi_moe_20946_neutral \
+    --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
     --num-envs 6144 \
     --batch-size 24576 \
     --ngpu 6 \
     --use-wandb \
     --wandb-project hhi-protomotions \
     --wandb-entity yugoamaryl \
-    --wandb-group hhi_moe_20946_2shape > /tmp/hhi_moe_20946_2shape.log 2>&1 &
+    --wandb-group hhi_moe_20946_neutral > /tmp/hhi_moe_20946_neutral.log 2>&1 &
 ```
+
+nohup python -u protomotions/train_agent.py \
+    --robot-name smpl_mor_neutral \
+    --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_wide.py \
+    --experiment-name hhi_wide_20946_neutral \
+    --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
+    --num-envs 6144 \
+    --batch-size 24576 \
+    --ngpu 6 \
+    --use-wandb \
+    --wandb-project hhi-protomotions \
+    --wandb-entity yugoamaryl \
+    --wandb-group hhi_wide_20946_neutral > /tmp/hhi_wide_20946_neutral.log 2>&1 &
 
 ----
 
