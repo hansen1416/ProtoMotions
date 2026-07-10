@@ -2702,3 +2702,59 @@ references are borderline-infeasible for this body (a real possibility for hands
 prone to foot-penetration/self-collision on retarget) rather than a policy-capacity problem.
 
 results/hhi_moe_20946_neutral/persistent_failures_18of18.txt
+
+
+CUDA_VISIBLE_DEVICES=0 python protomotions/record_video_mor.py \
+      --checkpoint results/hhi_moe_20946_neutral_stable/score_based.ckpt \
+      --motion-file /workspace/hhi_moe_stable_top8_failures.pt \
+      --simulator isaacgym \
+      --num-envs 8 --output output/videos/hhi_moe_stable_top8_failures.mp4
+
+## 26. `hhi_moe_20946_neutral_stable` Status Pull + Implausible-Motions Triage + Next Fine-Tune Plan (2026-07-10)
+
+**Status pull (epoch 16400/16427):** `eval/success_rate` **95.9%** (up from 93.4% at epoch 6400,
+§24's launch point), `eval/gt_error/mean` 0.102, `eval/gr_error/mean` 0.145,
+`eval/gt_error/failure_rate` 4.1%. Guard rails holding: `actor/clip_frac` 0.129 (well under the
+0.4 threshold), `actor`/`critic` `bad_grads_count` 0, `moe_load_balance_loss` 0.999,
+`moe_expert_utilization_std` 0.021 — no sign of a §24-style epoch-7540 dip recurring so far.
+
+**Implausible-motions triage:** of the 5,958 clips in `persistent_failures_final.txt`
+(epochs 8461-16400, 41 evals), keyword-scanned descriptions for support-object dependency (sit on
+a chair, lean on a table/counter, hand on a wall/railing, actual stairs, vehicle seat, platform) —
+objects this run's simulator does not have (`scene_file=None`, no scene objects). 23 clips flagged
+and manually spot-checked, written to `results/implausible_motions.json`
+(`motion_id`/`global_clip_idx`/`description`/`epochs_failed`). Broader keyword buckets (held
+objects like ball/cup/instrument — usually kinematically fine without weight-bearing dependency —
+and second-person/partner interactions) bring the union to 190/5,958 (3.2%), but only the 23
+support-dependent ones are a real physical-plausibility claim.
+
+**[Decision] Keep all motions, exclude nothing.** Neither the 23 implausible clips nor the rest of
+the failed set (including the 438-clip 41/41-persistent core) will be dropped from training or
+eval, for Stage 2 or otherwise — consistent with the "full HumanML3D library" scale claim
+(`project_overview` memory) and the earlier decision (§25 / `moe_20946_neutral_run` memory) not to
+chase the persistent-failure cluster further. `results/implausible_motions.json` is a reference
+list only. Explicit ask: see what pose the policy converges to on these 23 clips (e.g. "kneels
+with stool" with no stool present) rather than filter them out.
+
+**[Plan] Next fine-tune pass — cheap, warm-startable from `hhi_moe_20946_neutral_stable`'s current
+checkpoint, no architecture change, to be run tomorrow:**
+1. **`learnable_std=True` + `entropy_coef`** — actor's action log-std is currently frozen at the
+   initial `actor_logstd=-2.9` for the whole run (`learnable_std=False`). This is the exploration
+   change that was deliberately held back from §24's guard-rail run to avoid confounding "did the
+   guard rails help" with "did more exploration help." Now that the guard-rail run has plateaued
+   near 96%, this is the natural next single-variable test.
+2. **Tighten `adaptive_lr.desired_kl`** (currently 0.01) and/or **`actor_clip_frac_threshold`**
+   (already 0.6→0.4 in §24, could go to 0.3) — smaller, gentler late-stage policy updates, aimed at
+   squeezing out remaining gains without risking another transient dip.
+3. **Anneal `e_clip`** (PPO clip epsilon, flat 0.2 for the whole run so far) — narrowing it late in
+   training is a standard fine-tune-the-fine-tune trick; not schedule-able yet, would need a small
+   code change to `protomotions/agents/ppo/agent.py`/`config.py` first.
+4. **`moe_load_balance.lambda_lb`** sweep (currently 0.01, never tuned) — lowest-priority of the
+   four; `moe_load_balance_loss` is already ~0.999 and `moe_expert_utilization_std` only 0.021, so
+   there's little imbalance left to fix.
+
+**[Decision] Not touching the expensive options** (`num_experts` K sweep away from 8,
+`expert_layers` width/depth) — these require training from scratch (checkpoint won't load across
+an architecture change) and reopen the K/capacity sweep the user already deprioritized when
+`hhi_moe_20946_neutral_stable` was judged "good enough" (§25 / `moe_20946_neutral_run` memory,
+2026-07-09 decision to stop chasing the persistent-failure cluster).
