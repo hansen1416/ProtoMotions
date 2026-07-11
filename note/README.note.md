@@ -2638,6 +2638,8 @@ to show" (currently wrongly hard-locked to `t` via `motion_times`, the thing `s_
 unlock). Revisit with a clearer/simpler explanation before continuing — possibly a worked numeric
 example across a full short episode rather than abstract formulas.
 
+================================================================================
+
 ## 24. `mlp_moe_stable.py` — PPO Update-Stability Guard Rails (2026-07-09)
 
 **Context:** `hhi_moe_20946_neutral` (§18's K=8 MoE run) hit a transient dip at epoch ~7540-7600
@@ -2668,6 +2670,8 @@ this also fixes the early-training clip_frac instability (epochs 247-931).
 
 **Status (2026-07-09):** launched, running, looking good so far. See memory
 `moe_20946_neutral_run.md` for live metrics as they come in.
+
+================================================================================
 
 ## 25. Persistent-Failure-Cluster Overlap — MoE vs. Baseline (2026-07-09)
 
@@ -2709,6 +2713,8 @@ CUDA_VISIBLE_DEVICES=0 python protomotions/record_video_mor.py \
       --motion-file /workspace/hhi_moe_stable_top8_failures.pt \
       --simulator isaacgym \
       --num-envs 8 --output output/videos/hhi_moe_stable_top8_failures.mp4
+
+================================================================================
 
 ## 26. `hhi_moe_20946_neutral_stable` Status Pull + Implausible-Motions Triage + Next Fine-Tune Plan (2026-07-10)
 
@@ -2758,3 +2764,44 @@ checkpoint, no architecture change, to be run tomorrow:**
 an architecture change) and reopen the K/capacity sweep the user already deprioritized when
 `hhi_moe_20946_neutral_stable` was judged "good enough" (§25 / `moe_20946_neutral_run` memory,
 2026-07-09 decision to stop chasing the persistent-failure cluster).
+
+================================================================================
+
+## 27. `hhi_wide_20946_neutral` vs. `hhi_moe_20946_neutral_stable` — Capacity-Matched Control Check (2026-07-11)
+
+Pulled both runs' `eval/success_rate`/`gt_error`/`gr_error` from tfevents (identical `num_envs`/
+`batch_size` = 6144/24576, same 20,946-clip dataset, epochs directly comparable), cross-checked
+against raw `failed_motions/` counts.
+
+| metric (latest epoch) | wide (ep. 8600) | MoE stable (ep. 16400) |
+|---|---|---|
+| `success_rate` | 96.21% | 95.90% |
+| `gt_error/mean` | 0.1005 | 0.1018 |
+| `gr_error/mean` | **0.179** | **0.145** |
+| failed clips (raw) | 793/20946 | 859/20946 |
+
+**Not a clean win for wide.** Success rate and `gt_error` are a statistical wash — both runs
+oscillate ±1pp success epoch-to-epoch over their last 8 evals, well inside wide's apparent edge.
+`gr_error` (rotation) is the one real, consistent gap, and MoE wins it: wide sits 0.179-0.195
+across its last 8 evals vs. MoE stable's 0.145-0.153 — a stable ~20-25% difference, not noise.
+
+**Wide's real advantage: training efficiency, not final quality.** It reached this performance
+from scratch in 8600 epochs vs. MoE stable's ~16400 (8461 inherited from the `hhi_moe_20946_neutral`
+base run + ~7939 more in the `_stable` warm-start) — roughly half the epochs to the same success
+rate. Frame as "capacity alone gets most of the way, faster; MoE routing still wins on rotation
+tracking," not "wide beats MoE."
+
+Caveats: neither run confirmed converged/plateaued; §26's planned `learnable_std` fine-tune for
+MoE stable had not launched as of this check, so the MoE number isn't necessarily final either.
+
+**Persistent-failure overlap (2026-07-11), `persistent_failures_final.txt` vs. wide's own
+43/43-persistent set (476 clips, epoch 200-8600, its whole run so far) vs. MoE-stable's 41/41-set
+(438 clips, epoch 8461-16400):** 364 clips overlap (83.1% of MoE-stable's set, 76.5% of wide's) —
+largely the same hard core (crawl/all-fours, kneel, single-leg-balance) fails under both. Where
+they diverge, MoE-stable comes out slightly ahead: 112 clips only wide still fails (MoE-stable
+already fixed them) vs. only 74 clips only MoE-stable still fails (wide already fixed them).
+
+**[Decision] Let `hhi_wide_20946_neutral` keep training rather than call this comparison now.**
+At epoch 8600 wide is not clearly better than MoE-stable — tied on success_rate/gt_error, behind
+on gr_error and on the persistent-failure overlap above — so drawing a "wide wins" conclusion at
+this point would be premature. Revisit once wide has logged more epochs.
