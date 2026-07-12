@@ -2805,3 +2805,178 @@ already fixed them) vs. only 74 clips only MoE-stable still fails (wide already 
 At epoch 8600 wide is not clearly better than MoE-stable — tied on success_rate/gt_error, behind
 on gr_error and on the persistent-failure overlap above — so drawing a "wide wins" conclusion at
 this point would be premature. Revisit once wide has logged more epochs.
+
+================================================================================
+
+## 28. Cheap fine-tuning ideas for `hhi_wide_20946_neutral` (2026-07-11)
+
+As of epoch 11000, wide has moved past the §27 snapshot: success_rate 97.29% (was 96.21%),
+gt_error/mean 0.0743 (was 0.1005), gr_error/mean 0.157 (was 0.179, closing on MoE-stable's 0.145).
+Still improving epoch-to-epoch but decelerating (~1.9pp/1000ep around epoch 5000-6200, down to
+~0.45pp/1000ep by epoch 8600-11000) — diminishing returns, not yet flat.
+
+Same frozen-exploration setup as MoE had before §26's fine-tune plan, so the same cheap,
+warm-startable, no-architecture-change levers apply directly (pure hyperparameter/schedule
+changes on the existing PPO setup — no new reward terms, no new `MdpComponent`):
+
+1. **`learnable_std=True`** — actor's `actor_logstd` is frozen at -2.9 for the whole run
+   (`learnable_std=False`), identical to MoE's pre-§26 setup. With success-rate gains decelerating,
+   this is the natural next single-variable test: more late-run exploration, paired with
+   `entropy_coef` (currently 0.005) so it doesn't collapse back down.
+2. **Tighten `adaptive_lr.desired_kl`** (currently 0.01) and/or **`actor_clip_frac_threshold`**
+   (currently 0.6, could go to 0.4/0.3) — gentler late-stage policy updates. Matches the observed
+   deceleration curve: smaller steps late is the fix for a flattening-but-still-rising curve.
+3. **Anneal `e_clip`** (PPO clip epsilon, flat 0.2 for the whole run so far) — needs a small code
+   change to `protomotions/agents/ppo/agent.py`/`config.py` to make it schedulable first, but a
+   standard fine-tune-the-fine-tune move.
+
+MoE's 4th §26 item (`moe_load_balance.lambda_lb` sweep) doesn't apply here — wide has no gate/
+load-balance loss.
+
+**Not included here (reward/env changes, out of scope for this note):** HuB CoM-over-stance-foot
+reward, symmetry loss, termination curriculum — see [[hard_motion_solutions_survey]] recs 1-3.
+Deliberately left out — those change the task/reward, not just the optimizer schedule, and would
+confound a capacity-vs-routing comparison the same way §26 avoided confounding MoE's guard-rail
+run.
+
+**Not started** — same as MoE's §26 list, this is a plan, not yet launched.
+
+================================================================================
+
+## 29. `hhi_wide_20946_neutral` status check — plateaued, gr_error gap closed (2026-07-12)
+
+Pulled `eval/success_rate`/`gt_error`/`gr_error` from `lightning_logs/version_0` tfevents, epochs
+11000-12800 (last local checkpoint: `last.ckpt`/`epoch_12000.ckpt`, both dated 2026-07-11 ~21:50;
+no newer local data as of this check on 2026-07-12 morning — worth confirming the pod is still
+running before assuming training has stalled).
+
+| epoch | success_rate | gt_error/mean | gr_error/mean |
+|---|---|---|---|
+| 11000 | 97.29% | 0.0743 | 0.157 |
+| 11800 | 96.68% | 0.0893 | 0.160 |
+| 12200 | 97.43% | 0.0732 | 0.147 |
+| 12600 | 96.42% | 0.0810 | 0.163 |
+| 12800 | 97.20% | 0.0760 | 0.151 |
+
+**Plateaued, not still climbing.** §28 (epoch 11000) framed this as "still improving but
+decelerating." That's no longer the right read — success_rate has been oscillating 96.4-97.4%
+with no net movement for 1800 epochs (11000-12800), well inside run-to-run noise. Same story for
+gt_error/mean (0.072-0.089, no trend) and gr_error/mean (0.145-0.163, no trend). This looks flat,
+not decelerating-but-rising.
+
+**gr_error gap vs. MoE-stable has closed.** §27 (epoch 8600) found wide clearly behind MoE-stable
+on rotation tracking: 0.179 vs. 0.145, a "stable ~20-25% difference." As of epoch 12800, wide's
+gr_error is 0.145-0.163 across its last 5 evals — overlapping MoE-stable's 0.145 (epoch 16400,
+see [[moe_20946_neutral_run]]), sometimes matching it exactly (epoch 12200: 0.147). The one
+real, consistent MoE advantage from §27 is no longer clearly present at wide's current epoch
+count. Combined with wide's known ~2x training-efficiency edge (§27), this now reads closer to
+"wide matches MoE-stable on all three metrics, in fewer epochs" than "MoE wins rotation tracking."
+
+**No instability recurrence.** No epoch-7540-style dip (the MoE run's transient PPO instability
+from [[moe_20946_neutral_run]]) visible anywhere in 11000-12800 — success_rate never drops more
+than ~1pp between consecutive 200-epoch evals.
+
+**Not done yet**: none of the §28 fine-tune ideas (`learnable_std`, tighter `adaptive_lr`/
+`actor_clip_frac_threshold`, `e_clip` anneal) have been launched — this is a pure status check on
+the existing run. Given the plateau, `learnable_std=True` (§28 item 1) is now a stronger
+candidate than before: a flat success-rate curve with frozen `actor_logstd=-2.9` since the start
+is exactly the "exploration is likely limiting further gains" signal it was proposed to address.
+
+**How to apply:** when next asked about this run, re-check `lightning_logs/version_0` tfevents
+and confirm whether training has resumed past epoch 12800 (and whether the pod is still active)
+before reusing these numbers, and check whether the §28 fine-tune has launched before
+re-suggesting it.
+
+================================================================================
+
+## 30. §28's 3 fine-tune knobs, explained in plain English (2026-07-12)
+
+User asked for a plain-English explanation of the §28 fine-tune ideas before deciding whether to
+launch any of them. Recorded here so the reasoning behind picking item 1 first doesn't have to be
+re-derived next time.
+
+**1. `learnable_std` + `entropy_coef` — how much random noise the policy adds to its own actions.**
+The actor outputs a mean action plus a spread (std) around it, and samples from that during
+training — that's how it explores. `actor_logstd=-2.9` has been a fixed constant for this run's
+entire duration, so the exploration budget never changes. `learnable_std=True` lets the network
+adjust that spread on its own; `entropy_coef` (a small bonus for staying spread-out) is paired
+with it because a learnable std left alone tends to collapse toward zero noise once the policy
+feels confident — even if it's actually just stuck. Net effect: "let the policy try more varied
+things again."
+
+**2. `adaptive_lr.desired_kl` + `actor_clip_frac_threshold` — how big a step each update takes.**
+KL divergence measures how much the policy's behavior actually changed after an update;
+`desired_kl=0.01` is the target amount of change per update, and `adaptive_lr` shrinks/grows the
+learning rate to hit that target. `clip_frac` is a related signal: PPO caps how far any single
+action's probability can move in one update, and `clip_frac` is the fraction of the batch that hit
+that cap — high clip_frac means updates are frequently maxing out the safety limit. Tightening
+both numbers means smaller, more conservative updates late in training. Net effect: "take gentler
+steps."
+
+**3. `e_clip` — the actual size of PPO's safety cap.** This is the number `clip_frac` (above) is
+measured against. PPO clips the new/old action-probability ratio to `[1-e_clip, 1+e_clip]` —
+currently 0.2 (±20%), flat for the whole run. Annealing it means shrinking that window later in
+training (e.g. to ±10% or ±5%) — same spirit as item 2, but a direct hard cap rather than a
+reactive KL-based adjustment. Listed as the most work of the three because `e_clip` is currently a
+fixed constant in `protomotions/agents/ppo/agent.py`/`config.py`, not schedule-able yet.
+
+**One-line summary:** item 1 pulls toward "more exploration," items 2 and 3 pull toward "more
+caution" (two different levers for the same idea — one reactive, one a hard cap). This is also why
+item 1 is the natural first thing to try alone on `hhi_wide_20946_neutral`: a flat/plateaued curve
+with no clip_frac spikes and no instability dips (§29) reads as an exploration problem, not a
+stability problem — so the "more caution" knobs (2, 3) don't have an obvious signal pointing at
+them yet.
+
+**How to apply:** reuse this explanation instead of re-deriving it if the user (or a future
+session) asks what these three knobs mean again; update if the actual config field names or
+defaults in `protomotions/agents/ppo/config.py` change.
+
+================================================================================
+
+## 31. Implemented §30 item 1 as `mlp_wide_explore.py` — single-variable, not bundled (2026-07-12)
+
+User asked whether to implement all 3 of §28's fine-tune ideas together. Decided no, same
+single-variable reasoning as §30's summary, plus a concrete precedent already in the repo:
+`mlp_moe_stable.py`'s own docstring explicitly considered bundling `learnable_std` into that run
+and rejected it for confounding reasons — bundling all 3 here has the same problem, worse, since
+item 1 (more exploration) pulls the opposite direction from items 2/3 (more caution).
+
+**Created `examples/experiments/mimic/mlp_wide_explore.py`** — identical to `mlp_wide.py` except
+`learnable_std=True` on the actor config. `entropy_coef` left at `PPOAgentConfig`'s default
+(0.005), no override needed — it already existed but was inert with `learnable_std=False`. Items
+2 and 3 deliberately NOT included. Follows the same warm-start pattern as `mlp_moe_stable.py`:
+new experiment file + new `--experiment-name` so `train_agent.py` executes it fresh (picks up
+`learnable_std=True`) while only using `--checkpoint results/hhi_wide_20946_neutral/last.ckpt`
+for weight initialization. Architecture otherwise unchanged (same widened trunk, same critic), so
+the checkpoint loads with no shape mismatches.
+
+Launch command (6x A40, same envs/batch as the parent run) is in the file's docstring:
+```
+python protomotions/train_agent.py \
+    --robot-name smpl_mor_neutral --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_wide_explore.py \
+    --experiment-name hhi_wide_20946_neutral_explore \
+    --checkpoint results/hhi_wide_20946_neutral/last.ckpt \
+    --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
+    --num-envs 6144 --batch-size 24576 --ngpu 6 \
+    --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+    --wandb-group hhi_wide_20946_neutral_explore
+```
+
+**Not yet launched** — file created and syntax-checked (`py_compile`) locally only;
+`pre-commit`/`ruff` weren't available in this environment to lint it, so re-run
+`pre-commit run --files examples/experiments/mimic/mlp_wide_explore.py` before committing.
+Actual training launch needs the RunPod pod and is a user action, not something done from this
+session.
+
+**Budget/stop rule (carried over from §29):** re-check after ~2000-3000 epochs; if
+`eval/success_rate`/`eval/gr_error` haven't clearly moved, stop and take whichever checkpoint is
+better (this one or `hhi_wide_20946_neutral`'s own `last.ckpt`) to Stage 2 rather than continuing
+to chase marginal gains. Items 2/3 remain available as follow-ups but are not queued next by
+default — only pick them up if there's a specific instability signal (clip_frac spikes, dips)
+that this exploration-only change doesn't explain, per §30's reasoning.
+
+**How to apply:** before re-suggesting a fine-tune for this run, check whether
+`hhi_wide_20946_neutral_explore` has been launched/finished (`results/hhi_wide_20946_neutral_explore/`
+existing + its tfevents) and re-pull current numbers rather than reusing this entry's plan as if
+it were a completed result.
