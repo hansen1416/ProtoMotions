@@ -229,6 +229,21 @@ nohup python -u protomotions/train_agent.py \
     --wandb-entity yugoamaryl \
     --wandb-group hhi_wide_20946_neutral > /tmp/hhi_wide_20946_neutral.log 2>&1 &
 
+
+nohup python -u protomotions/train_agent.py \
+      --robot-name smpl_mor_neutral \
+      --simulator isaacgym \
+      --experiment-path examples/experiments/mimic/mlp_wide_explore.py \
+      --experiment-name hhi_wide_20946_neutral_explore \
+      --checkpoint results/hhi_wide_20946_neutral/last.ckpt \
+      --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
+      --num-envs 6144 \
+      --batch-size 24576 \
+      --ngpu 6 \
+      --use-wandb \
+      --wandb-project hhi-protomotions \
+      --wandb-entity yugoamaryl \
+      --wandb-group hhi_wide_20946_neutral_explore > /tmp/hhi_wide_20946_neutral_explore.log 2>&1 &
 ----
 
 
