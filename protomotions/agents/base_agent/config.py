@@ -138,3 +138,14 @@ class BaseAgentConfig:
     normalized_reward_clamp_value: float = field(
         default=5.0, metadata={"help": "Clamp normalized rewards to [-val, val]."}
     )
+
+    # Checkpoint loading
+    allow_partial_checkpoint_load: bool = field(
+        default=False,
+        metadata={
+            "help": "Load checkpoints with strict=False, tolerating missing/unexpected model "
+            "keys. Needed when warm-starting into an architecture with new params not present "
+            "in the source checkpoint (e.g. a frozen-backbone + adapter model). Defaults to "
+            "False (strict) so architecture drift is still caught everywhere else."
+        },
+    )

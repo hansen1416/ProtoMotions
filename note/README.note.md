@@ -2980,3 +2980,166 @@ that this exploration-only change doesn't explain, per §30's reasoning.
 `hhi_wide_20946_neutral_explore` has been launched/finished (`results/hhi_wide_20946_neutral_explore/`
 existing + its tfevents) and re-pull current numbers rather than reusing this entry's plan as if
 it were a completed result.
+
+================================================================================
+
+## 32. Stage 2 Architecture Plan — Frozen Backbone + Zero-Init LoRA-Style Residual Adapter (2026-07-13)
+
+**Context:** the original Stage 2 plan (§"Q1/Q2 Answer" above) was a full fine-tune of the
+identical `mlp.py`/`mlp_wide.py` architecture, loaded via strict `load_state_dict()` — no
+architectural change from Stage 1, just a lower LR and a normalizer reset. This section proposes
+an alternative: freeze the Stage 1 trunk entirely and add a small trainable adapter conditioned
+on `morphology_obs`, so Stage 2 can't catastrophically forget the motion prior learned on all
+20,946 clips, and the actual optimization problem at Stage 2 is tiny (adapter params only)
+instead of re-touching all ~45M trunk weights across 2.68M motion-instances (20,946 clips x 128
+shapes). Not yet implemented — this section is the design, not a result.
+
+**Base checkpoint:** `hhi_wide_20946_neutral` (not the MoE line) — as of this writing
+`note/README.rclone.md`/`README.runpod.md` have uncommitted edits pulling that run's checkpoint
+zip from R2 and relaunching `mlp_wide_explore.py` from its `score_based.ckpt`. Recommend basing
+Stage 2 on the current best non-regressed wide-MLP checkpoint rather than blocking on the
+`_explore` learnable_std fine-tune's outcome (that fine-tune already failed once as a straight
+regression per `moe_20946_neutral_run.md`/[[architecture_research]] memory, before being retried) —
+these are two independent workstreams and Stage 2 planning shouldn't wait on it.
+
+### Why not just full fine-tune (the original Q1/Q2 plan)
+
+One concrete finding motivates freezing over full fine-tune: `morphology_obs` (11-dim,
+`[gender_id, betas/3.0]`) is already concatenated into the trunk's input in `mlp_wide.py`
+(`morphology_obs_factory()`), but during Stage 1 it was always exactly zero — so gradient w.r.t.
+those input columns was exactly zero for the entire run (`dL/dW = dL/dh · x`, `x≡0` identically).
+The frozen trunk's only existing morphology pathway is untrained noise from `weight_init`, not a
+degenerate-but-real signal. Full fine-tuning has to fix this by letting the whole 6x2896 trunk
+drift; a residual adapter re-injects real shape signal without touching it, at the cost of a
+smaller-capacity intervention (see escalation ladder below if that proves insufficient).
+
+### Design
+
+New module `LoRAResidualMLPWithConcat` **subclasses `MLPWithConcat` directly** (`protomotions/agents/common/mlp.py:67`) —
+does not wrap it — so parameter names (`norm.*`, `mlp.*`) stay identical to `mlp_wide.py`'s. This
+is what lets the Stage 1 checkpoint load with zero key-remapping.
+
+```
+mu_model forward:
+  base_out   = super().forward(obs)        # frozen 6x2896 trunk, unchanged from Stage 1
+  bottleneck = adapter_down(all_obs)        # shared LazyLinear, in -> r, TRAINABLE
+  W_up_e     = hypernet(morphology_obs)     # per-env (r -> action_dim) matrix, TRAINABLE
+  delta      = einsum(bottleneck, W_up_e)   # per-env residual
+  output     = base_out + delta
+```
+
+- **Freeze-on-first-forward, not in `__init__`.** `base_agent/agent.py:189-196` runs a dummy
+  forward pass (`agent.setup()`) to materialize `LazyLinear` layers *before* `agent.load(checkpoint)`
+  runs (`train_agent.py:834-836`). So the module sets `requires_grad=False` on `norm`/`mlp`
+  params the first time its own `forward()` executes, after materialization — self-contained,
+  no changes needed to the training loop's setup/load ordering. Confirmed safe either way:
+  `load_state_dict` copies into `param.data` regardless of `requires_grad`, so freeze-before-load
+  vs. freeze-after-load doesn't matter for correctness.
+- **Zero-init the hypernetwork's last layer** so `delta ≡ 0` at Stage 2 step 1 — Stage 2 starts
+  as an *exact* continuation of the Stage 1 policy, not a fresh regression. Important under PPO,
+  where a bad initial policy burns rollout compute before recovering. Same convention FARM uses
+  for its zero-initialized adapters (`architecture_research.md` point 4).
+- `adapter_down`'s input dim is only known after concat, hence `LazyLinear` — the same
+  "unknown input dim" wrinkle the reverted HyperDistill build hit (`architecture_research.md`
+  point 3), solved the same way (shared projection, not per-env). `hypernet`'s output dim
+  (`robot_config.number_of_actions`) is known at config-build time, so no ambiguity there —
+  simpler than HyperDistill's per-layer version, which needed the same workaround at every layer.
+- **Critic: unchanged, unfrozen, plain `MLPWithConcatConfig`**, fully fine-tuned, no adapter —
+  no prior to protect, matches the existing "critic stays flat-concat" precedent from §18.
+- Recommended rank `r=16` — one global bottleneck now carries what HyperDistill spread across
+  per-layer adapters (r=8-16 there), so erring toward the higher end.
+
+### One required code change
+
+`self.model.load_state_dict(state_dict["model"])` at `base_agent/agent.py:262` is unconditionally
+strict — the new adapter/hypernet keys don't exist in the Stage 1 checkpoint, so this raises as-is
+(this is the same strict-loading constraint noted in the Q1 Answer section above, "Checkpoint
+loading is strict... no `strict=False`"). Add an opt-in field to the base agent config,
+`allow_partial_checkpoint_load: bool = False`, defaulting to the current strict behavior
+everywhere (including the existing warm-start pattern used for `hhi_moe_20946_neutral_stable`,
+which relies on strict matching to catch architecture drift as a safety net):
+```python
+self.model.load_state_dict(
+    state_dict["model"], strict=not self.config.allow_partial_checkpoint_load
+)
+```
+Only the new Stage 2 experiment file sets it `True`.
+
+### New files
+
+- `protomotions/agents/common/lora_residual_mlp.py` — `LoRAResidualMLPWithConcatConfig` +
+  `LoRAResidualMLPWithConcat` (matches the existing convention of config-alongside-module used by
+  `film_mlp.py`/`shape_embed_mlp.py`/`moe_mlp.py`, not centralized in `agents/common/config.py`).
+- `examples/experiments/mimic/mlp_wide_lora_stage2.py` — copy of `mlp_wide.py`, swap `mu_model`
+  for `LoRAResidualMLPWithConcatConfig(...)` wrapping the same `layers=[2896]x6` spec,
+  `allow_partial_checkpoint_load=True`, actor LR cut ~5-10x (2e-5 -> ~2-4e-6) per the existing
+  "Stage 2 LR should be 5-10x lower than Stage 1" decision in the Q2 design question above, critic
+  LR unchanged (1e-4). Still runs `tools/reset_morphology_normalizer.py` on the checkpoint first,
+  unchanged — that fix is orthogonal (obs-normalizer saturation, not backbone forgetting) and
+  still needed regardless of this architecture change.
+
+### Verification plan before RunPod (mirrors the CPU-verification convention already used for
+`moe_mlp.py` and the reverted HyperDistill build)
+
+1. CPU dummy-forward on a fake TensorDict: confirm frozen (`norm`/`mlp`) params get zero grad,
+   adapter (`adapter_down`/`hypernet`) params get nonzero grad, `delta` is exactly 0 at init, and
+   different `morphology_obs` per env produce different `delta` values (mechanism is live).
+2. Load an actual `hhi_wide_20946_neutral` checkpoint with `strict=False`; assert `missing_keys`
+   is exactly `{adapter_down.*, hypernet.*}` and `unexpected_keys` is empty. Then run one forward
+   pass and confirm the output is bit-identical to running that same checkpoint through
+   unmodified `mlp_wide.py` (valid since `delta=0` at init) — this is the single check that
+   catches a silently-wrong load (key typo, double-normalization, etc.).
+3. Small-scale smoke test on the existing 2-shape `hhi_stage1_merged6` data
+   ([[stage1_v2_data]]) before committing to the full 128-shape Stage 2 run.
+
+### Escalation ladder if the single global residual underperforms
+
+Increase `r` -> add a second adapter mid-trunk (requires splitting `self.mlp` into two frozen
+halves, more invasive than the current design) -> fall back to full fine-tune (the original
+Q1/Q2 plan, `mlp.py` unmodified) as the comparison baseline -> revisit true per-layer LoRA (the
+original reverted HyperDistill design, full mechanism preserved in `architecture_research.md`
+point 3, if this simpler global-residual version proves insufficient).
+
+**How to apply:** this is a design doc, not yet built. Before implementing, re-check which Stage 1
+checkpoint (`hhi_wide_20946_neutral` vs. its `_explore` fine-tune vs. the MoE line) is the current
+best candidate — the wide-vs-MoE question was still open as of §29/§31 above.
+
+**Decided (2026-07-13): base on `hhi_wide_20946_neutral` directly, not the `_explore` fine-tune.**
+User confirmed this explicitly. Consistent with the R2/RunPod checkpoint pull already in flight
+per the "Base checkpoint" note above.
+
+### [Implementation] `lora_residual_mlp.py` built and CPU-verified (2026-07-13)
+
+Built as designed above:
+- `protomotions/agents/common/lora_residual_mlp.py` — `LoRAResidualMLPWithConcatConfig` +
+  `LoRAResidualMLPWithConcat(MLPWithConcat)`. Freeze-on-first-forward and hypernet last-layer
+  zero-init both implemented as planned, self-contained in the module (no changes needed to
+  `BaseAgent.setup()`'s dummy-forward/materialization flow).
+- `protomotions/agents/base_agent/config.py` — added `allow_partial_checkpoint_load: bool = False`
+  to `BaseAgentConfig`.
+- `protomotions/agents/base_agent/agent.py:262` — `load_parameters` now does
+  `self.model.load_state_dict(state_dict["model"], strict=not self.config.allow_partial_checkpoint_load)`,
+  logging missing/unexpected keys when non-strict. Default preserves strict loading everywhere
+  else (including the existing `hhi_moe_20946_neutral_stable` warm-start pattern).
+
+**CPU verification (ad hoc script, not committed) confirmed all 4 planned checks:** only
+`adapter_down`/`hypernet` params have `requires_grad=True` after the first forward; the model's
+output is bit-identical to an unmodified `MLPWithConcat` loaded with the same weights (delta
+exactly 0 at init, `max_diff=0.0`); no gradient ever reaches the frozen base; different
+`morphology_obs` per env produces different outputs after a couple of optimizer steps.
+
+**One real finding, not a bug:** zero-initializing the hypernetwork's *last* layer blocks
+backprop to every upstream param on the very first step — `adapter_down` and the hypernet's own
+earlier layers (`hypernet.0.*`) get exactly zero gradient on step 1, only `hypernet`'s last
+layer (`hypernet.2.*`) does (matches standard LoRA "B=0" behavior: `dL/dA = B^T . dL/d(delta)`,
+zero when `B=0`; `dL/dB = dL/d(delta) . A^T`, nonzero since `A` isn't zero-init). Gradients reach
+`adapter_down` and earlier hypernet layers starting step 2, once the last layer has moved off
+zero. Worth remembering if early Stage 2 training looks inert for the first several steps before
+an eval — that's expected, not stalled.
+
+**Not yet built:** `examples/experiments/mimic/mlp_wide_lora_stage2.py` (the actual experiment
+file wiring `LoRAResidualMLPWithConcatConfig` into an actor config, warm-started from
+`hhi_wide_20946_neutral`). `pre-commit`/`ruff` weren't available in this environment to lint the
+changed files — run `pre-commit run --files protomotions/agents/common/lora_residual_mlp.py
+protomotions/agents/base_agent/agent.py protomotions/agents/base_agent/config.py` before
+committing.

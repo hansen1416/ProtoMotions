@@ -259,7 +259,14 @@ class BaseAgent:
         if self.config.normalize_rewards:
             self.running_reward_norm.load_state_dict(state_dict["running_reward_norm"])
 
-        self.model.load_state_dict(state_dict["model"])
+        strict = not self.config.allow_partial_checkpoint_load
+        load_result = self.model.load_state_dict(state_dict["model"], strict=strict)
+        if not strict and (load_result.missing_keys or load_result.unexpected_keys):
+            print(
+                "Partial checkpoint load (allow_partial_checkpoint_load=True):\n"
+                f"  missing_keys: {load_result.missing_keys}\n"
+                f"  unexpected_keys: {load_result.unexpected_keys}"
+            )
 
     # -----------------------------
     # Model Saving and State Dict
