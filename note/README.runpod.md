@@ -244,6 +244,23 @@ nohup python -u protomotions/train_agent.py \
   --wandb-project hhi-protomotions \
   --wandb-entity yugoamaryl \
   --wandb-group hhi_wide_20946_neutral_explore > /tmp/hhi_wide_20946_neutral_explore.log 2>&1 &
+
+---
+
+## Stage2
+
+python tools/reset_morphology_normalizer.py \
+      --checkpoint results/hhi_wide_20946_neutral/last.ckpt \
+      --output results/hhi_wide_20946_neutral/last_morph_reset.ckpt
+
+python protomotions/train_agent.py \
+      --robot-name smpl_mor_neutral --simulator isaacgym \
+      --experiment-path examples/experiments/mimic/mlp_wide_lora_stage2.py \
+      --experiment-name hhi_wide_lora_stage2_smoke \
+      --checkpoint results/hhi_wide_20946_neutral/last_morph_reset.ckpt \
+      --motion-file /workspace/20946_neutral_offset/humanml3d_neutral_20946_slurmrank.pt \
+      --num-envs 4096 --batch-size 16384
+
 ----
 
 

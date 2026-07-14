@@ -186,7 +186,19 @@ class PPO(BaseAgent):
                 )
                 self.actor.logstd.data = current_logstd
 
-        self.actor_optimizer.load_state_dict(state_dict["actor_optimizer"])
+        if self.config.allow_partial_checkpoint_load:
+            # Actor now has extra params (e.g. a LoRA-style adapter) not present in the
+            # checkpoint's optimizer state -- param-group sizes won't match, so start the
+            # actor optimizer fresh rather than trying to splice partial Adam state.
+            try:
+                self.actor_optimizer.load_state_dict(state_dict["actor_optimizer"])
+            except ValueError as e:
+                print(
+                    "Skipping actor_optimizer state load (allow_partial_checkpoint_load=True): "
+                    f"{e}"
+                )
+        else:
+            self.actor_optimizer.load_state_dict(state_dict["actor_optimizer"])
         self.critic_optimizer.load_state_dict(state_dict["critic_optimizer"])
 
         # Restore adaptive LR state
