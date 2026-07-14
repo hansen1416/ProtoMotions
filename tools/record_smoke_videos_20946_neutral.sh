@@ -11,7 +11,7 @@
 #   CHECKPOINT=... MOTION_DIR=... OUT_DIR=... bash tools/record_smoke_videos_20946_neutral.sh
 set -euo pipefail
 
-CHECKPOINT="${CHECKPOINT:-results/hhi_wide_20946_neutral/last.ckpt}"
+CHECKPOINT="${CHECKPOINT:-results/hhi_wide_20946_neutral/score_based.ckpt}"
 MOTION_DIR="${MOTION_DIR:-/workspace/20946_neutral_offset}"
 OUT_DIR="${OUT_DIR:-output/videos/hhi_wide_20946_neutral_smoke}"
 mkdir -p "$OUT_DIR"
