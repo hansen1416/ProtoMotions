@@ -3143,3 +3143,75 @@ file wiring `LoRAResidualMLPWithConcatConfig` into an actor config, warm-started
 changed files — run `pre-commit run --files protomotions/agents/common/lora_residual_mlp.py
 protomotions/agents/base_agent/agent.py protomotions/agents/base_agent/config.py` before
 committing.
+
+================================================================================
+
+## 33. Stage 2 Streaming Data Loader — implemented (2026-07-14)
+
+Built the design from `note/README.stage2-streaming-loader-plan.md` (328 R2 shards, ~1.1 TB,
+too big for RAM/VRAM at once). `mlp_wide_lora_stage2.py` (built since §32, superseding that
+section's "not yet built" note) now has a working data path to the full `hhi_stage2` set, not
+just the small `hhi_stage1_merged6` smoke-test data.
+
+**New files**, matching the plan exactly:
+- `protomotions/components/motion_lib_pool.py` — `StreamingMotionLibConfig(MotionLibConfig)` +
+  `MotionLibPool(MotionLib)` + `FileDownloader` (background-thread `rclone copy` wrapper).
+  Rotation is a pure function of `current_epoch`
+  (`target_shard_idx = (current_epoch // epochs_per_shard) % len(rank_files)`), per-rank
+  disjoint shard slices via deterministic shuffle + `files[rank::world_size]`, in-place
+  `load_from_file` swap (same object, so `env.motion_lib`/`motion_manager.motion_lib`/
+  `agent.motion_lib` never need re-pointing).
+- `protomotions/agents/callbacks/motion_shard_rotation.py` — `MotionShardRotationCallback`:
+  `before_play_steps` calls `maybe_rotate` and sets `agent._force_full_env_reset` on an actual
+  swap; `on_load_checkpoint_end` calls `sync_to_epoch` (unconditional) for resume.
+
+**Modified**, matching the plan except one addition (see gap below):
+- `protomotions/agents/base_agent/agent.py` — added `self._force_full_env_reset = False` next
+  to `_skip_next_policy_update`; in `fit()`, right after `fabric.call("before_play_steps", self)`
+  and before the rollout loop, force `done_indices = arange(num_envs)` when the flag is set.
+- `protomotions/train_agent.py` — appends the `MotionShardRotationCallback` target dict to
+  `callbacks` when `isinstance(motion_lib_config, StreamingMotionLibConfig)`, next to the
+  existing `args.use_slurm` wiring. `motion_lib_config` is in scope there in all three modes
+  (resume/warm_start/fresh), confirmed by reading each branch.
+- `examples/experiments/mimic/mlp_wide_lora_stage2.py` — added `additional_experiment_arguments`
+  (`--r2-motion-source`, `--motion-cache-dir`, `--epochs-per-shard`, `--shard-shuffle-seed`);
+  `motion_lib_config()` returns a `StreamingMotionLibConfig` when `--r2-motion-source` is set,
+  else falls back to the existing plain `MotionLibConfig(motion_file=...)` path — so the 2a
+  smoke-test command is untouched.
+
+**Gap found in the plan and fixed:** `protomotions/utils/component_builder.py`'s
+`build_motion_lib_from_config` hardcoded `MotionLib(config=motion_lib_config, device=device)` —
+it ignored `motion_lib_config._target_` entirely, so a `StreamingMotionLibConfig` would have
+silently built a plain `MotionLib` instead of a `MotionLibPool`. Fixed to resolve the class via
+`get_class(motion_lib_config._target_)`, the same convention `agents/ppo/model.py:59-60` already
+uses to resolve `mu_model`/critic classes (explicit `config=` kwarg, not the generic
+`instantiate()` helper — `instantiate()` flattens config fields into kwargs, which fits
+`nn.Module`-style configs but not `MotionLib.__init__(self, config, device)`'s signature).
+Verified the ordinary (non-streaming) `MotionLibConfig` path is unaffected: `build_motion_lib_from_config(MotionLibConfig(motion_file=None), device="cpu")` still returns
+a plain empty `MotionLib`.
+
+**One robustness addition beyond the plan:** the plan's "kept exactly 2 local files per rank"
+claim doesn't quite hold across a discontinuous jump (e.g. `sync_to_epoch` after resume landing
+on a shard other than whatever was mid-prefetch) — the superseded prefetch download would be
+orphaned on disk with nothing to ever delete it. Added a sweep at the end of
+`_ensure_shard_loaded` that deletes any `.pt` file in the rank's cache dir other than the
+current shard and the newly-started prefetch target, so the ≤2-files-per-rank bound holds even
+across resume, not just during normal one-step-at-a-time rotation.
+
+**CPU verification (ad hoc script, not committed,
+`/tmp/.../scratchpad/verify_motion_lib_pool.py`), per the plan's "CPU, no cloud" check:** 3 tiny
+dummy shards in a local directory as `r2_source` (rclone works against local paths with no
+credentials). Confirmed: construction loads shard 0 synchronously; `maybe_rotate` is a no-op
+within `epochs_per_shard`; rotating at the epoch boundary swaps `gts`/etc. to the new shard's
+content, deletes the old local file, and starts prefetching the next one; rotation wraps around
+correctly at the end of `rank_files`; `sync_to_epoch` after a simulated resume at an arbitrary
+epoch lands on the correct (recomputed) shard directly; local cache dir never exceeds 2 files
+across the whole sequence including the resume jump.
+
+**Not yet done:** real R2 integration test against `r2:proto-data/hhi_stage2/` on RunPod (the
+plan's step 2) — needs an actual pod with the R2 rclone remote configured. `pre-commit`/`ruff`
+weren't available in this environment either; run `pre-commit run --files
+protomotions/components/motion_lib_pool.py protomotions/agents/callbacks/motion_shard_rotation.py
+protomotions/agents/base_agent/agent.py protomotions/utils/component_builder.py
+protomotions/train_agent.py examples/experiments/mimic/mlp_wide_lora_stage2.py` before
+committing.

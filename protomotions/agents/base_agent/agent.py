@@ -151,6 +151,11 @@ class BaseAgent:
         # Hacky flag to skip policy update right after eval to avoid training spikes
         self._skip_next_policy_update = False
 
+        # Set by MotionShardRotationCallback when the streaming MotionLibPool swaps shards --
+        # forces a full env reset so no env keeps tracking a now-stale motion index across
+        # the in-place shard swap (see note/README.stage2-streaming-loader-plan.md)
+        self._force_full_env_reset = False
+
         # Set root_dir: use logger's root_dir if available, otherwise use passed parameter
         if self.fabric.loggers:
             self.root_dir = Path(self.fabric.loggers[0].root_dir)
@@ -462,6 +467,12 @@ class BaseAgent:
             self.eval()
             with torch.no_grad():
                 self.fabric.call("before_play_steps", self)
+
+                if self._force_full_env_reset:
+                    done_indices = torch.arange(
+                        self.num_envs, device=self.device, dtype=torch.long
+                    )
+                    self._force_full_env_reset = False
 
                 for step in track(
                     range(self.num_steps),
@@ -793,6 +804,21 @@ class BaseAgent:
         if len(env_log_dict) > 0:
             log_dict.update(env_log_dict)
         log_dict.update(training_log_dict)
+
+        # Streaming motion loaders (e.g. MotionLibPool) track distinct motions loaded so
+        # far per-rank; ranks own disjoint shard slices, so the true total is a sum across
+        # ranks, not the mean `aggregate_scalar_metrics` below would otherwise apply. Reduce
+        # it here to an already-identical-across-ranks value so that downstream mean is a
+        # no-op and the logged number is the correct cluster-wide total.
+        if hasattr(self.motion_lib, "distinct_motions_seen"):
+            local_count = torch.tensor(
+                self.motion_lib.distinct_motions_seen,
+                device=self.fabric.device,
+                dtype=torch.float32,
+            )
+            if self.fabric.world_size > 1:
+                local_count = self.fabric.all_gather(local_count).sum()
+            log_dict["data/distinct_motions_seen"] = local_count.item()
 
         # Aggregate metrics across all devices before logging
         # This ensures wandb reports representative metrics from all ranks, not just rank 0

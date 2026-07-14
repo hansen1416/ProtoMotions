@@ -48,14 +48,18 @@ base_agent/config.py's allow_partial_checkpoint_load).
         --motion-file <path-to-hhi_stage1_merged6-slurmrank-file> \\
         --num-envs 4096 --batch-size 16384
 
-    # 2b. Full Stage 2 run, once the smoke test looks right and the full 128-shape
-    #     hhi_stage2 data is ready:
+    # 2b. Full Stage 2 run, streaming the 328 shards shard-by-shard from R2 (~1.1 TB total,
+    #     too big to fit in RAM/VRAM at once -- see note/README.stage2-streaming-loader-plan.md).
+    #     Each rank rotates through its own slice of the remote file list; --motion-file is
+    #     not used in this mode.
     python protomotions/train_agent.py \\
         --robot-name smpl_mor --simulator isaacgym \\
         --experiment-path examples/experiments/mimic/mlp_wide_lora_stage2.py \\
         --experiment-name hhi_wide_lora_stage2 \\
         --checkpoint results/hhi_wide_20946_neutral/last_morph_reset.ckpt \\
-        --motion-file <path-to-hhi_stage2-slurmrank-file> \\
+        --r2-motion-source r2:proto-data/hhi_stage2/ \\
+        --motion-cache-dir /workspace/motion_cache \\
+        --epochs-per-shard 64 \\
         --num-envs 6144 --batch-size 24576 --ngpu 6
 
 Verification checklist before trusting either run's numbers (note/README.note.md #32):
@@ -81,6 +85,44 @@ ADAPTER_RANK = 16  # note/README.note.md #32 -- single global residual, upper en
 HYPER_HIDDEN_UNITS = 64
 
 
+def additional_experiment_arguments(parser: argparse.ArgumentParser):
+    """Add Stage 2 streaming-data CLI arguments (note/README.stage2-streaming-loader-plan.md).
+
+    When --r2-motion-source is set, motion_lib_config() below returns a
+    StreamingMotionLibConfig that streams shards from R2 instead of loading --motion-file.
+    This keeps the smoke-test command (2a, small hhi_stage1_merged6 data, --motion-file) working
+    unchanged -- streaming only turns on for the full Stage 2 run (2b).
+    """
+    parser.add_argument(
+        "--r2-motion-source",
+        type=str,
+        default=None,
+        help=(
+            "rclone remote directory of per-shard Stage 2 motion files "
+            "(e.g. r2:proto-data/hhi_stage2/). When set, streams shards shard-by-shard "
+            "instead of using --motion-file."
+        ),
+    )
+    parser.add_argument(
+        "--motion-cache-dir",
+        type=str,
+        default="/workspace/motion_cache",
+        help="Local directory to cache downloaded Stage 2 shards (2 files per rank kept).",
+    )
+    parser.add_argument(
+        "--epochs-per-shard",
+        type=int,
+        default=64,
+        help="Number of training epochs to run on each streamed shard before rotating.",
+    )
+    parser.add_argument(
+        "--shard-shuffle-seed",
+        type=int,
+        default=42,
+        help="Seed for the deterministic shard shuffle/rank-partition.",
+    )
+
+
 def terrain_config(args: argparse.Namespace):
     return TerrainConfig()
 
@@ -91,6 +133,15 @@ def scene_lib_config(args: argparse.Namespace):
 
 
 def motion_lib_config(args: argparse.Namespace):
+    if getattr(args, "r2_motion_source", None):
+        from protomotions.components.motion_lib_pool import StreamingMotionLibConfig
+
+        return StreamingMotionLibConfig(
+            r2_source=args.r2_motion_source,
+            local_cache_dir=args.motion_cache_dir,
+            epochs_per_shard=args.epochs_per_shard,
+            shard_shuffle_seed=args.shard_shuffle_seed,
+        )
     return MotionLibConfig(motion_file=args.motion_file)
 
 

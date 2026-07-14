@@ -92,11 +92,15 @@ def build_motion_lib_from_config(motion_lib_config, device: torch.device):
         device: PyTorch device
 
     Returns:
-        MotionLib instance (empty if motion_file is None)
+        MotionLib instance (empty if motion_file is None). Respects
+        `motion_lib_config._target_` (same convention as the actor/critic model config ->
+        class resolution in `agents/ppo/model.py`), so a `StreamingMotionLibConfig` builds a
+        `MotionLibPool` instead of a plain `MotionLib`.
     """
-    from protomotions.components.motion_lib import MotionLib
+    from protomotions.utils.hydra_replacement import get_class
 
-    return MotionLib(config=motion_lib_config, device=device)
+    MotionLibClass = get_class(motion_lib_config._target_)
+    return MotionLibClass(config=motion_lib_config, device=device)
 
 
 def build_simulator_from_config(

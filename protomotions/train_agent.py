@@ -706,6 +706,15 @@ def main():
             }
         )
 
+    from protomotions.components.motion_lib_pool import StreamingMotionLibConfig
+
+    if isinstance(motion_lib_config, StreamingMotionLibConfig):
+        callbacks.append(
+            {
+                "_target_": "agents.callbacks.motion_shard_rotation.MotionShardRotationCallback",
+            }
+        )
+
     from protomotions.utils.fabric_config import FabricConfig
     from lightning.fabric import Fabric
 
