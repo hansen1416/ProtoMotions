@@ -228,6 +228,11 @@ class BaseAgent:
 
             self.just_loaded_checkpoint_should_evaluate = True
 
+            # Fires after current_epoch is restored (set inside load_parameters) but before
+            # the env checkpoint below is loaded, so callbacks that need motion_lib pointed
+            # at the epoch-correct shard first (e.g. MotionShardRotationCallback) can do so.
+            self.fabric.call("on_load_checkpoint_before_env_load")
+
             if load_env:
                 # Load env state from the same directory as the checkpoint.
                 task_id = self.env.get_task_id()

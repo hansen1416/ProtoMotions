@@ -27,6 +27,7 @@ import logging
 import random
 import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -71,7 +72,15 @@ class StreamingMotionLibConfig(MotionLibConfig):
 
 
 class FileDownloader:
-    """Background-thread wrapper around `rclone copy <remote_file> <local_dir>`."""
+    """Background-thread wrapper around `rclone copy <remote_file> <local_dir>`.
+
+    Retries the whole `rclone copy` invocation a few times on top of rclone's own internal
+    `--retries` -- covers the rclone process itself dying (network reset, transient auth
+    failure) rather than a single transfer within it failing.
+    """
+
+    MAX_ATTEMPTS = 3
+    RETRY_BACKOFF_SECONDS = 30.0
 
     def __init__(self, remote_path: str, local_dir: Path):
         self.remote_path = remote_path
@@ -86,22 +95,31 @@ class FileDownloader:
         return self
 
     def _run(self) -> None:
-        try:
-            subprocess.run(
-                [
-                    "rclone",
-                    "copy",
-                    self.remote_path,
-                    str(self.local_dir),
-                    "--retries=10",
-                    "--retries-sleep=30s",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except BaseException as e:  # surfaced to the caller via wait()
-            self._error = e
+        for attempt in range(1, self.MAX_ATTEMPTS + 1):
+            try:
+                subprocess.run(
+                    [
+                        "rclone",
+                        "copy",
+                        self.remote_path,
+                        str(self.local_dir),
+                        "--retries=10",
+                        "--retries-sleep=30s",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self._error = None
+                return
+            except BaseException as e:  # surfaced to the caller via wait()
+                self._error = e
+                log.warning(
+                    f"[MotionLibPool] download attempt {attempt}/{self.MAX_ATTEMPTS} failed "
+                    f"for {self.remote_path}: {e}"
+                )
+                if attempt < self.MAX_ATTEMPTS:
+                    time.sleep(self.RETRY_BACKOFF_SECONDS)
 
     def is_ready(self) -> bool:
         return self._thread is not None and not self._thread.is_alive()
@@ -238,6 +256,10 @@ class MotionLibPool(MotionLib):
         self._current_shard_idx = idx
         self._prefetcher = None
         self._visited_shard_motion_counts[idx] = self.num_motions()
+        # load_from_file() only overwrites the fields present in the saved packaged file
+        # (motion_lib.py:754) -- it never touches this cache, so a stale shard-0 asset_id ->
+        # motion_ids mapping would otherwise silently outlive every later rotation.
+        self._asset_id_to_motion_ids_cache = None
 
         self._start_prefetch(self._next_shard_idx(idx))
 

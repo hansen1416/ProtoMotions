@@ -147,6 +147,26 @@ class LoRAResidualMLPWithConcat(MLPWithConcat):
 
         self._adapter_finalized = True
 
+    def train(self, mode: bool = True):
+        """Keep the frozen trunk's obs-normalizer pinned to eval regardless of the outer
+        actor's train()/eval() calls.
+
+        `requires_grad=False` only stops gradient updates to `norm`/`mlp`'s *parameters* --
+        it does nothing to `RunningMeanStd`'s running mean/var buffers, which
+        `NormObsBase.forward` keeps updating purely based on `self.training` (see
+        `agents/common/common.py`). `BaseAgent.train()` calls `self.model.train()` before
+        every optimization step, which by default recurses into every submodule -- so
+        without this override the "frozen" trunk's input normalization would keep drifting
+        under its frozen weights throughout Stage 2, silently undermining the point of
+        freezing it. Matches the freeze convention used for `expert_model` in
+        `agents/masked_mimic/agent.py` (`requires_grad=False` + pinned `.eval()`).
+        """
+        super().train(mode)
+        if self._adapter_finalized:
+            self.norm.eval()
+            self.mlp.eval()
+        return self
+
     def forward(self, tensordict: TensorDict) -> TensorDict:
         tensordict = super().forward(tensordict)
         base_out = tensordict[self.config.out_keys[0]]

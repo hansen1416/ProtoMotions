@@ -121,6 +121,21 @@ class MotionManager:
         # Set to None by default; MimicMotionManager uses it for shape-consistent sampling.
         self.env_asset_ids = None
 
+    def on_motion_lib_reloaded(self):
+        """Resync motion-count-dependent state after `motion_lib`'s tensors are swapped
+
+        in place (e.g. `MotionLibPool` rotating to a new shard with a different
+        `num_motions()`). Without this, `self.motion_weights`/`available_motion_ids`/
+        `excluded_motion_ids` stay sized to whatever shard was loaded at construction --
+        `sample_n_motion_ids` would then sample indices out of range for the new shard's
+        tensors (or never reach motions past the old size). Does not touch `motion_ids`/
+        `motion_times`; callers are expected to force a full env reset alongside this so
+        every env resamples against the new motion set.
+        """
+        self.motion_weights = self.motion_lib.motion_weights.clone().to(device=self.device)
+        self._setup_motion_subset()
+        self._setup_motion_exclusion()
+
     def _setup_motion_subset(self):
         """
         Setup motion subset based on config.subset_method

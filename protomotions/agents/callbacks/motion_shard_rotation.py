@@ -41,10 +41,17 @@ class MotionShardRotationCallback(Callback):
                 f"[MotionShardRotationCallback] rotated to shard index "
                 f"{agent.motion_lib._current_shard_idx} at epoch {agent.current_epoch}"
             )
+            agent.env.motion_manager.on_motion_lib_reloaded()
             agent._force_full_env_reset = True
 
-    def on_load_checkpoint_end(self, agent: PPO) -> None:
+    def on_load_checkpoint_before_env_load(self, agent: PPO) -> None:
+        # Must run before BaseAgent.load() restores env_<task_id>.ckpt (which validates its
+        # saved motion_weights against motion_lib.motion_file) -- otherwise motion_lib is
+        # still sitting on the epoch-0 shard loaded by MotionLibPool.__init__ and the
+        # env-checkpoint's motion weights get silently dropped on every resume past the
+        # first shard rotation.
         agent.motion_lib.sync_to_epoch(agent.current_epoch)
+        agent.env.motion_manager.on_motion_lib_reloaded()
         log.info(
             f"[MotionShardRotationCallback] synced motion shard to epoch {agent.current_epoch}"
         )
