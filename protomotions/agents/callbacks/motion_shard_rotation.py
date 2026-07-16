@@ -35,6 +35,19 @@ class MotionShardRotationCallback(Callback):
     `agent.motion_lib` is actually a `MotionLibPool` -- see train_agent.py.
     """
 
+    def on_fit_start(self, agent: PPO) -> None:
+        """No-op override.
+
+        Without this, `fabric.call("on_fit_start", agent)` resolves to
+        `pytorch_lightning.Callback.on_fit_start(self, trainer, pl_module)` (this class's
+        base, unrelated to our single-arg hooks) and crashes with a missing `pl_module`
+        argument -- same landmine `AutoResumeCallbackSrun` already guards against.
+        """
+        pass
+
+    def on_fit_end(self, agent: PPO) -> None:
+        pass
+
     def before_play_steps(self, agent: PPO) -> None:
         if agent.motion_lib.maybe_rotate(agent.current_epoch):
             log.info(
