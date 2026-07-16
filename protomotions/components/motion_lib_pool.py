@@ -76,11 +76,17 @@ class FileDownloader:
 
     Retries the whole `rclone copy` invocation a few times on top of rclone's own internal
     `--retries` -- covers the rclone process itself dying (network reset, transient auth
-    failure) rather than a single transfer within it failing.
+    failure) rather than a single transfer within it failing. Each attempt is also bounded
+    by a wall-clock timeout: a stalled-but-not-erroring transfer (e.g. R2 throttling under
+    concurrent multi-rank downloads at a shard-rotation boundary) never trips rclone's own
+    retry logic, since nothing actually fails -- it just crawls. Without a timeout, that
+    hangs the calling rank indefinitely, which eventually blows the NCCL collective timeout
+    on every *other* rank with an opaque watchdog error pointing nowhere near the real cause.
     """
 
     MAX_ATTEMPTS = 3
     RETRY_BACKOFF_SECONDS = 30.0
+    ATTEMPT_TIMEOUT_SECONDS = 600.0
 
     def __init__(self, remote_path: str, local_dir: Path):
         self.remote_path = remote_path
@@ -109,14 +115,20 @@ class FileDownloader:
                     check=True,
                     capture_output=True,
                     text=True,
+                    timeout=self.ATTEMPT_TIMEOUT_SECONDS,
                 )
                 self._error = None
                 return
             except BaseException as e:  # surfaced to the caller via wait()
                 self._error = e
+                reason = (
+                    f"timed out after {self.ATTEMPT_TIMEOUT_SECONDS:.0f}s"
+                    if isinstance(e, subprocess.TimeoutExpired)
+                    else str(e)
+                )
                 log.warning(
                     f"[MotionLibPool] download attempt {attempt}/{self.MAX_ATTEMPTS} failed "
-                    f"for {self.remote_path}: {e}"
+                    f"for {self.remote_path}: {reason}"
                 )
                 if attempt < self.MAX_ATTEMPTS:
                     time.sleep(self.RETRY_BACKOFF_SECONDS)

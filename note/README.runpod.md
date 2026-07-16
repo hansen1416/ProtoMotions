@@ -259,20 +259,20 @@ several rotations actually happen during a short test window, since that's the w
 rotation-safety fixes end to end.
 
 nohup python -u protomotions/train_agent.py \
-    --robot-name smpl_mor --simulator isaacgym \
-    --experiment-path examples/experiments/mimic/mlp_wide_lora_stage2.py \
-    --experiment-name hhi_wide_lora_stage2_streaming_smoke \
-    --checkpoint results/hhi_wide_20946_neutral/last_morph_reset.ckpt \
-    --r2-motion-source r2:proto-data/hhi_stage2/ \
-    --motion-cache-dir /workspace/motion_cache \
-    --epochs-per-shard 2 \
-    --num-envs 6144 \
-    --batch-size 24576 \
-    --ngpu 6 \
-    --use-wandb \
-    --wandb-project hhi-protomotions \
-    --wandb-entity yugoamaryl \
-    --wandb-group hhi_wide_lora_stage2_streaming_smoke > /tmp/hhi_wide_lora_stage2_streaming_smoke.log 2>&1 &
+  --robot-name smpl_mor --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide_lora_stage2.py \
+  --experiment-name hhi_wide_lora_stage2 \
+  --checkpoint results/hhi_wide_20946_neutral/last_morph_reset.ckpt \
+  --r2-motion-source r2:proto-data/hhi_stage2/ \
+  --motion-cache-dir /workspace/motion_cache \
+  --epochs-per-shard 64 \
+  --num-envs 6144 \
+  --batch-size 24576 \
+  --ngpu 6 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_lora_stage2 > /tmp/hhi_wide_lora_stage2.log 2>&1 &
 ----
 
 
@@ -415,3 +415,4 @@ sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 
 
+claude --resume 36b9f507-1b60-4b9a-b280-b7c1963a5e72
