@@ -195,8 +195,10 @@ def create_parser():
     parser.add_argument(
         "--motion-file",
         type=str,
-        required=True,
-        help="Path to motion file for training",
+        default=None,
+        help="Path to motion file for training. Not required when the experiment's "
+        "motion_lib_config() builds an alternative source (e.g. --r2-motion-source "
+        "for a StreamingMotionLibConfig).",
     )
     parser.add_argument(
         "--experiment-path",
@@ -630,6 +632,19 @@ def main():
         motion_lib_config = configs["motion_lib"]
         env_config = configs["env"]
         agent_config = configs["agent"]
+
+        # --motion-file is only truly required for experiments that don't build an
+        # alternative motion source (e.g. a StreamingMotionLibConfig from --r2-motion-source).
+        # It's optional at the parser level so those experiments' CLI args aren't blocked;
+        # enforce it here for everyone else so a forgotten --motion-file still fails loudly
+        # instead of silently building an empty MotionLib (build_motion_lib_from_config's
+        # documented behavior when motion_file is None).
+        from protomotions.components.motion_lib_pool import StreamingMotionLibConfig
+
+        if not isinstance(motion_lib_config, StreamingMotionLibConfig) and not getattr(
+            motion_lib_config, "motion_file", None
+        ):
+            parser.error("--motion-file is required for this experiment")
 
         # Apply CLI overrides (highest priority)
         # NOTE: These overrides are saved to resolved_configs.pt and become permanent!
