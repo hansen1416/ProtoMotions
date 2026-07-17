@@ -3215,3 +3215,50 @@ protomotions/components/motion_lib_pool.py protomotions/agents/callbacks/motion_
 protomotions/agents/base_agent/agent.py protomotions/utils/component_builder.py
 protomotions/train_agent.py examples/experiments/mimic/mlp_wide_lora_stage2.py` before
 committing.
+
+================================================================================
+
+## 34. Stage 2 v1 (hypernetwork LoRA) stopped — replaced with plain residual-adapter MLP (2026-07-17)
+
+**Diagnosis (via wandb, run `hhi_wide_lora_stage2` / `nz2kwkr4`):** not crashing —
+`bad_grads_count` stayed 0 throughout, only one transient loss spike at epoch 12940 that
+settled within 10 epochs. It's a genuine **plateau**: `eval/success_rate` epochs 14200-20200
+had slope ≈ 0, oscillating 53-80% (mean 70%, std 6.5pp) with no upward trend. Root cause: only
+`adapter_down`/`hypernet` were trainable, at a fixed `actor_optimizer.lr=4e-6` with
+`adaptive_lr.enabled=False` and `actor/clip_frac` near zero — updates were too small to keep
+making progress once past the initial warm-start ramp.
+
+**Change:** replaced §32's hypernetwork-generated per-env LoRA weight matrix with a much
+simpler design — a small trainable MLP reads the same (already morphology-including) input
+the frozen trunk sees and outputs the residual directly, no bottleneck/rank/einsum:
+
+    base_out = frozen_trunk(obs)       # unchanged Stage 1 weights
+    delta    = adapter_mlp(obs)        # small trainable MLP (2x512 relu default)
+    output   = base_out + delta
+
+This is functionally the "just concatenate beta into obs" approach that worked pre-freeze,
+scoped to a small trainable head instead of the whole network (trunk is still frozen).
+Zero-init on the adapter's last layer preserves the same "exact continuation of Stage 1 at
+init" property as §32's design.
+
+**Files:**
+- `protomotions/agents/common/residual_adapter_mlp.py` — new,
+  `ResidualAdapterMLPWithConcat`/`Config`, replaces (deleted) `lora_residual_mlp.py`.
+- `examples/experiments/mimic/mlp_wide_lora_stage2.py` — swapped
+  `LoRAResidualMLPWithConcatConfig` → `ResidualAdapterMLPWithConcatConfig`; dropped
+  `adapter_rank`/`hyper_hidden_units`; added `ADAPTER_UNITS`/`ADAPTER_NUM_LAYERS` (512, 2).
+  `actor_optimizer.lr` left at `4e-6` unchanged — worth revisiting now that the adapter has a
+  more direct gradient path.
+
+Verified standalone (CPU, ad hoc): delta exactly 0 at init, trunk correctly frozen/adapter
+trainable, different `morphology_obs` → different output post-update, `strict=False` load
+against a plain Stage 1 checkpoint leaves only `adapter_mlp.*` missing (no unexpected keys) —
+same checkpoint-compat contract as §32.
+
+**Run transition:** old run `hhi_wide_lora_stage2` (wandb `nz2kwkr4`) left to stop on its own /
+stopped on the pod, not resumed. New run launched under a new experiment name,
+`hhi_wide_residual_stage2`, rather than reusing the old name — reusing it would have hit
+`train_agent.py`'s resume-mode auto-detect (`results/<name>/last.ckpt` present →
+loads pickled `resolved_configs.pt`, which still references the deleted LoRA class). Same
+Stage 1 warm-start checkpoint (`hhi_wide_20946_neutral/last_morph_reset.ckpt`), same streaming
+data config, same `--num-envs 6144 --batch-size 24576 --ngpu 6`.
