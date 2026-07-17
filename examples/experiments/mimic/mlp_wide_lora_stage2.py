@@ -14,15 +14,16 @@
 # limitations under the License.
 #
 """
-Stage 2 — Shape Transfer via Frozen Backbone + LoRA-Style Residual Adapter
+Stage 2 — Shape Transfer via Frozen Backbone + Residual Adapter
 ===========================================================================
 
 Same as mlp_wide.py in every respect except the actor's mu_model is
-LoRAResidualMLPWithConcatConfig instead of MLPWithConcatConfig: the 6x2896 trunk is warm-started
-from a Stage 1 checkpoint (hhi_wide_20946_neutral) and frozen, and a small trainable adapter
-(shared low-rank bottleneck + a per-env up-projection generated from morphology_obs by a tiny
-hypernetwork) injects a residual correction. Design doc, rationale, and code-level notes:
-note/README.note.md #32.
+ResidualAdapterMLPWithConcatConfig instead of MLPWithConcatConfig: the 6x2896 trunk is
+warm-started from a Stage 1 checkpoint (hhi_wide_20946_neutral) and frozen, and a small
+trainable MLP reads the same (morphology-including) input the trunk sees and adds a residual
+correction -- the same "concat beta into obs" approach that worked pre-freeze, just scoped to
+this small head instead of the whole network, since the trunk can no longer learn from it.
+Design doc, rationale, and code-level notes: note/README.note.md #32.
 
 Critic is unchanged (same 4x1024 as mlp_wide.py) and fully fine-tuned, unfrozen, no adapter --
 no Stage-1 prior to protect there, matches the existing "critic stays flat-concat" precedent
@@ -80,9 +81,8 @@ from protomotions.components.motion_lib import MotionLibConfig
 import argparse
 
 WIDE_UNITS = 2896  # must match the Stage 1 checkpoint's trunk width (mlp_wide.py)
-ADAPTER_RANK = 16  # note/README.note.md #32 -- single global residual, upper end of the
-                    # 8-16 range HyperDistill used per-layer
-HYPER_HIDDEN_UNITS = 64
+ADAPTER_UNITS = 512  # width of the small trainable residual-adapter MLP's hidden layers
+ADAPTER_NUM_LAYERS = 2
 
 
 def additional_experiment_arguments(parser: argparse.ArgumentParser):
@@ -218,7 +218,7 @@ def agent_config(
     robot_config: RobotConfig, env_config: EnvConfig, args: argparse.Namespace
 ) -> PPOAgentConfig:
     from protomotions.agents.common.config import MLPWithConcatConfig, MLPLayerConfig
-    from protomotions.agents.common.lora_residual_mlp import LoRAResidualMLPWithConcatConfig
+    from protomotions.agents.common.residual_adapter_mlp import ResidualAdapterMLPWithConcatConfig
     from protomotions.agents.ppo.config import (
         PPOActorConfig,
         PPOModelConfig,
@@ -242,16 +242,16 @@ def agent_config(
         actor_logstd=-2.9,
         in_keys=actor_in_keys,
         mu_key="actor_trunk_out",
-        mu_model=LoRAResidualMLPWithConcatConfig(
+        mu_model=ResidualAdapterMLPWithConcatConfig(
             in_keys=actor_in_keys,
             normalize_obs=True,
             norm_clamp_value=5,
             out_keys=["actor_trunk_out"],
             num_out=robot_config.number_of_actions,
             layers=[MLPLayerConfig(units=WIDE_UNITS, activation="relu") for _ in range(6)],
-            adapter_rank=ADAPTER_RANK,
-            hyper_hidden_units=HYPER_HIDDEN_UNITS,
-            morphology_key="morphology_obs",
+            adapter_layers=[
+                MLPLayerConfig(units=ADAPTER_UNITS, activation="relu") for _ in range(ADAPTER_NUM_LAYERS)
+            ],
         ),
     )
 
@@ -270,8 +270,8 @@ def agent_config(
             out_keys=["action", "mean_action", "neglogp", "value"],
             actor=actor_config,
             critic=critic_config,
-            # 5-10x lower than mlp_wide.py's 2e-5 -- only adapter_down/hypernet are trainable
-            # on the actor side, so this LR governs a much smaller optimization problem.
+            # 5-10x lower than mlp_wide.py's 2e-5 -- only adapter_mlp is trainable on the
+            # actor side, so this LR governs a much smaller optimization problem.
             actor_optimizer=OptimizerConfig(_target_="torch.optim.Adam", lr=4e-6),
             # Critic has no frozen prior to protect; unchanged from mlp_wide.py.
             critic_optimizer=OptimizerConfig(_target_="torch.optim.Adam", lr=1e-4),
