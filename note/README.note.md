@@ -3262,3 +3262,70 @@ stopped on the pod, not resumed. New run launched under a new experiment name,
 loads pickled `resolved_configs.pt`, which still references the deleted LoRA class). Same
 Stage 1 warm-start checkpoint (`hhi_wide_20946_neutral/last_morph_reset.ckpt`), same streaming
 data config, same `--num-envs 6144 --batch-size 24576 --ngpu 6`.
+
+## 35. Stage 2 v2 diagnosis + adapter scoped to morphology_obs only (2026-07-19)
+
+**Diagnosis (wandb API + a remote Claude Code session with log/checkpoint access on the
+training box, run `hhi_wide_residual_stage2` / `3skv3b2g`):** plateaued at epoch ~31459,
+`eval/success_rate` flat since ~epoch 19000 (78.1%±4.4% over ~12,400 epochs, no net slope),
+`info/episode_length` flat in lockstep (~100 vs. a ~200 target — episodes end early via
+`tracking_error_term_factory`, so this and success_rate are two views of the same "policy
+still falls" signal). Unlike v1, `actor/clip_frac` was healthy (0.0126 mean, ~24x v1's dead
+0.0005) — so the v1→v2 direct-gradient-path fix worked, but a different ceiling was hit
+anyway. Shard-rotation-driven oscillation was investigated and **ruled out**: binning all 95
+eval events by epoch-distance to the nearest `epochs_per_shard=64` rotation boundary gave
+near-rotation mean success_rate 0.775 (n=23) vs. far-from-rotation 0.786 (n=40) — 1.1pp
+difference on a 4.4pp noise floor.
+
+**Root cause identified: the adapter was reading the full observation, not just body shape.**
+`ResidualAdapterMLPWithConcat._adapter_input()` reused `tensordict["norm_max_coords_obs"]`,
+which — despite the name — is the full normalized 1014-dim concatenation of ALL `actor_in_keys`
+(`max_coords_obs` + `mimic_target_poses` + `previous_actions` + `morphology_obs`), computed by
+the parent `MLPWithConcat.forward()`. A CPU checkpoint forward-pass check (epoch-31620
+checkpoint, 256 synthetic obs sampled from the checkpoint's own `running_obs_norm` marginals)
+found the adapter's output norm was ~40% of the frozen trunk's on average (up to 136% on some
+samples) — a large, high-frequency correction, not a small stabilizing one. Since the adapter's
+input changed every timestep (pose/motion-target obs are high-frequency), nothing structurally
+prevented its output from being high-frequency too, consistent with the run's elevated
+`eval/normalized_jerk_mean` (1500-2500, vs. a Stage-1-trunk-only baseline around 358) and
+`high_jerk_frame_percentage_mean` (25-40%) staying flat/elevated through the whole plateau. A
+first fix attempt (raise `action_smoothness` reward weight -0.02→-0.2,
+`mlp_wide_residual_stage2_smooth.py`) was designed but **abandoned before launch** in favor of
+the structural fix below — a reward-shaping bandaid was judged unlikely to close a ~78%→95%,
+~100→200-step gap on its own, and doesn't address why the adapter is noisy in the first place.
+
+**Fix:** `ResidualAdapterMLPWithConcatConfig` gained a new field, `adapter_in_keys` (default
+`["morphology_obs"]`), and `_adapter_input()` now concatenates only those keys instead of
+reusing the trunk's full normalized input. `morphology_obs` (the 11-dim `[gender_id,
+betas/3.0]`) is constant for the whole episode, so `delta` is now provably constant within an
+episode too — verified standalone (CPU): after one training step, adapter output changes
+0.0 for a pose-only perturbation (morphology_obs held fixed) vs. 4.05 for a morphology-only
+perturbation (pose held fixed) on the same input batch. The adapter can no longer introduce
+frame-to-frame jerk by construction, not by reward-penalty tuning. Tradeoff, not yet resolved:
+this caps the adapter to a per-body *offset*, unable to express pose-shape interaction
+corrections (e.g. a different ankle correction while crouching vs. standing) — open question
+whether that matters for this failure mode; no data collected yet either way.
+
+**Also discussed, not changed:** whether MotionLib's streaming/shard-rotation setup should
+be replaced with a static full load. Confirmed via code
+(`protomotions/components/motion_lib.py:701-754`, `load_from_file()`) that `MotionLib` always
+moves the *entire* loaded file to the target device (GPU) — `torch.load(..., map_location="cpu")`
+then an unconditional `.to(self.device)` per tensor, no lazy/on-demand paths except `max_motions`
+(documented for inference, not training). Full Stage 2 is ~2.68M motion-instances / ~1.1TB,
+~447k/rank across 6 ranks — ~64x `hhi_stage1_merged6`'s per-rank size (the largest static,
+non-rotating load this codebase has actually run). A literal non-rotating full load for the
+full dataset would OOM on load; shard rotation isn't a suboptimal choice here, it's structurally
+required given how `MotionLib` loads data. If R2 network reliability during live streaming is
+the actual concern, pre-downloading all 328 shards to local disk once (same shard sizing/
+rotation cadence, just a local instead of R2 source) is the change that addresses that without
+touching the GPU-memory model — not yet implemented, revisit if network stalls are confirmed
+as a real problem separately from this diagnosis.
+
+**Launch (not yet run):** new experiment name `hhi_wide_residual_stage2_shapeonly`, same
+`mlp_wide_lora_stage2.py` experiment file (architecture default changed in
+`residual_adapter_mlp.py`, no experiment-file-level override needed), same base checkpoint
+`hhi_wide_20946_neutral/last_morph_reset.ckpt` (deliberately unchanged from v1/v2 — single-
+variable test), same streaming data config and `--epochs-per-shard 64` (increasing shard dwell
+time was discussed as a secondary/low-priority experiment, not bundled into this one — the
+rotation-boundary binning above already argues against rotation cadence being the bottleneck).
+Full launch command in `mlp_wide_lora_stage2.py`'s docstring.

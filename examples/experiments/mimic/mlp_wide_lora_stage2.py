@@ -20,10 +20,17 @@ Stage 2 — Shape Transfer via Frozen Backbone + Residual Adapter
 Same as mlp_wide.py in every respect except the actor's mu_model is
 ResidualAdapterMLPWithConcatConfig instead of MLPWithConcatConfig: the 6x2896 trunk is
 warm-started from a Stage 1 checkpoint (hhi_wide_20946_neutral) and frozen, and a small
-trainable MLP reads the same (morphology-including) input the trunk sees and adds a residual
-correction -- the same "concat beta into obs" approach that worked pre-freeze, just scoped to
-this small head instead of the whole network, since the trunk can no longer learn from it.
-Design doc, rationale, and code-level notes: note/README.note.md #32.
+trainable MLP adds a residual correction on top. Design doc, rationale, and code-level notes:
+note/README.note.md #32, #34, #35.
+
+As of 2026-07-19 (#35) the adapter's input defaults to `morphology_obs` ONLY (the 11-dim
+`[gender_id, betas/3.0]`), not the trunk's full pose/motion-target/previous-action input --
+see `protomotions/agents/common/residual_adapter_mlp.py`'s module docstring and
+`ResidualAdapterMLPWithConcatConfig.adapter_in_keys`. This makes `delta` constant within an
+episode (morphology_obs doesn't change mid-episode), so the adapter cannot itself introduce
+frame-to-frame jerk -- diagnosed as a real problem in the prior (full-obs-input) variant,
+which plateaued at ~78% success_rate under wandb run `hhi_wide_residual_stage2` / `3skv3b2g`
+with the adapter contributing ~40% of the trunk's output magnitude.
 
 Critic is unchanged (same 4x1024 as mlp_wide.py) and fully fine-tuned, unfrozen, no adapter --
 no Stage-1 prior to protect there, matches the existing "critic stays flat-concat" precedent
@@ -32,44 +39,40 @@ from #18.
 Requires --checkpoint pointing at a Stage 1 checkpoint that has been run through
 tools/reset_morphology_normalizer.py first (obs-normalizer saturation fix, orthogonal to the
 architecture change here -- still needed). Loads via allow_partial_checkpoint_load=True since
-the new adapter_down/hypernet keys don't exist in that checkpoint (see
+the new adapter_mlp keys don't exist in that checkpoint (see
 base_agent/config.py's allow_partial_checkpoint_load).
 
     # 1. One-time: reset the morphology obs-normalizer dims on the Stage 1 checkpoint
+    #    (already done previously -- reuse the existing last_morph_reset.ckpt if present,
+    #    don't regenerate it).
     python tools/reset_morphology_normalizer.py \\
         --checkpoint results/hhi_wide_20946_neutral/last.ckpt \\
         --output results/hhi_wide_20946_neutral/last_morph_reset.ckpt
 
-    # 2a. Smoke test first, on the existing 2-shape hhi_stage1_merged6 data
+    # 2. Full Stage 2 run, streaming the 328 shards shard-by-shard from R2 (~1.1 TB total,
+    #    too big to fit in RAM/VRAM at once -- see note/README.stage2-streaming-loader-plan.md
+    #    and note/README.note.md #35 for why a single non-rotating load isn't feasible here).
+    #    Each rank rotates through its own slice of the remote file list; --motion-file is
+    #    not used in this mode. New experiment name each time (see resume-mode gotcha in
+    #    CLAUDE.md) -- this one tests the shape-only adapter input (#35):
     python protomotions/train_agent.py \\
         --robot-name smpl_mor --simulator isaacgym \\
         --experiment-path examples/experiments/mimic/mlp_wide_lora_stage2.py \\
-        --experiment-name hhi_wide_lora_stage2_smoke \\
-        --checkpoint results/hhi_wide_20946_neutral/last_morph_reset.ckpt \\
-        --motion-file <path-to-hhi_stage1_merged6-slurmrank-file> \\
-        --num-envs 4096 --batch-size 16384
-
-    # 2b. Full Stage 2 run, streaming the 328 shards shard-by-shard from R2 (~1.1 TB total,
-    #     too big to fit in RAM/VRAM at once -- see note/README.stage2-streaming-loader-plan.md).
-    #     Each rank rotates through its own slice of the remote file list; --motion-file is
-    #     not used in this mode.
-    python protomotions/train_agent.py \\
-        --robot-name smpl_mor --simulator isaacgym \\
-        --experiment-path examples/experiments/mimic/mlp_wide_lora_stage2.py \\
-        --experiment-name hhi_wide_lora_stage2 \\
+        --experiment-name hhi_wide_residual_stage2_shapeonly \\
         --checkpoint results/hhi_wide_20946_neutral/last_morph_reset.ckpt \\
         --r2-motion-source r2:proto-data/hhi_stage2/ \\
         --motion-cache-dir /workspace/motion_cache \\
         --epochs-per-shard 64 \\
         --num-envs 6144 --batch-size 24576 --ngpu 6
 
-Verification checklist before trusting either run's numbers (note/README.note.md #32):
+Verification checklist before trusting a new run's numbers (note/README.note.md #32, #35):
     1. CPU dummy-forward: frozen params get zero grad, adapter params get nonzero grad,
-       delta == 0 at init, different morphology_obs -> different delta.
+       delta == 0 at init, different morphology_obs -> different delta; delta must NOT change
+       if pose/motion-target/previous-action inputs change with morphology_obs held fixed
+       (confirms the adapter is actually shape-only post-#35).
     2. Load an hhi_wide_20946_neutral checkpoint with strict=False; missing_keys should be
-       exactly {adapter_down.*, hypernet.*}, unexpected_keys empty; output should match
-       mlp_wide.py's output bit-for-bit at that checkpoint (delta == 0 at init).
-    Both already verified against this module in isolation as of #32's implementation note.
+       exactly {adapter_mlp.*}, unexpected_keys empty; output should match mlp_wide.py's
+       output bit-for-bit at that checkpoint (delta == 0 at init).
 """
 from protomotions.robot_configs.base import RobotConfig
 from protomotions.simulator.base_simulator.config import SimulatorConfig
