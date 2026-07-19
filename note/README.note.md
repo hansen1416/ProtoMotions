@@ -3329,3 +3329,14 @@ variable test), same streaming data config and `--epochs-per-shard 64` (increasi
 time was discussed as a secondary/low-priority experiment, not bundled into this one — the
 rotation-boundary binning above already argues against rotation cadence being the bottleneck).
 Full launch command in `mlp_wide_lora_stage2.py`'s docstring.
+
+## 36. Session summary (2026-07-19)
+
+1. Stopped `hhi_wide_residual_stage2` (v2) after diagnosis (§35) found it plateaued at ~78%
+   success_rate with the adapter reading the full observation, not just body shape.
+2. Launched `hhi_wide_residual_stage2_shapeonly` (v3) — adapter now reads only `morphology_obs`;
+   same base checkpoint, same data, everything else unchanged. Result pending.
+3. If v3 doesn't reach target (95% success, ~200-step episodes), next step is a concat-fusion
+   design — feed both the trunk's output and betas into new learnable layer(s) instead of pure
+   addition — design and known risks in §35's "v4 candidate" note. Not started; waiting on v3's
+   result first.
