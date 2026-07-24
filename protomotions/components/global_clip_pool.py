@@ -230,29 +230,33 @@ class GlobalClipPool(MotionLib):
         remote_manifest = f"{r2_source.rstrip('/')}/{manifest_name}"
         local_manifest = manifest_dir / manifest_name
 
-        try:
-            subprocess.run(
-                [
-                    "rclone",
-                    "copy",
-                    remote_manifest,
-                    str(manifest_dir),
-                    "--s3-no-check-bucket",
-                    "--retries=10",
-                    "--retries-sleep=30s",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except FileNotFoundError as e:
-            raise RuntimeError(
-                "`rclone` was not found on PATH -- required for GlobalClipPoolConfig."
-            ) from e
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                f"Failed to download manifest {remote_manifest} (rc={e.returncode}): {e.stderr}"
-            ) from e
+        # The manifest is a static, one-time artifact of the (already-complete) repackaging job --
+        # skip re-fetching it if a local copy already exists, instead of re-downloading on every
+        # single process launch/restart regardless of cache state.
+        if not local_manifest.exists():
+            try:
+                subprocess.run(
+                    [
+                        "rclone",
+                        "copy",
+                        remote_manifest,
+                        str(manifest_dir),
+                        "--s3-no-check-bucket",
+                        "--retries=10",
+                        "--retries-sleep=30s",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except FileNotFoundError as e:
+                raise RuntimeError(
+                    "`rclone` was not found on PATH -- required for GlobalClipPoolConfig."
+                ) from e
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(
+                    f"Failed to download manifest {remote_manifest} (rc={e.returncode}): {e.stderr}"
+                ) from e
 
         if not local_manifest.exists():
             raise RuntimeError(f"Manifest not found after download: {local_manifest}")
