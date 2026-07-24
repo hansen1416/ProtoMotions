@@ -82,21 +82,69 @@ FUSION_NUM_LAYERS = 2
 
 
 def additional_experiment_arguments(parser: argparse.ArgumentParser):
-    """Add Stage 2 streaming-data CLI arguments (note/README.stage2-streaming-loader-plan.md).
+    """Add Stage 2 streaming-data CLI arguments.
 
-    When --r2-motion-source is set, motion_lib_config() below returns a
-    StreamingMotionLibConfig that streams shards from R2 instead of loading --motion-file.
-    This keeps the smoke-test command (small hhi_stage1_merged6 data, --motion-file) working
-    unchanged -- streaming only turns on for the full Stage 2 run.
+    Two mutually exclusive alternative motion sources, checked in this order by
+    motion_lib_config() below:
+
+    1. --global-clip-pool-source (note/README.stage2-global-clip-sampling-plan.md): a persistent,
+       globally-weighted resident pool of clips (GlobalClipPoolConfig) -- the current mechanism,
+       tracks clip difficulty for the life of the run and survives resumes.
+    2. --r2-motion-source (note/README.stage2-streaming-loader-plan.md): the older shard-by-shard
+       rotation (StreamingMotionLibConfig), which resets its difficulty weights every rotation --
+       kept only for in-flight runs/resumes already using it, not for new runs.
+
+    Neither set -> falls back to --motion-file. This keeps the smoke-test command (small
+    hhi_stage1_merged6 data, --motion-file) working unchanged.
     """
+    parser.add_argument(
+        "--global-clip-pool-source",
+        type=str,
+        default=None,
+        help=(
+            "rclone remote directory of per-clip Stage 2 motion files + clip_manifest.jsonl "
+            "(e.g. r2:proto-data/hhi_stage2_per_clip/). When set, uses the persistent global "
+            "clip-priority pool instead of --r2-motion-source/--motion-file."
+        ),
+    )
+    parser.add_argument(
+        "--global-clip-pool-size", type=int, default=256,
+        help="Number of clips resident per rank (K). Matches the validated hhi_1024_motion "
+        "pilot's per-rank footprint (1024 clips / 4 ranks).",
+    )
+    parser.add_argument(
+        "--global-clip-pool-cache-dir", type=str, default="/workspace/motion_cache",
+        help="Local directory to cache downloaded per-clip files.",
+    )
+    parser.add_argument(
+        "--global-clip-pool-cache-multiplier", type=float, default=3.0,
+        help="Local disk cache sized at this multiple of K, for download hysteresis.",
+    )
+    parser.add_argument(
+        "--global-clip-pool-rebuild-every", type=int, default=64,
+        help="Epochs between resident-pool rebuilds. Deliberately decoupled from "
+        "--eval-metrics-every (weight updates still need real eval rollouts and stay on that "
+        "cadence); rebuilds are cheap and default to matching today's shard rotation cadence "
+        "(--epochs-per-shard) so new/unproven clips get pulled in at least as often.",
+    )
+    parser.add_argument(
+        "--global-clip-pool-shuffle-seed", type=int, default=42,
+        help="Seed for the deterministic clip shuffle/rank-partition. Must stay fixed across "
+        "a run (including resume).",
+    )
+    parser.add_argument(
+        "--global-clip-pool-exploration-coefficient", type=float, default=1.0,
+        help="Scale of the UCB-style exploration bonus added to a clip's selection priority.",
+    )
     parser.add_argument(
         "--r2-motion-source",
         type=str,
         default=None,
         help=(
             "rclone remote directory of per-shard Stage 2 motion files "
-            "(e.g. r2:proto-data/hhi_stage2/). When set, streams shards shard-by-shard "
-            "instead of using --motion-file."
+            "(e.g. r2:proto-data/hhi_stage2/). When set (and --global-clip-pool-source is not), "
+            "streams shards shard-by-shard instead of using --motion-file. Superseded by "
+            "--global-clip-pool-source for new runs -- kept for in-flight runs/resumes."
         ),
     )
     parser.add_argument(
@@ -129,6 +177,18 @@ def scene_lib_config(args: argparse.Namespace):
 
 
 def motion_lib_config(args: argparse.Namespace):
+    if getattr(args, "global_clip_pool_source", None):
+        from protomotions.components.global_clip_pool import GlobalClipPoolConfig
+
+        return GlobalClipPoolConfig(
+            r2_source=args.global_clip_pool_source,
+            local_cache_dir=args.global_clip_pool_cache_dir,
+            resident_pool_size=args.global_clip_pool_size,
+            cache_size_multiplier=args.global_clip_pool_cache_multiplier,
+            pool_rebuild_every=args.global_clip_pool_rebuild_every,
+            clip_partition_shuffle_seed=args.global_clip_pool_shuffle_seed,
+            exploration_bonus_coefficient=args.global_clip_pool_exploration_coefficient,
+        )
     if getattr(args, "r2_motion_source", None):
         from protomotions.components.motion_lib_pool import StreamingMotionLibConfig
 

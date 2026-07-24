@@ -455,9 +455,33 @@ class MotionManager:
             "motion_file_name": self.motion_lib.motion_file,
             "motion_weights": self.motion_weights.cpu().clone(),
         }
+        if hasattr(self.motion_lib, "get_global_clip_weights_state_dict"):
+            state_dict["global_clip_pool"] = (
+                self.motion_lib.get_global_clip_weights_state_dict()
+            )
         return state_dict
 
     def load_state_dict(self, state_dict):
+        # GlobalClipPool's persistent scoreboard is keyed by clip identity, not by
+        # motion_lib.motion_file (a fixed synthetic per-rank string for this loader, see
+        # GlobalClipPool.__init__) -- the motion_file_name equality check below is meaningless
+        # for it and would incorrectly gate loading, so this branches before that check.
+        if hasattr(self.motion_lib, "load_global_clip_weights_state_dict"):
+            if "global_clip_pool" in state_dict:
+                self.motion_lib.load_global_clip_weights_state_dict(
+                    state_dict["global_clip_pool"]
+                )
+                # The resident set materialized above may differ from what this MotionManager
+                # was sized/synced to before load (num_motions can differ), so resync the same
+                # way a live rebuild does.
+                self.on_motion_lib_reloaded()
+            else:
+                print(
+                    "Warning: motion_lib has a global clip pool but this checkpoint predates "
+                    "it -- starting the clip-priority scoreboard fresh."
+                )
+            return
+
         if "motion_weights" in state_dict and "motion_file_name" in state_dict:
             if state_dict["motion_file_name"] != self.motion_lib.motion_file:
                 # should match given we have task id, but double check here

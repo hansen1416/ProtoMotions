@@ -634,15 +634,18 @@ def main():
         agent_config = configs["agent"]
 
         # --motion-file is only truly required for experiments that don't build an
-        # alternative motion source (e.g. a StreamingMotionLibConfig from --r2-motion-source).
+        # alternative motion source (e.g. a StreamingMotionLibConfig from --r2-motion-source, or
+        # a GlobalClipPoolConfig from --global-clip-pool-source).
         # It's optional at the parser level so those experiments' CLI args aren't blocked;
         # enforce it here for everyone else so a forgotten --motion-file still fails loudly
         # instead of silently building an empty MotionLib (build_motion_lib_from_config's
         # documented behavior when motion_file is None).
         from protomotions.components.motion_lib_pool import StreamingMotionLibConfig
+        from protomotions.components.global_clip_pool import GlobalClipPoolConfig
 
-        if not isinstance(motion_lib_config, StreamingMotionLibConfig) and not getattr(
-            motion_lib_config, "motion_file", None
+        if (
+            not isinstance(motion_lib_config, (StreamingMotionLibConfig, GlobalClipPoolConfig))
+            and not getattr(motion_lib_config, "motion_file", None)
         ):
             parser.error("--motion-file is required for this experiment")
 
@@ -722,8 +725,15 @@ def main():
         )
 
     from protomotions.components.motion_lib_pool import StreamingMotionLibConfig
+    from protomotions.components.global_clip_pool import GlobalClipPoolConfig
 
-    if isinstance(motion_lib_config, StreamingMotionLibConfig):
+    if isinstance(motion_lib_config, GlobalClipPoolConfig):
+        callbacks.append(
+            {
+                "_target_": "agents.callbacks.global_clip_pool_rebuild.GlobalClipPoolRebuildCallback",
+            }
+        )
+    elif isinstance(motion_lib_config, StreamingMotionLibConfig):
         callbacks.append(
             {
                 "_target_": "agents.callbacks.motion_shard_rotation.MotionShardRotationCallback",

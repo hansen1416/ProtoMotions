@@ -1,0 +1,520 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 The ProtoMotions Developers
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+"""
+Global clip-priority resident pool for Stage 2 (~20,951 per-clip R2 files, too big to fit in
+RAM/VRAM at once).
+
+Design doc: note/README.stage2-global-clip-sampling-plan.md. Unlike `MotionLibPool` (shard-by-
+shard rotation on a fixed epoch schedule, curriculum weights reset every rotation), this keeps a
+persistent per-rank clip-priority scoreboard (`global_clip_weights` + `global_clip_visit_counts`)
+that survives resident-set churn and resumes, and periodically swaps the resident set (K clips/
+rank) to whichever clips currently look most important -- known-hard (per the evaluator's
+success/failure signal) or still-unproven (per a UCB-style exploration bonus). Reuses the
+existing full-block `MotionLib._load_motion_state_dict` swap-in-place path -- no incremental
+insert/evict support is added to MotionLib's tensor indexing.
+"""
+
+import json
+import logging
+import math
+import random
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import torch
+
+from protomotions.components.motion_lib import MotionLib, MotionLibConfig
+from protomotions.components.motion_lib_pool import FileDownloader
+
+log = logging.getLogger(__name__)
+
+# Field lists mirror tools/repackage_stage2_per_clip.py's per-clip packaging contract exactly.
+PER_FRAME_FIELDS = ["gts", "grs", "gvs", "gavs", "dvs", "dps", "contacts", "lrs"]
+PER_MOTION_TENSOR_FIELDS = [
+    "motion_lengths",
+    "motion_dt",
+    "motion_num_frames",
+    "motion_weights",
+    "motion_betas",
+    "motion_gender_ids",
+]
+PER_MOTION_TUPLE_FIELDS = [
+    "motion_files",
+    "motion_genders",
+    "motion_beta_keys",
+    "motion_asset_ids",
+    "motion_clip_ids",
+    "motion_npz_files",
+]
+
+
+@dataclass
+class GlobalClipPoolConfig(MotionLibConfig):
+    """Configuration for the global clip-priority resident pool (Stage 2)."""
+
+    _target_: str = "protomotions.components.global_clip_pool.GlobalClipPool"
+    r2_source: str = field(
+        default="r2:proto-data/hhi_stage2_per_clip/",
+        metadata={"help": "rclone remote directory of per-clip .pt motion files + manifest."},
+    )
+    manifest_name: str = field(
+        default="clip_manifest.jsonl",
+        metadata={"help": "Manifest filename inside r2_source, one JSON line per clip."},
+    )
+    local_cache_dir: str = field(
+        default="/workspace/motion_cache",
+        metadata={"help": "Local directory to cache downloaded per-clip files."},
+    )
+    resident_pool_size: int = field(
+        default=256,
+        metadata={
+            "help": "Number of clips resident per rank (K). Matches the validated "
+            "hhi_1024_motion pilot's per-rank footprint (1024 clips / 4 ranks)."
+        },
+    )
+    cache_size_multiplier: float = field(
+        default=3.0,
+        metadata={
+            "help": "Local disk cache sized at this multiple of K, purely for download "
+            "hysteresis near the resident-set boundary -- disk is cheap, VRAM isn't."
+        },
+    )
+    clip_partition_shuffle_seed: int = field(
+        default=42,
+        metadata={
+            "help": "Seed for the deterministic clip shuffle/rank-partition. Must stay fixed "
+            "across a run (including resume) for the clip vocabulary to remain reproducible."
+        },
+    )
+    pool_rebuild_every: int = field(
+        default=64,
+        metadata={
+            "help": "Epochs between resident-pool rebuilds. Deliberately decoupled from the "
+            "evaluator's eval_metrics_every: weight *updates* need real eval rollouts and stay "
+            "on eval_metrics_every, but rebuilds (re-rank + swap using whatever weights "
+            "currently exist) are cheap and should happen faster, so new/unproven clips get "
+            "pulled in at least as often as today's shard rotation (epochs_per_shard=64)."
+        },
+    )
+    exploration_bonus_coefficient: float = field(
+        default=1.0,
+        metadata={
+            "help": "Scale of the UCB-style exploration bonus added to a clip's selection "
+            "priority. 1.0 puts a never-visited clip's bonus on the same order of magnitude as "
+            "the default initial weight (also 1.0)."
+        },
+    )
+
+
+class GlobalClipPool(MotionLib):
+    """MotionLib backed by a persistent, globally-weighted resident pool of clips.
+
+    Each rank owns a disjoint, deterministically shuffled slice of the clip manifest and keeps
+    K=`resident_pool_size` of them resident at a time, chosen by `global_clip_weights +
+    exploration_bonus` (a combinatorial-UCB priority). `global_clip_weights`/
+    `global_clip_visit_counts` persist for the life of the run (checkpointed) and are never reset
+    by a rebuild -- only the *resident set* changes; the curriculum itself doesn't forget.
+
+    Rebuilds mutate this same object in place via the inherited `_load_motion_state_dict`, so
+    every other reference (env, motion_manager, agent) keeps working unmodified -- same
+    convention `MotionLibPool` already established for shard rotation.
+    """
+
+    def __init__(self, config: GlobalClipPoolConfig, device: str = "cpu"):
+        assert config.max_motions is None, (
+            "GlobalClipPoolConfig doesn't compose with max_motions -- resident_pool_size "
+            "controls how much data is loaded instead."
+        )
+
+        self.config = config
+        self.device = device
+        self._asset_id_to_motion_ids_cache = None
+        self._clip_id_to_motion_ids_cache = None
+        self.get_motion_state_use_blend = config.get_motion_state_use_blend
+        self.different_motion_files_across_ranks = True
+
+        if torch.distributed.is_initialized():
+            self.rank = torch.distributed.get_rank()
+            self.world_size = torch.distributed.get_world_size()
+        else:
+            self.rank = 0
+            self.world_size = 1
+
+        self.local_cache_dir = Path(config.local_cache_dir) / f"rank{self.rank}"
+        self.local_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        clip_id_to_remote_name = self._load_manifest(config.r2_source, config.manifest_name)
+
+        # Deterministic per-rank clip vocabulary: fully reproducible from the (static) manifest
+        # plus a fixed seed/world_size, so it needs no checkpoint entry of its own -- same idiom
+        # `MotionLibPool` uses for its shard partition (`remote_files[rank::world_size]`).
+        all_clip_ids = sorted(clip_id_to_remote_name.keys())
+        rng = random.Random(config.clip_partition_shuffle_seed)
+        rng.shuffle(all_clip_ids)
+        self.rank_clip_ids: List[str] = all_clip_ids[self.rank :: self.world_size]
+        if not self.rank_clip_ids:
+            raise RuntimeError(
+                f"No clips assigned to rank {self.rank} (world_size={self.world_size}) "
+                f"out of {len(all_clip_ids)} clips in the manifest at {config.r2_source}. "
+                "world_size is larger than the number of clips."
+            )
+        self._clip_remote_name: Dict[str, str] = {
+            cid: clip_id_to_remote_name[cid] for cid in self.rank_clip_ids
+        }
+        self.clip_id_to_local_index: Dict[str, int] = {
+            cid: i for i, cid in enumerate(self.rank_clip_ids)
+        }
+        log.info(
+            f"[GlobalClipPool] rank {self.rank}/{self.world_size}: "
+            f"{len(self.rank_clip_ids)}/{len(all_clip_ids)} clips assigned, "
+            f"resident_pool_size={config.resident_pool_size}"
+        )
+
+        num_clips = len(self.rank_clip_ids)
+        self.global_clip_weights = torch.ones(num_clips, dtype=torch.float32)
+        self.global_clip_visit_counts = torch.zeros(num_clips, dtype=torch.long)
+        self.rebuild_count = 0
+
+        self._resident_local_indices: Optional[torch.Tensor] = None
+        self._resident_shape_counts: Optional[torch.Tensor] = None
+        self._cache_last_used: Dict[str, int] = {}
+        self._touch_count = 0
+
+        # Stable for the life of the run: `Env.get_task_id()` derives the `env_<task_id>.ckpt`
+        # checkpoint filename from this, and residency here depends on the checkpoint's own
+        # contents (unlike `MotionLibPool`'s shard rotation, a pure function of `current_epoch`
+        # computable before the checkpoint is even opened) -- if this string changed every
+        # rebuild, resume could never find the right checkpoint file.
+        self.motion_file = f"global_clip_pool_rank{self.rank}"
+
+        # Synchronous: env/simulator construction needs real motion data immediately.
+        self._rebuild_resident_pool(self._select_top_k(), force=True)
+
+    # ---------------------------------------------------------------- manifest
+
+    def _load_manifest(self, r2_source: str, manifest_name: str) -> Dict[str, str]:
+        manifest_dir = self.local_cache_dir / "_manifest_dl"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        remote_manifest = f"{r2_source.rstrip('/')}/{manifest_name}"
+        local_manifest = manifest_dir / manifest_name
+
+        try:
+            subprocess.run(
+                [
+                    "rclone",
+                    "copy",
+                    remote_manifest,
+                    str(manifest_dir),
+                    "--s3-no-check-bucket",
+                    "--retries=10",
+                    "--retries-sleep=30s",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                "`rclone` was not found on PATH -- required for GlobalClipPoolConfig."
+            ) from e
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"Failed to download manifest {remote_manifest} (rc={e.returncode}): {e.stderr}"
+            ) from e
+
+        if not local_manifest.exists():
+            raise RuntimeError(f"Manifest not found after download: {local_manifest}")
+
+        clip_id_to_remote_name: Dict[str, str] = {}
+        with open(local_manifest, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                entry = json.loads(line)
+                clip_id_to_remote_name[entry["clip_id"]] = entry["file"]
+
+        if not clip_id_to_remote_name:
+            raise RuntimeError(f"Manifest {remote_manifest} is empty.")
+        return clip_id_to_remote_name
+
+    def _remote_path(self, remote_name: str) -> str:
+        return f"{self.config.r2_source.rstrip('/')}/{remote_name}"
+
+    # ---------------------------------------------------------------- priority / selection
+
+    def _select_top_k(self) -> torch.Tensor:
+        """Combinatorial-UCB priority: known-hard clips OR still-unproven clips win a slot.
+
+        `+1` smoothing on both the log term and the visit count avoids the divide-by-zero/
+        log(0) edge case at the very first rebuild (`rebuild_count=0`, all `visit_counts=0`)
+        while preserving the two properties the design doc requires: a never-visited clip has
+        the highest possible bonus at any given rebuild_count, and that bonus keeps growing
+        (slowly, log-scale) with `rebuild_count` even if the clip is never picked, so it's
+        guaranteed to eventually outrank a stale already-known-hard clip.
+        """
+        t = self.rebuild_count
+        bonus = self.config.exploration_bonus_coefficient * torch.sqrt(
+            2.0 * math.log(t + 1) / (self.global_clip_visit_counts.float() + 1.0)
+        )
+        priority = self.global_clip_weights + bonus
+        k = min(self.config.resident_pool_size, priority.numel())
+        return torch.topk(priority, k, largest=True).indices
+
+    # ---------------------------------------------------------------- rebuild
+
+    def _rebuild_resident_pool(
+        self, target_local_idx: torch.Tensor, force: bool = False
+    ) -> bool:
+        """Curriculum-driven rebuild: materializes `target_local_idx` as the resident set AND
+        records it as a genuine rebuild decision (bumps `rebuild_count`/`visit_counts`). Use
+        this for real "should the resident set change" decisions (init, `maybe_rebuild`) --
+        NOT for reconstituting an already-decided state on resume (see `_materialize_resident_set`
+        for that; double-counting a resume as a fresh decision would silently inflate the UCB
+        clock and falsely mark resumed clips as newly-visited with no new eval evidence).
+        """
+        target_local_idx = target_local_idx.sort().values
+        if (
+            not force
+            and self._resident_local_indices is not None
+            and torch.equal(target_local_idx, self._resident_local_indices)
+        ):
+            return False
+
+        self._materialize_resident_set(target_local_idx)
+        self.rebuild_count += 1
+        self.global_clip_visit_counts[target_local_idx] += 1
+        return True
+
+    def _materialize_resident_set(self, target_local_idx: torch.Tensor) -> None:
+        """Mechanically load `target_local_idx` as the resident MotionLib data. Pure I/O +
+        tensor-assembly -- does NOT touch `rebuild_count`/`visit_counts` (see
+        `_rebuild_resident_pool` for the curriculum-decision wrapper that does)."""
+        target_local_idx = target_local_idx.sort().values
+        target_clip_ids = [self.rank_clip_ids[i] for i in target_local_idx.tolist()]
+
+        # Download anything missing, concurrently. Unlike MotionLibPool's shard prefetch (which
+        # downloads the *known* next shard during the *current* shard's many epochs of residency),
+        # which clips get promoted here is only known once this rebuild's priority is computed --
+        # there's no way to know it in advance, so this download is unavoidably synchronous from
+        # the training loop's perspective (parallelized across the K files, not hidden behind
+        # unrelated prior work).
+        downloaders = []
+        for clip_id in target_clip_ids:
+            remote_name = self._clip_remote_name[clip_id]
+            local_path = self.local_cache_dir / remote_name
+            if not local_path.exists():
+                downloaders.append(
+                    FileDownloader(self._remote_path(remote_name), self.local_cache_dir).start()
+                )
+        for d in downloaders:
+            d.wait()
+
+        log.info(
+            f"[GlobalClipPool] rank {self.rank}: rebuilding resident pool "
+            f"({len(target_clip_ids)} clips, rebuild_count={self.rebuild_count})"
+        )
+
+        clip_dicts = []
+        shape_counts = []
+        for clip_id in target_clip_ids:
+            local_path = self.local_cache_dir / self._clip_remote_name[clip_id]
+            clip_data = torch.load(local_path, map_location="cpu", weights_only=False)
+            clip_dicts.append(clip_data)
+            shape_counts.append(len(clip_data["motion_lengths"]))
+            self._touch_count += 1
+            self._cache_last_used[clip_id] = self._touch_count
+
+        assembled = self._concat_clip_dicts(clip_dicts)
+
+        # Overwrite the assembled per-motion weights with this rank's persistent scoreboard
+        # value for each clip, broadcast across its shape count -- the per-clip file's own
+        # `motion_weights` is just a stale placeholder from packaging time, the scoreboard
+        # (`global_clip_weights`) is the source of truth.
+        shape_counts_t = torch.tensor(shape_counts, dtype=torch.long)
+        assembled["motion_weights"] = self.global_clip_weights[
+            target_local_idx
+        ].repeat_interleave(shape_counts_t)
+
+        self._load_motion_state_dict(assembled)
+
+        # `_load_motion_state_dict` only overwrites fields present in the loaded dict -- it never
+        # touches these caches, so a stale mapping from the previous resident set would otherwise
+        # silently outlive this rebuild (same reasoning as `MotionLibPool._ensure_shard_loaded`).
+        self._asset_id_to_motion_ids_cache = None
+        self._clip_id_to_motion_ids_cache = None
+
+        self._resident_local_indices = target_local_idx.clone()
+        self._resident_shape_counts = shape_counts_t
+
+        self._evict_cache(keep_clip_ids=set(target_clip_ids))
+
+    @staticmethod
+    def _concat_clip_dicts(clip_dicts: List[dict]) -> dict:
+        """Concatenate K per-clip packaged dicts into one, in the given order.
+
+        Mirrors the field handling in `tools/repackage_stage2_per_clip.py`, just in reverse
+        (merge instead of split). Fails loudly (rather than silently dropping or leaving stale
+        data) if an optional field is present in some but not all of the K dicts -- that would
+        indicate malformed/inconsistent per-clip data, since presence of these fields is a
+        whole-dataset conversion-pipeline invariant, not a per-clip one.
+        """
+        assembled: dict = {}
+
+        def gather(field_name: str):
+            present = [cd.get(field_name) for cd in clip_dicts]
+            n_present = sum(p is not None for p in present)
+            if n_present == 0:
+                return None
+            if n_present != len(present):
+                raise RuntimeError(
+                    f"Inconsistent presence of '{field_name}' across resident clips "
+                    f"({n_present}/{len(present)} have it) -- indicates malformed per-clip data."
+                )
+            return present
+
+        for field_name in PER_FRAME_FIELDS:
+            present = gather(field_name)
+            if present is not None:
+                assembled[field_name] = torch.cat(present, dim=0)
+
+        motion_num_frames = torch.cat([cd["motion_num_frames"] for cd in clip_dicts], dim=0)
+        lengths_shifted = motion_num_frames.roll(1)
+        lengths_shifted[0] = 0
+        assembled["length_starts"] = lengths_shifted.cumsum(0)
+        assembled["motion_num_frames"] = motion_num_frames
+
+        for field_name in PER_MOTION_TENSOR_FIELDS:
+            if field_name == "motion_num_frames":
+                continue
+            present = gather(field_name)
+            if present is not None:
+                assembled[field_name] = torch.cat(present, dim=0)
+
+        for field_name in PER_MOTION_TUPLE_FIELDS:
+            present = gather(field_name)
+            if present is not None:
+                assembled[field_name] = tuple(x for tup in present for x in tup)
+
+        return assembled
+
+    def _evict_cache(self, keep_clip_ids: set) -> None:
+        max_files = int(self.config.cache_size_multiplier * self.config.resident_pool_size)
+        cached = {
+            cid: name
+            for cid, name in self._clip_remote_name.items()
+            if (self.local_cache_dir / name).exists()
+        }
+        if len(cached) <= max_files:
+            return
+
+        evictable = [cid for cid in cached if cid not in keep_clip_ids]
+        evictable.sort(key=lambda cid: self._cache_last_used.get(cid, -1))
+        num_to_evict = len(cached) - max_files
+        for cid in evictable[:num_to_evict]:
+            (self.local_cache_dir / self._clip_remote_name[cid]).unlink(missing_ok=True)
+            self._cache_last_used.pop(cid, None)
+
+    def maybe_rebuild(self) -> bool:
+        """Rebuild the resident pool if the current top-K differs from what's loaded.
+
+        Called on `pool_rebuild_every`'s own epoch cadence (see
+        `GlobalClipPoolRebuildCallback`), deliberately independent of the evaluator's
+        `eval_metrics_every` -- see `GlobalClipPoolConfig.pool_rebuild_every`.
+        """
+        return self._rebuild_resident_pool(self._select_top_k())
+
+    # ---------------------------------------------------------------- weight updates
+
+    def update_global_clip_weights(
+        self,
+        failed_motion_ids: torch.Tensor,
+        success_motion_ids: torch.Tensor,
+        success_discount: float,
+        failure_discount: float,
+    ) -> None:
+        """Apply the evaluator's success/failure discount to the persistent scoreboard.
+
+        `failed_motion_ids`/`success_motion_ids` are global motion ids into the *currently
+        resident* MotionLib, already expanded to all shape variants of each evaluated clip by the
+        caller (`MimicEvaluator._expand_to_clip_variants`). Failure wins over success on overlap,
+        matching the existing precedence in `MimicEvaluator._update_motion_sampling_weights`.
+        """
+        clip_ids = self.motion_clip_ids
+
+        def to_local_indices(motion_ids: torch.Tensor) -> torch.Tensor:
+            unique_clips = {clip_ids[i] for i in motion_ids.detach().cpu().tolist()}
+            return torch.tensor(
+                [self.clip_id_to_local_index[c] for c in unique_clips], dtype=torch.long
+            )
+
+        if success_motion_ids.numel() > 0:
+            idx = to_local_indices(success_motion_ids)
+            self.global_clip_weights[idx] *= success_discount
+
+        if failed_motion_ids.numel() > 0:
+            idx = to_local_indices(failed_motion_ids)
+            if failure_discount != 0:
+                self.global_clip_weights[idx] /= failure_discount
+            else:
+                self.global_clip_weights[idx] = 1.0
+
+    def project_global_weights_to_resident_motion_weights(self) -> torch.Tensor:
+        """Re-broadcast the current global weights onto the resident MotionLib's per-motion
+        `motion_weights` shape, without waiting for the next rebuild."""
+        weights = self.global_clip_weights[self._resident_local_indices].repeat_interleave(
+            self._resident_shape_counts
+        )
+        return weights.to(self.device)
+
+    # ---------------------------------------------------------------- checkpointing
+
+    def get_global_clip_weights_state_dict(self) -> dict:
+        return {
+            "clip_ids": tuple(self.rank_clip_ids),
+            "weights": self.global_clip_weights.clone(),
+            "visit_counts": self.global_clip_visit_counts.clone(),
+            "rebuild_count": self.rebuild_count,
+        }
+
+    def load_global_clip_weights_state_dict(self, state_dict: dict) -> None:
+        if tuple(state_dict["clip_ids"]) != tuple(self.rank_clip_ids):
+            raise RuntimeError(
+                "Checkpointed clip vocabulary doesn't match this rank's current partition -- "
+                "did the manifest, world_size, or clip_partition_shuffle_seed change? Refusing "
+                "to load global clip weights against a mismatched vocabulary."
+            )
+        self.global_clip_weights = state_dict["weights"].clone()
+        self.global_clip_visit_counts = state_dict["visit_counts"].clone()
+        self.rebuild_count = state_dict["rebuild_count"]
+        # Reconstitutes a resident set consistent with the restored scoreboard -- not a new
+        # curriculum decision, so this must NOT bump rebuild_count/visit_counts again (see
+        # `_materialize_resident_set` vs. `_rebuild_resident_pool`). Note this isn't guaranteed to
+        # be bit-identical to whatever was resident at save time: `_select_top_k()` uses
+        # `rebuild_count` as UCB's time axis, and the restored value is one past whatever `t` the
+        # save-time decision actually used (selection happens, then the counter increments) -- the
+        # same kind of shift that naturally happens between any two consecutive live rebuilds
+        # anyway. What must round-trip exactly is the scoreboard (weights/visit_counts/
+        # rebuild_count) itself, not the derived resident set, which is always free to re-derive.
+        self._materialize_resident_set(self._select_top_k())
+
+    @property
+    def distinct_motions_seen(self) -> int:
+        """Total distinct clips visited by this rank so far (parity with `MotionLibPool`, read
+        by `agent.py`'s logging for any motion_lib that exposes it)."""
+        return int((self.global_clip_visit_counts > 0).sum().item())

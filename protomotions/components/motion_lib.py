@@ -149,6 +149,7 @@ class MotionLib:
     motion_genders: Optional[Tuple[str, ...]] = None
     motion_beta_keys: Optional[Tuple[str, ...]] = None
     motion_asset_ids: Optional[Tuple[str, ...]] = None   # e.g. "male_0e26b88d"
+    motion_clip_ids: Optional[Tuple[str, ...]] = None    # stable clip identity, shared across shapes
     # morphology =======
 
     # Get all field names defined at class level
@@ -175,6 +176,8 @@ class MotionLib:
 
         # Internal cache for the static asset_id -> motion_ids mapping.
         self._asset_id_to_motion_ids_cache: Optional[Dict[str, torch.Tensor]] = None
+        # Internal cache for the static clip_id -> motion_ids mapping.
+        self._clip_id_to_motion_ids_cache: Optional[Dict[str, torch.Tensor]] = None
 
         # Handle empty motion library (Null Object pattern)
         if config.motion_file is None:
@@ -227,6 +230,7 @@ class MotionLib:
         self.motion_genders = None
         self.motion_beta_keys = None
         self.motion_asset_ids = None
+        self.motion_clip_ids = None
         # morphology =======
 
     @classmethod
@@ -356,6 +360,41 @@ class MotionLib:
 
         # {'male_0e26b88d': tensor([0], device='cuda:0'), 'female_0e26b88d': tensor([1], device='cuda:0'), ...}
         return self._asset_id_to_motion_ids_cache
+
+    def has_clip_identity_metadata(self) -> bool:
+        """Return True if this MotionLib contains per-motion clip identity (`motion_clip_ids`).
+
+        Distinct from `has_morphology_metadata()`: a MotionLib can have gender/beta metadata
+        without stable clip identity, or vice versa. Callers that need to group motions by
+        "which real-world clip is this, regardless of body shape" (e.g. curriculum weighting
+        across shape variants) should check this rather than assume shape-major positional
+        ordering.
+        """
+        return getattr(self, "motion_clip_ids", None) is not None
+
+    def build_clip_id_to_motion_ids(self) -> Dict[str, torch.Tensor]:
+        """Return mapping: clip_id -> motion ids sharing that clip (cached after first call).
+
+        Unlike the positional "[num_shapes, num_clips] grid" assumption used elsewhere, this
+        groups by the real `motion_clip_ids` string identity, so it's correct even when this
+        MotionLib holds a partial or ragged subset of clips (e.g. a resident clip pool where not
+        every clip has the same number of shape variants).
+        """
+        if self._clip_id_to_motion_ids_cache is not None:
+            return self._clip_id_to_motion_ids_cache
+
+        if not self.has_clip_identity_metadata():
+            raise RuntimeError("MotionLib does not contain motion_clip_ids.")
+
+        mapping: Dict[str, List[int]] = {}
+        for motion_id, clip_id in enumerate(self.motion_clip_ids):
+            mapping.setdefault(clip_id, []).append(motion_id)
+
+        self._clip_id_to_motion_ids_cache = {
+            clip_id: torch.tensor(ids, device=self.device, dtype=torch.long)
+            for clip_id, ids in mapping.items()
+        }
+        return self._clip_id_to_motion_ids_cache
     # morphology =======
 
     def process_packaged_motion_file_name_multi_gpu(self, motion_file):
@@ -709,7 +748,16 @@ class MotionLib:
         loaded_data = torch.load(
             file_path, map_location="cpu", weights_only=False
         )
+        self._load_motion_state_dict(loaded_data)
 
+    def _load_motion_state_dict(self, loaded_data: dict) -> None:
+        """Apply an already-loaded packaged-motion dict to this MotionLib.
+
+        Split out of `load_from_file` so callers that assemble a dict in memory
+        (e.g. `GlobalClipPool`, which concatenates several per-clip files into one
+        packaged dict) can apply it directly without a wasted serialize/deserialize
+        round trip through disk.
+        """
         max_motions = getattr(self.config, "max_motions", None)
         if max_motions is not None:
             n = min(max_motions, len(loaded_data["motion_num_frames"]))

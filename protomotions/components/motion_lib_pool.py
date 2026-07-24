@@ -269,9 +269,10 @@ class MotionLibPool(MotionLib):
         self._prefetcher = None
         self._visited_shard_motion_counts[idx] = self.num_motions()
         # load_from_file() only overwrites the fields present in the saved packaged file
-        # (motion_lib.py:754) -- it never touches this cache, so a stale shard-0 asset_id ->
-        # motion_ids mapping would otherwise silently outlive every later rotation.
+        # (motion_lib.py:754) -- it never touches these caches, so a stale shard-0 asset_id/
+        # clip_id -> motion_ids mapping would otherwise silently outlive every later rotation.
         self._asset_id_to_motion_ids_cache = None
+        self._clip_id_to_motion_ids_cache = None
 
         self._start_prefetch(self._next_shard_idx(idx))
 

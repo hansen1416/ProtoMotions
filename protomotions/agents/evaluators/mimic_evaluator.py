@@ -81,8 +81,16 @@ class MimicEvaluator(BaseEvaluator):
 
         return metrics
 
-    def _build_clip_expansion_index(self) -> tuple:
-        """Build (or return cached) tables for expanding motion IDs to all shape variants.
+    def _build_clip_expansion_index_legacy_positional(self) -> tuple:
+        """Build (or return cached) tables for expanding motion IDs to all shape variants,
+        using shape-major COLUMN POSITION as clip identity.
+
+        Fallback only, used when `motion_lib.has_clip_identity_metadata()` is False (morphology
+        data that predates the `motion_clip_ids` field). Assumes every shape has the same clips
+        in the same positional order and the same clip count -- breaks (throws or silently
+        misaligns) the moment `motion_lib` holds a partial/ragged clip set, e.g. a resident clip
+        pool. Prefer `MotionLib.build_clip_id_to_motion_ids()` wherever `motion_clip_ids` is
+        available (see `_expand_to_clip_variants`).
 
         Returns:
             all_ids: [num_shapes, num_clips] where all_ids[k, i] = global motion ID
@@ -107,25 +115,42 @@ class MimicEvaluator(BaseEvaluator):
         self._clip_expansion_id_to_col = id_to_clip_col
         return all_ids, id_to_clip_col
 
+    def _expand_to_clip_variants_legacy_positional(self, motion_ids: torch.Tensor) -> torch.Tensor:
+        """Expand global motion IDs to ALL shape variants of those clips, via column position.
+
+        Fallback only -- see `_build_clip_expansion_index_legacy_positional`.
+        """
+        if motion_ids.numel() == 0:
+            return motion_ids
+        all_ids, id_to_clip_col = self._build_clip_expansion_index_legacy_positional()
+        unique_clip_cols = id_to_clip_col[motion_ids].unique()
+        return all_ids[:, unique_clip_cols].flatten()
+
     def _expand_to_clip_variants(self, motion_ids: torch.Tensor) -> torch.Tensor:
         """Expand global motion IDs to ALL shape variants of those clips.
 
         If motion_ids contains the ID for (clip_3, shape_A), the result includes
-        all num_shapes variants of clip_3 — (clip_3, shape_A), (clip_3, shape_B), …
-        Relies on the same positional-order assumption as _sample_one_shape_per_motion.
+        all shape variants of clip_3 — (clip_3, shape_A), (clip_3, shape_B), …
+
+        Groups by real `motion_clip_ids` identity when available (correct even for a partial or
+        ragged clip set, e.g. a resident clip pool); falls back to the shape-major positional
+        grid otherwise (morphology data predating `motion_clip_ids`).
         """
         if motion_ids.numel() == 0:
             return motion_ids
-        all_ids, id_to_clip_col = self._build_clip_expansion_index()
-        unique_clip_cols = id_to_clip_col[motion_ids].unique()
-        return all_ids[:, unique_clip_cols].flatten()
+        if not self.motion_lib.has_clip_identity_metadata():
+            return self._expand_to_clip_variants_legacy_positional(motion_ids)
 
-    def _sample_one_shape_per_motion(self) -> torch.Tensor:
-        """For every unique clip, pick one random gender-beta shape.
+        clip_id_to_motion_ids = self.motion_lib.build_clip_id_to_motion_ids()
+        clip_ids = self.motion_lib.motion_clip_ids
+        unique_clips = {clip_ids[i] for i in motion_ids.detach().cpu().tolist()}
+        return torch.cat([clip_id_to_motion_ids[c] for c in unique_clips]).to(motion_ids.device)
 
-        Assumes all shapes have the same clips in the same positional order,
-        which holds for fully-retargeted datasets (e.g. HUMOS). Returns sorted
-        global motion IDs — one per unique clip.
+    def _sample_one_shape_per_motion_legacy_positional(self) -> torch.Tensor:
+        """For every unique clip (by column position), pick one random gender-beta shape.
+
+        Fallback only -- see `_build_clip_expansion_index_legacy_positional`. Assumes all shapes
+        have the same clips in the same positional order and the same clip count.
         """
         asset_to_motion_ids = self.motion_lib.build_asset_id_to_motion_ids()
         shape_lists = list(asset_to_motion_ids.values())  # each: [num_clips]
@@ -142,6 +167,24 @@ class MimicEvaluator(BaseEvaluator):
 
         selected = all_ids[shape_picks, clip_idx]
         return selected.sort().values
+
+    def _sample_one_shape_per_motion(self) -> torch.Tensor:
+        """For every unique clip, pick one random gender-beta shape.
+
+        Groups by real `motion_clip_ids` identity when available, so it's correct even against a
+        partial/ragged resident clip pool where clips may have unequal shape counts; falls back
+        to the shape-major positional grid otherwise. Returns sorted global motion IDs — one per
+        unique clip.
+        """
+        if not self.motion_lib.has_clip_identity_metadata():
+            return self._sample_one_shape_per_motion_legacy_positional()
+
+        clip_id_to_motion_ids = self.motion_lib.build_clip_id_to_motion_ids()
+        selected = []
+        for motion_ids in clip_id_to_motion_ids.values():
+            pick = torch.randint(motion_ids.shape[0], (1,), device=motion_ids.device)
+            selected.append(motion_ids[pick])
+        return torch.cat(selected).sort().values
 
     def initialize_eval(self) -> Dict:
         """Initialize evaluation tracking and cache env state for restoration."""
@@ -228,12 +271,26 @@ class MimicEvaluator(BaseEvaluator):
             self.config.motion_weights_rules.motion_weights_update_failure_discount,
             self.config.eval_metrics_every,
         )
-        new_weights = self.env.motion_manager.motion_weights.clone()
-        new_weights[global_success] *= success_discount
-        if failure_discount != 0:
-            new_weights[global_failed] /= failure_discount
+
+        if hasattr(self.motion_lib, "update_global_clip_weights"):
+            # Persistent scoreboard path (GlobalClipPool): the update lands on the vector that
+            # survives resident-set churn and resumes, then gets re-broadcast onto whatever's
+            # currently resident. Discount math is identical to the direct-mutation path below --
+            # only *where* the result is stored differs.
+            self.motion_lib.update_global_clip_weights(
+                failed_motion_ids=global_failed,
+                success_motion_ids=global_success,
+                success_discount=success_discount,
+                failure_discount=failure_discount,
+            )
+            new_weights = self.motion_lib.project_global_weights_to_resident_motion_weights()
         else:
-            new_weights[global_failed] = 1.0
+            new_weights = self.env.motion_manager.motion_weights.clone()
+            new_weights[global_success] *= success_discount
+            if failure_discount != 0:
+                new_weights[global_failed] /= failure_discount
+            else:
+                new_weights[global_failed] = 1.0
         self.env.motion_manager.update_sampling_weights(new_weights)
 
     def evaluate_episode(self, env_ids: torch.Tensor, max_steps: int) -> None:

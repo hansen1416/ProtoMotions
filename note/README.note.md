@@ -3391,3 +3391,91 @@ So the new design keeps one permanent scoreboard, covering all ~20,951 clips (we
   every ~64 epochs, matching today's pace), using whatever the scoreboard currently says — even if the scoreboard itself
   hasn't been updated by a fresh evaluation in a while. The scoreboard-updating (clock 2b) stays on its own slower pace,
   because that part genuinely requires running real evaluation rollouts, which is expensive.
+
+## 37. Global Clip-Priority Sampling — implemented (2026-07-24)
+
+Implements the design in `note/README.stage2-global-clip-sampling-plan.md` (per-clip repackaging
+to `r2:proto-data/hhi_stage2_per_clip/`, done 2026-07-23) plus the "two clocks" explanation in
+§36's addendum above. Full implementation plan: `/home/hlz/.claude/plans/generic-finding-sparkle.md`.
+
+**New files:**
+- `protomotions/components/global_clip_pool.py` — `GlobalClipPoolConfig`/`GlobalClipPool`
+  (`MotionLib` subclass). Deterministic per-rank clip vocabulary (sorted manifest + seeded
+  shuffle + `[rank::world_size]` stride, same idiom as `MotionLibPool`'s shard partition).
+  Persistent `global_clip_weights`/`global_clip_visit_counts` scoreboard (the "shelf's
+  scoreboard" from §36, CPU tensors, checkpointed, never reset). `_select_top_k()` — a
+  combinatorial-UCB priority (`weight + coefficient * sqrt(2*ln(rebuild_count+1)/(visit_count+1))`)
+  picks K=256 clips/rank. `_rebuild_resident_pool`/`_materialize_resident_set` — downloads
+  missing per-clip files concurrently, concatenates K per-clip dicts in memory (no temp-file
+  round trip), overwrites the assembled `motion_weights` with the scoreboard's values broadcast
+  per clip, loads via a new `MotionLib._load_motion_state_dict` (split out of `load_from_file` for
+  exactly this in-memory use). LRU disk-cache eviction at `cache_size_multiplier * K`.
+- `protomotions/agents/callbacks/global_clip_pool_rebuild.py` — `GlobalClipPoolRebuildCallback`,
+  triggers `maybe_rebuild()` on its own `pool_rebuild_every` epoch cadence (default 64, matching
+  today's `epochs_per_shard`) — deliberately NOT on the evaluator's `on_eval_end`/
+  `eval_metrics_every` (default 200), since that would introduce new/unproven clips *less* often
+  than today's shard rotation, a regression rather than an improvement (this is clock 2a vs.
+  clock 2b from §36's addendum).
+
+**Modified:**
+- `protomotions/components/motion_lib.py` — split `load_from_file`, added
+  `has_clip_identity_metadata()`/`build_clip_id_to_motion_ids()` (real `motion_clip_ids`-keyed
+  grouping, vs. the old shape-major positional-column-index assumption).
+- `protomotions/components/motion_lib_pool.py` — one-line fix: invalidate the new
+  clip-id-to-motion-ids cache on shard rotation too (same staleness reasoning already documented
+  for the asset-id cache at that line), since `mimic_evaluator.py`'s rework below now depends on
+  it generally, not just for the new pool.
+- `protomotions/envs/motion_manager/motion_manager.py` — `get_state_dict`/`load_state_dict` gain
+  a duck-typed `"global_clip_pool"` branch (checked before the existing `motion_file_name`-match
+  legacy path, which is meaningless for a pool whose `motion_file` is a fixed synthetic per-rank
+  string, not a real filename).
+- `protomotions/agents/evaluators/mimic_evaluator.py` — clip-variant grouping
+  (`_expand_to_clip_variants`, `_sample_one_shape_per_motion`) now uses real `motion_clip_ids`
+  identity when available, falling back to the old positional-grid method otherwise (renamed
+  `..._legacy_positional`). `_update_motion_sampling_weights` routes through the pool's
+  `update_global_clip_weights`/`project_global_weights_to_resident_motion_weights` when present;
+  the discount-factor math itself is unchanged either way.
+- `protomotions/train_agent.py` — exempts `GlobalClipPoolConfig` from the `--motion-file`
+  requirement; registers `GlobalClipPoolRebuildCallback` via `isinstance` check, mirroring the
+  existing `StreamingMotionLibConfig` wiring.
+- `examples/experiments/mimic/mlp_wide_fusion_stage2.py` — new `--global-clip-pool-*` CLI flags
+  (source, size, cache dir/multiplier, rebuild-every, shuffle seed, exploration coefficient).
+  `--r2-motion-source` (old shard streaming) kept, checked second, for in-flight runs/resumes.
+
+**Design decisions made while turning the doc into code** (not spelled out in the original doc):
+- `GlobalClipPool.motion_file` is a fixed string per rank (`f"global_clip_pool_rank{rank}"`), set
+  once, never reassigned on rebuild — unlike `MotionLibPool`, which reassigns it every rotation.
+  `Env.get_task_id()` derives the `env_<task_id>.ckpt` filename from this; if it changed every
+  rebuild, resume could never find the right checkpoint file (residency here depends on the
+  checkpoint's own contents, unlike shard rotation being a pure function of `current_epoch`).
+- No new `on_load_checkpoint_before_env_load` hook: the resync (restore scoreboard, recompute
+  top-K, materialize) happens synchronously inside `MotionManager.load_state_dict()` itself,
+  since `BaseAgent.fit()` already unconditionally forces a full env reset on every call including
+  resume.
+- The positional→identity clip-grouping fix in `mimic_evaluator.py` applies whenever
+  `motion_clip_ids` is present, not only when `GlobalClipPool` is in use — it's literally
+  "Problem #2" the design doc names, and it breaks the moment *any* `MotionLib` holds a partial/
+  ragged clip set, which the resident pool structurally is.
+
+**Bug caught by testing, fixed before considering this done:** the first version of
+`load_global_clip_weights_state_dict` re-ran the full rebuild-decision path on resume, which
+silently re-incremented `rebuild_count`/`visit_counts` a second time for the same decision —
+compounding by +1 on every resume, forever. Fixed by splitting `_rebuild_resident_pool`
+(decision + bookkeeping) from `_materialize_resident_set` (pure data loading, no bookkeeping);
+resume now calls only the latter. Caught via a real round-trip test against the actual R2
+manifest, not just a code read-through.
+
+**Verified (real R2 data, `r2:proto-data/hhi_stage2_per_clip/`, small K smoke tests), not yet
+run on real training hardware:** clip-vocabulary determinism across separate instantiations,
+weight-update math (fail → weight up, success → weight down, matching Stage 1's existing
+formula exactly), scoreboard checkpoint round-trip (weights/visit_counts/rebuild_count exact;
+resident set itself is *not* guaranteed bit-identical after a round trip — `_select_top_k`'s UCB
+term uses `rebuild_count` as a time axis that legitimately shifts by one between "the decision
+that produced the saved set" and "reconstructing from the saved counter," same as it would
+between any two consecutive live rebuilds — only the scoreboard needs to round-trip exactly),
+vocabulary-mismatch checkpoint guard, LRU disk-cache eviction bound, identity-based clip
+grouping (both the new path and the legacy-positional fallback), callback cadence gating, and
+all three experiment CLI dispatch branches (`--global-clip-pool-source` /
+`--r2-motion-source` / `--motion-file`). Not yet run: an actual multi-GPU training job, or the
+`nvidia-smi` VRAM dry-run the design doc calls for at real K=256 — both need real RunPod
+hardware.
