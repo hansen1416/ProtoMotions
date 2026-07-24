@@ -3507,3 +3507,94 @@ used, unchanged, by the old `MotionLibPool` shard path, which was never the prob
 exactly one `rclone copy` process observed throughout (confirmed via `ps aux` while it ran), full
 cold-start build completed in ~2m48s, `num_motions == 256*128 == 32768`, `256` distinct resident
 clips — no FD exhaustion. Safe to relaunch the same command as before.
+
+### 37.2 Real-run bug (unresolved, likely host-level): `futex_lock_pi` abort inside PhysX's CPU
+dispatcher (2026-07-24)
+
+After §37.1's fix, every launch of `hhi_wide_fusion_stage2_clippool` (`--num-envs 6144 --batch-size
+24576 --ngpu 6`) still died with:
+```
+Skipping actor_optimizer state load (allow_partial_checkpoint_load=True): ...
+The futex facility returned an unexpected error code.
+[rank: N] Child process with PID ... terminated with code -6.
+```
+one rank, always right after checkpoint load / before the first epoch's rollout, on this specific
+RunPod pod — no Python traceback, a bare glibc abort.
+
+**Ruled out, in order tested (each with a real relaunch, not just reasoning):**
+- `--use-wandb` — disabled, crash unchanged.
+- `GlobalClipPool` forking during download — the manifest download was also made cache-skip (was
+  unconditionally re-fetched every launch before this fix, confounding an earlier test), then
+  relaunched on the *same* pod with a fully warm cache (clips + manifest) so `GlobalClipPool.
+  __init__` made **zero** `subprocess`/`rclone` calls — crashed identically. Repeated on a second,
+  brand-new pod (cold cache → real downloads happened → crash; then relaunched same pod, now warm
+  → crash again). Conclusively rules out fork-after-CUDA-init in the download path.
+- Leftover zombie GPU processes from a prior crashed run — `nvidia-smi` showed stale contexts
+  the first time this was suspected, but the crash recurred on a genuinely fresh pod/GPUs too.
+- Multi-GPU/NCCL scaling — `--ngpu 2` still crashed, but with a *different* symptom first
+  (`PxgCudaDeviceMemoryAllocator fail to allocate memory 1073741824 bytes!! Result = 2`, then a
+  segfault, code -11) — a distinct, well-known IsaacGym GPU-buffer allocation failure, not
+  investigated further since a smaller repro below superseded it.
+- Resource pressure / env count — a minimal smoke test (`--num-envs 32 --batch-size 128
+  --global-clip-pool-size 8 --ngpu 1`, i.e. as small as the config allows) still hit the same futex
+  abort — but notably *later* this time, during actual rollout collection ("Epoch N, collecting
+  data...") rather than at checkpoint load, and as a single process (no Fabric multi-process
+  launcher, since `--ngpu 1`).
+
+**Root cause, found via `gdb -batch -ex run -ex "thread apply all bt full" --args python
+protomotions/train_agent.py ...`** (needed because `core_pattern` on this pod pipes to `apport`,
+which isn't running inside the container, so no core file was ever written — running under gdb
+directly sidesteps that). The aborting thread's stack:
+```
+physx::Ext::CpuWorkerThread::execute()
+  → physx::Cm::FanoutTask::removeReference()
+    → pthread_mutex_lock() [PTHREAD_PRIO_INHERIT mutex]
+      → futex_lock_pi()  -- kernel returned an error glibc's PI-futex path doesn't handle
+        → futex_fatal_error() → abort()
+```
+This is entirely inside IsaacGym's closed-source PhysX plugin (`libcarb.gym.plugin.so`) — one of
+PhysX's own CPU worker threads (`physx.num_threads`, default 4) doing routine task-graph reference
+counting, using a **priority-inheritance (`FUTEX_LOCK_PI`) mutex**, a distinct and much less common
+kernel/glibc code path than an ordinary futex wait. Nothing in ProtoMotions code, the download
+logic, GPU count, or env count is anywhere on this stack — every earlier theory was chasing
+correlation (crash timing lined up with checkpoint load / rank count / cache state) rather than
+the actual cause.
+
+**Working theory:** a host-kernel or container-runtime incompatibility with `FUTEX_LOCK_PI`
+specific to this pod's underlying machine — PI futexes have known edge cases across kernel
+versions/virtualization layers that ordinary futexes don't hit, and glibc has no fallback when the
+kernel returns something the PI-futex path doesn't expect. This would explain why the crash is
+100% reproducible on this pod regardless of every application-level variable tried, and why it's
+never been reported before on whatever pod(s) this project has used historically.
+
+**Confirmed host-level, not Stage-2-specific (2026-07-24):** relaunched with a completely
+unrelated, much simpler script — plain `mlp.py` experiment, `smpl_mor_neutral` robot, a static
+`--motion-file` (no `GlobalClipPool`/streaming, no `--checkpoint` warm-start), same
+`hhi_20946_neutral` config that has trained successfully on this pod before — same `--ngpu 6`. Hit
+the identical `futex` abort. This rules out Stage 2, the clip-pool code, and checkpoint loading
+entirely: the fault is in this pod's PhysX/kernel interaction, triggered by essentially any
+IsaacGym multi-GPU launch.
+
+**Status: unresolved, deferred — waiting on a different pod / RunPod support.** Decided not to
+chase further in-application since this RunPod instance has been in use for a long time without
+this issue appearing before, and it's now confirmed independent of anything in this codebase:
+1. First try forcing PhysX single-threaded to remove the CPU worker-thread pool (and this locking
+   path) entirely: `--overrides simulator.sim.physx.num_threads=1`. If the crash stops, that
+   confirms the PI-mutex theory; if it still crashes, the CPU dispatcher isn't optional at
+   `num_threads=1` either and something deeper is going on.
+2. If (1) doesn't resolve it, treat it as this specific host and provision a fresh pod rather than
+   continuing to debug — the crash showing up only now, after long prior use of this pod, is
+   itself a data point toward host-level drift (kernel update, degraded hardware) rather than
+   anything in this codebase. Worth reporting to RunPod support with the `gdb` backtrace above
+   (`futex_lock_pi` fatal error inside PhysX's CPU dispatcher) — a specific, actionable report
+   naming the host/pod ID, since this looks like exactly the kind of host-kernel issue their infra
+   team could confirm or rule out directly.
+
+Debugging recipe worth keeping for next time (no core file needed, `core_pattern` was piped to a
+non-running `apport`):
+```bash
+which gdb || apt-get update && apt-get install -y gdb
+gdb -batch -ex "run" -ex "thread apply all bt full" --args python protomotions/train_agent.py \
+  <same args as the failing launch> 2>&1 | tee /tmp/gdb_futex.log
+grep -n "SIGABRT\|received signal\|futex_fatal\|__pthread_kill" /tmp/gdb_futex.log
+```
