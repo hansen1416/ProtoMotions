@@ -3340,3 +3340,54 @@ Full launch command in `mlp_wide_lora_stage2.py`'s docstring.
    design — feed both the trunk's output and betas into new learnable layer(s) instead of pure
    addition — design and known risks in §35's "v4 candidate" note. Not started; waiting on v3's
    result first.
+
+
+  ====
+
+
+The basic problem
+
+We have 20,951 motion clips, each with 128 body-shape versions — about 2.7 million individual motions total. That's way too
+much data to fit in GPU memory at once (roughly 1.1TB). GPU memory can only hold a few hundred clips' worth at a time. So at
+any given moment, only a small slice of the full dataset is actually loaded and usable — call this the "shelf."
+
+Everything below is really about answering one question: which clips go on the shelf, and when do we change what's on it.
+
+Two separate clocks running at different speeds
+
+Clock 1 — every training step (fast, thousands of times per epoch): Whenever a simulated robot finishes its current motion
+and needs a new one, we pick a motion only from what's currently on the shelf. This pick is weighted — motions marked "hard"
+get picked more often than motions marked "easy." This part is unchanged from how Stage 1 already works; the only
+difference is the pool of things to pick from is smaller (just the shelf) instead of the whole dataset.
+
+Clock 2a — every ~64 epochs (rebuild): We look at the shelf and ask: "is there anything better we should swap onto it?" A
+clip earns a slot on the shelf for one of two reasons:
+- It's known to be hard (robot keeps failing it), so we want it around more.
+- It's never been tried, so we don't actually k Jump to bottom (ctrl+End) ↓ — we owe it a turn.
+
+We swap the shelf's contents to reflect this, download whatever's newly needed, throw out the least useful stuff, and continue training.
+
+Clock 2b — every ~200 epochs (evaluation): Separately, we periodically run the robot through a batch of motions currently on
+the shelf and check: did it succeed or fail? Motions it failed get marked "harder" (more likely to be picked, and more
+likely to earn a shelf slot later); motions it succeeded on get marked "easier." This is the exact same success→harder /
+fail→easier math Stage 1 already uses — we're not changing that formula at all.
+
+The one genuinely new idea: a permanent memory of difficulty
+
+Today's system (shard rotation) has no memory — every time it swaps in a new batch of clips, it forgets everything it
+learned about difficulty and starts those "hard/easy" labels back at neutral. That's wasteful: if we already learned clip
+#4821 is hard, we shouldn't have to relearn that from scratch every time it happens to cycle back onto the shelf.
+
+So the new design keeps one permanent scoreboard, covering all ~20,951 clips (well, this rank's share of them), that never
+  resets — even across a crash/resume. "Hard" and "easy" labels accumulate on this scoreboard for the life of the whole
+  training run. The shelf is just a small, temporary window into that scoreboard — showing whichever clips currently look most
+  important (hard, or unproven) — but the scoreboard itself remembers everything, forever.
+
+  Why two clocks instead of one
+
+  Originally the plan was to only update the shelf right after evaluation (clock 2b) — but that's slow (every 200 epochs),
+  slower than what's running today (every 64 epochs). That would mean we introduce fresh, untried clips onto the shelf less
+  often than we do now — a step backward. So we decoupled it: the shelf gets refreshed on its own faster schedule (clock 2a,
+  every ~64 epochs, matching today's pace), using whatever the scoreboard currently says — even if the scoreboard itself
+  hasn't been updated by a fresh evaluation in a while. The scoreboard-updating (clock 2b) stays on its own slower pace,
+  because that part genuinely requires running real evaluation rollouts, which is expensive.

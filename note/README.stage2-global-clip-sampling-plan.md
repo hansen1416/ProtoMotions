@@ -141,8 +141,9 @@ failure discount formula itself.
 
 
 
-python tools/repackage_stage2_per_clip.py \
+nohup python -u tools/repackage_stage2_per_clip.py \
       --r2-source r2:proto-data/hhi_stage2/ \
       --r2-dest r2:proto-data/hhi_stage2_per_clip/ \
-      --workspace /workspace/repackage_prep
+      --workspace /workspace/repackage_prep \
+      > /workspace/repackage_prep.log 2>&1 &
 
