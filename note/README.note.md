@@ -3479,3 +3479,31 @@ all three experiment CLI dispatch branches (`--global-clip-pool-source` /
 `--r2-motion-source` / `--motion-file`). Not yet run: an actual multi-GPU training job, or the
 `nvidia-smi` VRAM dry-run the design doc calls for at real K=256 — both need real RunPod
 hardware.
+
+### 37.1 Real-run bug: `EMFILE`/"Too many open files" on the first cold-start rebuild (2026-07-24)
+
+First actual RunPod launch (`hhi_wide_fusion_stage2_clippool`, `--ngpu 6`, `--global-clip-pool-size
+256`) hit `[Errno 24] Too many open files` immediately, from `motion_lib_pool.FileDownloader`'s
+`rclone copy` calls failing across many different clip files at once.
+
+**Root cause:** `GlobalClipPool._materialize_resident_set`'s original implementation launched one
+`FileDownloader` (i.e. one separate `rclone copy` OS process) *per missing clip*, all started
+concurrently. At cold start every one of K=256 clips/rank is missing, so that's up to 256
+simultaneous rclone processes per rank — and with `--ngpu 6` on one node, up to ~1536 across the
+pod — each opening its own file descriptors (network sockets, config/credential files) on top of
+the training process's own. That blows past the user's open-file ulimit (commonly 1024). The old
+shard-streaming path (`MotionLibPool`) never hit this because it only ever runs 1-2 concurrent
+downloads (current shard + one prefetch) — this was specific to the new per-clip pool's K-at-once
+downloads.
+
+**Fix:** `GlobalClipPool._download_missing_clips` now issues ONE `rclone copy` call per rebuild,
+listing all missing clips via `--files-from=<tempfile>`, with rclone's own bounded *internal*
+concurrency (`--transfers`/`--checkers`, new `GlobalClipPoolConfig.download_transfers` field,
+default 8) — one OS process regardless of K, parallelism happens inside that process instead of
+across processes. `motion_lib_pool.FileDownloader` is no longer used by `GlobalClipPool` (still
+used, unchanged, by the old `MotionLibPool` shard path, which was never the problem).
+
+**Re-verified end-to-end at the real production K=256** against the actual R2 data after the fix:
+exactly one `rclone copy` process observed throughout (confirmed via `ps aux` while it ran), full
+cold-start build completed in ~2m48s, `num_motions == 256*128 == 32768`, `256` distinct resident
+clips — no FD exhaustion. Safe to relaunch the same command as before.

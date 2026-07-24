@@ -44,6 +44,19 @@ class GlobalClipPoolRebuildCallback(Callback):
     their own faster, independent schedule.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        # `GlobalClipPool.__init__`/`MotionManager.load_state_dict` (on resume) already
+        # materialize a resident set correct for "right now" before this callback's first
+        # `before_play_steps` call ever fires. Without this guard, that very first call -- at
+        # whatever epoch training starts/resumes from -- would immediately call `maybe_rebuild()`
+        # again: `_select_top_k()`'s UCB bonus term uses `rebuild_count` as a time axis that
+        # shifts by one between "the decision that just ran" and "this next check," which makes
+        # almost every never-visited clip look more attractive than what's already resident (see
+        # note/README.note.md §37 for the math) -- so it would reliably trigger a second, fully
+        # redundant full-pool download+reload on all ranks at once, right as training starts.
+        self._skip_next_check = True
+
     def on_fit_start(self, agent: PPO) -> None:
         """No-op override.
 
@@ -59,6 +72,9 @@ class GlobalClipPoolRebuildCallback(Callback):
         pass
 
     def before_play_steps(self, agent: PPO) -> None:
+        if self._skip_next_check:
+            self._skip_next_check = False
+            return
         if agent.current_epoch % agent.motion_lib.config.pool_rebuild_every != 0:
             return
         if agent.motion_lib.maybe_rebuild():

@@ -32,6 +32,8 @@ import logging
 import math
 import random
 import subprocess
+import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -39,9 +41,16 @@ from typing import Dict, List, Optional
 import torch
 
 from protomotions.components.motion_lib import MotionLib, MotionLibConfig
-from protomotions.components.motion_lib_pool import FileDownloader
 
 log = logging.getLogger(__name__)
+
+# Batched-download retry/timeout knobs (mirrors motion_lib_pool.FileDownloader's constants, but
+# applied to one rclone invocation covering all missing clips in a rebuild, not one per file --
+# see GlobalClipPool._download_missing_clips for why that distinction matters).
+DOWNLOAD_MAX_ATTEMPTS = 3
+DOWNLOAD_RETRY_BACKOFF_SECONDS = 30.0
+DOWNLOAD_BASE_TIMEOUT_SECONDS = 120.0
+DOWNLOAD_PER_FILE_TIMEOUT_SECONDS = 8.0
 
 # Field lists mirror tools/repackage_stage2_per_clip.py's per-clip packaging contract exactly.
 PER_FRAME_FIELDS = ["gts", "grs", "gvs", "gavs", "dvs", "dps", "contacts", "lrs"]
@@ -117,6 +126,14 @@ class GlobalClipPoolConfig(MotionLibConfig):
             "help": "Scale of the UCB-style exploration bonus added to a clip's selection "
             "priority. 1.0 puts a never-visited clip's bonus on the same order of magnitude as "
             "the default initial weight (also 1.0)."
+        },
+    )
+    download_transfers: int = field(
+        default=8,
+        metadata={
+            "help": "rclone --transfers/--checkers for the single batched download call each "
+            "rebuild issues. Bounded, internal-to-one-process concurrency -- NOT one OS "
+            "subprocess per missing clip (that exhausts the open-file ulimit at K~256/rank)."
         },
     )
 
@@ -253,8 +270,73 @@ class GlobalClipPool(MotionLib):
             raise RuntimeError(f"Manifest {remote_manifest} is empty.")
         return clip_id_to_remote_name
 
-    def _remote_path(self, remote_name: str) -> str:
-        return f"{self.config.r2_source.rstrip('/')}/{remote_name}"
+    def _download_missing_clips(self, remote_names: List[str]) -> None:
+        """Download all listed (not-yet-cached) per-clip files in ONE rclone invocation, using
+        rclone's own bounded internal concurrency (`--transfers`) rather than one OS subprocess
+        per file.
+
+        The original implementation launched a separate `FileDownloader` (i.e. a separate
+        `rclone copy` process) per missing clip, all concurrently. At K~256 clips/rank -- and
+        worse, all 256 missing at once on the very first cold-start rebuild -- that's up to 256
+        simultaneous OS processes per rank (more across multiple ranks on one node), each opening
+        its own set of file descriptors (network sockets, config/credential files) on top of
+        whatever else the training process has open. That exhausts the user's open-file ulimit
+        (`EMFILE`, "Too many open files") in practice, unlike `MotionLibPool`'s shard prefetch
+        which never runs more than 1-2 concurrent downloads. A single rclone process with
+        `--files-from` keeps the OS-level process/FD footprint to one process regardless of K;
+        parallelism across files still happens, just internally to that one process.
+        """
+        if not remote_names:
+            return
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(remote_names))
+            list_path = f.name
+
+        timeout = DOWNLOAD_BASE_TIMEOUT_SECONDS + DOWNLOAD_PER_FILE_TIMEOUT_SECONDS * len(
+            remote_names
+        )
+        try:
+            for attempt in range(1, DOWNLOAD_MAX_ATTEMPTS + 1):
+                try:
+                    subprocess.run(
+                        [
+                            "rclone",
+                            "copy",
+                            self.config.r2_source.rstrip("/"),
+                            str(self.local_cache_dir),
+                            f"--files-from={list_path}",
+                            f"--transfers={self.config.download_transfers}",
+                            f"--checkers={self.config.download_transfers}",
+                            "--retries=10",
+                            "--retries-sleep=30s",
+                            "--s3-no-check-bucket",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                    )
+                    return
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                    reason = (
+                        f"timed out after {timeout:.0f}s"
+                        if isinstance(e, subprocess.TimeoutExpired)
+                        else str(e)
+                    )
+                    log.warning(
+                        f"[GlobalClipPool] rank {self.rank}: batched download attempt "
+                        f"{attempt}/{DOWNLOAD_MAX_ATTEMPTS} failed "
+                        f"({len(remote_names)} files): {reason}"
+                    )
+                    if attempt == DOWNLOAD_MAX_ATTEMPTS:
+                        raise RuntimeError(
+                            f"Failed to download {len(remote_names)} clip files after "
+                            f"{DOWNLOAD_MAX_ATTEMPTS} attempts: {reason}"
+                        ) from e
+                    time.sleep(DOWNLOAD_RETRY_BACKOFF_SECONDS)
+        finally:
+            Path(list_path).unlink(missing_ok=True)
 
     # ---------------------------------------------------------------- priority / selection
 
@@ -308,22 +390,18 @@ class GlobalClipPool(MotionLib):
         target_local_idx = target_local_idx.sort().values
         target_clip_ids = [self.rank_clip_ids[i] for i in target_local_idx.tolist()]
 
-        # Download anything missing, concurrently. Unlike MotionLibPool's shard prefetch (which
-        # downloads the *known* next shard during the *current* shard's many epochs of residency),
-        # which clips get promoted here is only known once this rebuild's priority is computed --
-        # there's no way to know it in advance, so this download is unavoidably synchronous from
-        # the training loop's perspective (parallelized across the K files, not hidden behind
-        # unrelated prior work).
-        downloaders = []
-        for clip_id in target_clip_ids:
-            remote_name = self._clip_remote_name[clip_id]
-            local_path = self.local_cache_dir / remote_name
-            if not local_path.exists():
-                downloaders.append(
-                    FileDownloader(self._remote_path(remote_name), self.local_cache_dir).start()
-                )
-        for d in downloaders:
-            d.wait()
+        # Download anything missing in ONE batched rclone call (bounded internal concurrency via
+        # --transfers), not one OS subprocess per file. Unlike MotionLibPool's shard prefetch
+        # (which downloads the *known* next shard during the *current* shard's many epochs of
+        # residency), which clips get promoted here is only known once this rebuild's priority is
+        # computed -- there's no way to know it in advance, so this download is unavoidably
+        # synchronous from the training loop's perspective.
+        missing_remote_names = [
+            self._clip_remote_name[clip_id]
+            for clip_id in target_clip_ids
+            if not (self.local_cache_dir / self._clip_remote_name[clip_id]).exists()
+        ]
+        self._download_missing_clips(missing_remote_names)
 
         log.info(
             f"[GlobalClipPool] rank {self.rank}: rebuilding resident pool "
