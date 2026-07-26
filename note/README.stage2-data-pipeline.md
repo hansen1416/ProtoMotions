@@ -14,6 +14,9 @@ and resumes automatically if interrupted.
 each containing 128 shape variants (64 betas × 2 genders).
 
 **Target:** `r2:proto-data/20946_humos_offset/` — ~335 offset shards × ~3.4 GB each ≈ 1.1 TB total.
+(Note: the actual run at the bottom of this doc uploaded to `r2:proto-data/hhi_stage2/` instead —
+that's the real, still-referenced prefix; `20946_humos_offset` was the originally planned name
+and was never actually used on R2.)
 
 **Script:** `tools/prepare_stage2_data.py` — processes in batches of 4096 clips,
 peak disk ~750 GB, cleans up intermediates after each batch.

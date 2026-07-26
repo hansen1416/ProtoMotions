@@ -1,5 +1,12 @@
 # Stage 2 Training Plan
 
+> **Status: superseded (2026-07-26).** This plan's transfer approach (raw-betas, full
+> fine-tune, `MotionLibPool`/`FileDownloader`/`schedule.json` sliding window) was replaced by
+> the frozen-trunk + adapter architecture — see `README.note.md` §32–37. The R2 path below
+> (`stage2_data/`) is also stale; the actual data lives at `r2:proto-data/hhi_stage2/` (and
+> `hhi_stage2_per_clip/` for the per-clip repackaged format used by the global clip pool).
+> Kept for historical context on why the naive `MotionLib` approach doesn't scale.
+
 ## Context
 
 Stage 2 trains a morphology-conditioned policy on the full 20,946 HumanML3D clips × 128 SMPL body shapes = 2.68M motions, transferred from the Stage 1 neutral checkpoint.

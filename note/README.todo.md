@@ -1,53 +1,47 @@
 # TODO
 
+> **Note (2026-07-26):** this file had gone stale — it still described Stage 1 as running and
+> Stage 2 as blocked on data. Updated below based on what's actually happened since
+> (`README.note.md` §1-37 is the authoritative chronological record if in doubt).
+
 ## Current Status
 
 | | |
 |---|---|
-| Stage 1 (`hhi_20946_neutral`) | **Running** — 20,946 neutral motions, `smpl_mor_neutral` + `mlp.py`, 6 shards on RunPod |
-| Stage 2 data pipeline | **In progress** — `tools/prepare_stage2_data.py`; check `pipeline_log.txt` for batch progress |
-| Stage 2 training | **Blocked** on data |
+| Stage 1 (`hhi_20946_neutral`) | **Converged.** Superseded by MoE/wide-control iterations; `hhi_moe_20946_neutral_stable` reached 95.9% success @ epoch 16400. |
+| Stage 2 data pipeline | **Done.** `r2:proto-data/hhi_stage2/` (328 shards) and `hhi_stage2_per_clip/` (per-clip repackaged, used by the global clip pool) both on R2. |
+| Stage 2 training | **Running** — `hhi_wide_fusion_stage2_clippool` launched 2026-07-26 on RunPod (frozen-trunk fusion adapter v4 + `GlobalClipPool`, first real run of both). |
 
 ---
 
-## Active — Pre-Stage-2
+## Active — Pre-Stage-2 (historical — all resolved)
 
-- **N1 (CRITICAL)** When Stage 1 converges: inspect normalizer before Stage 2
-  ```bash
-  python tools/reset_morphology_normalizer.py \
-      --checkpoint results/hhi_20946_neutral/last.ckpt --dry-run
-  # expect var[-10:] ≈ 0 on all beta dims; var[-11] (gender) ≈ 1.0
-  python tools/reset_morphology_normalizer.py \
-      --checkpoint results/hhi_20946_neutral/last.ckpt \
-      --output results/hhi_20946_neutral/last_morph_reset.ckpt
-  ```
-- **N2 (DECIDED 2026-06-27)** Morphology rep: **raw betas (11-dim)** — gravity-core eval shows
-  physics features only 0.018 m better (< 0.05 m threshold), not worth obs-dim change. See
-  `README.gravity-core-eval.md` for full analysis.
-- **N3** When Stage 2 data ready and Stage 1 converged: launch `hhi_stage2_transfer`
-  with 10× lower LR, from the reset checkpoint
+- **N1 (CRITICAL) — DONE.** Normalizer reset before Stage 2, via `tools/reset_morphology_normalizer.py`.
+  Confirmed still in use as of the current stage2 adapter pipeline (`README.note.md` line ~3077).
+- **N2 (DECIDED 2026-06-27) — DONE.** Morphology rep: raw betas (11-dim). See `README.gravity-core-eval.md`.
+- **N3 — SUPERSEDED.** The original "`hhi_stage2_transfer`, 10× LR, full fine-tune" plan was
+  replaced by the frozen-trunk + adapter architecture (v1 LoRA → v2 full-concat → v3 shape-only →
+  v4 concat-fusion, the version now training). See `README.note.md` §32-37.
 
 ---
 
-## Training Improvements (Stage 2)
+## Training Improvements (Stage 2) — DONE
 
-- **A2 (MED)** Contact reward: extend `contact_bodies` to include `L_Knee`, `R_Knee`,
-  `L_Wrist`, `R_Wrist` — needed for crawl/kneel/squat clips which are the main failure class
-- **A3 (MED)** Phase obs: add `φ = frame_idx / total_frames ∈ [0,1]` as an observation key
-  to resolve temporal aliasing in periodic motions
+- **A2 (MED) — DONE.** Contact reward extended to knees/wrists. See `README.note.md` §16
+  (2026-06-30, "Phase Variable φ and Contact Bodies Extension").
+- **A3 (MED) — DONE.** Phase obs `φ = frame_idx / total_frames` added, same §16.
 
 ---
 
-## Evaluator Augmentation (needed before first Stage 2 eval run)
+## Evaluator Augmentation — partially verified, needs a re-check before relying on it
 
-Add to `HHIFaultEvaluator` / `evaluate_hhi_faults.py` CSV output:
-- **E3-a** `mean_normalized_jerk` — via existing `SmoothnessCalculator.compute_normalized_jerk_from_pos`
-- **E3-b** `high_jerk_frame_pct` — % of 0.4s windows exceeding NJ threshold 6500
-- **E3-c** `beta_l2` = `‖β‖₂` per motion (one-liner from `motion_lib.motion_betas[id].norm()`)
-- **E3-d** `explosion_frame` — first frame where body_dist > 5 m; −1 if none
-- **E3-e** `completed` bool — all frames ran without explosion
-
-See `README.eval-plan.md` §Part 3 for the full implementation spec.
+Originally speced (`README.eval-plan.md` §Part 3) as additions to `HHIFaultEvaluator` /
+`protomotions/evaluate_hhi_faults.py`:
+- **E3-a, E3-b — DONE**, confirmed present as `SmoothnessAggregateMetric`
+  (`protomotions/agents/evaluators/aggregate_metrics.py`) — same 0.4s window / 6500 threshold as spec'd.
+- **E3-c, E3-d, E3-e** (`beta_l2`, `explosion_frame`, `completed`) — **not found** under these
+  names in `hhi_fault_evaluator.py` as of 2026-07-26. Either implemented differently/renamed, or
+  never done — verify before assuming this data exists in eval CSVs.
 
 ---
 
@@ -62,11 +56,14 @@ Run after Stage 2 converges. All post-E1 analyses are pure pandas from the CSV �
 | E4 | Per-shape success rate: group by `(gender, beta_key)` → 128 rates → histogram | E1 |
 | E5 | Cross-shape variance: `std(mean_body_dist)` per clip across 128 betas | E1 |
 | E6 | Shape extremity: scatter `‖β‖₂` vs `mean_body_dist`, fit OLS slope | E1 + E3-c |
-| E7 | Held-out beta generalization (interp + extrap) | interp inference done; see `README.heldout-pipeline.md` |
+| E7 | Held-out beta generalization (interp + extrap) | **Still blocked.** Interp inference ran (717 files) but was found to be an invalid result — `infer.py` bug concatenated train/val/test splits (see `README.note.md` §11). Needs the fix + re-run; see `README.heldout-pipeline.md`. |
+
+E1-E6: status not re-verified in this pass (not confidently confirmed done or not — check
+`results/*/` eval CSVs directly rather than trusting this table).
 
 ---
 
-## Analysis
+## Analysis (status not re-verified in this pass)
 
 - **B1 (HIGH)** Embodiment probe: record actor hidden activations for all 128 shapes; fit
   linear regression to predict physical properties (mass, COM height, limb lengths); report R²
@@ -75,6 +72,11 @@ Run after Stage 2 converges. All post-E1 analyses are pure pandas from the CSV �
 ---
 
 ## Future Training Architecture (from 2026-06-30 training strategy review)
+
+Note: written before the frozen-trunk + adapter architecture (v1-v4, `README.note.md` §32-37).
+T-B1 in particular (pre-init the *trunk's* obs normalizer from morphology stats) may not directly
+apply now that betas are routed through a separate, freshly-trained `beta_encoder` rather than the
+frozen trunk's normalizer — re-evaluate relevance before picking this up.
 
 - **T-B1 (MED)** Pre-initialise obs normalizer from dataset statistics before Stage 2 starts.
   Since all 128 body shapes are loaded at startup, compute `mean` and `var` of `morphology_obs`

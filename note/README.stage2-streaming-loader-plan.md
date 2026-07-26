@@ -1,6 +1,10 @@
 # Stage 2 Streaming Data Loader (shard-by-shard from R2) — Implementation Plan
 
-**Status: plan only, not yet implemented (2026-07-14).** This refines and supersedes the "What
+**Status: implemented 2026-07-14** (see `note/README.note.md` §33 — matches this plan almost
+exactly), **then superseded by the global clip pool 2026-07-24** (`note/README.note.md` §37,
+`README.stage2-global-clip-sampling-plan.md`), which replaces per-rank shard rotation with a
+resident per-clip pool. Kept for the shard-rotation design rationale below, which the clip pool
+built on. This refines and supersedes the "What
 needs to be built" section of `note/README.stage2-training-plan.md` after checking it against the
 current codebase — nothing described there (`MotionLibPool`, `FileDownloader`,
 `prepare_stage2_schedule.py`) was ever built.

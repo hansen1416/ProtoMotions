@@ -27,7 +27,9 @@ All permanent/large data lives at `r2:proto-data/`. Run `rclone ls r2:proto-data
 |---|---|---|---|
 | `merged4/humos_{0-3}.pt` | 57 GB | **Pilot** training data (1024 clips × 128 shapes, merged shards) | ✓ uploaded |
 | `20946_neutral_offset/humanml3d_neutral_20946_000X.pt` | 16 GB | Stage 1 training data (20,946 neutral motions, 6 shards) | ✓ uploaded |
-| `hhi_stage2/` | ~1.1 TB projected | **Stage 2** full training data (20,946 clips × 128 shapes) | In progress — see `README.stage2-data-pipeline.md` |
+| `hhi_stage2/` | ~1.1 TB | **Stage 2** full training data (20,946 clips × 128 shapes), 328 shards | ✓ uploaded, kept as fallback |
+| `hhi_stage2_per_clip/` | ~1.1 TB | Same Stage 2 data, repackaged one file per clip (20,952 objects) for `GlobalClipPool` streaming | ✓ uploaded, active format |
+| `hhi_stage1_merged6/` | ~17.2 GB | Stage 1 v2 data (41,902 motions, 2 shapes), merged to 6 balanced files | ✓ uploaded, active format |
 | `difficult-motions/failed_clips.pt` | 10 GB | Pilot hard-clip fine-tune set (192 clips × 128 shapes) | ✓ uploaded |
 | `ckpt/hhi_1024_transfer.zip` | 932 MB | Pilot transfer checkpoint (raw betas) — ablation reference | ✓ uploaded |
 | `ckpt/hhi_1024_phy_transfer.zip` | 1.1 GB | Pilot transfer checkpoint (physics features) — ablation reference | ✓ uploaded |
@@ -234,6 +236,11 @@ rsync -avz protomotions/data/assets/mjcf/smpl_mor_neutral/ \
 ## Pipeline D — Stage 2 Full Dataset (20,946 clips × 128 shapes ≈ 1.1 TB)
 
 Final output on R2: `hhi_stage2/batch_NNNN_MMMM_offset.pt` (~335 shards × 3.4 GB)
+
+**Follow-on step (done 2026-07-24, not covered below):** the shards were repackaged one file per
+clip into `hhi_stage2_per_clip/` via `tools/repackage_stage2_per_clip.py`, for `GlobalClipPool`
+streaming (`README.note.md` §37, `README.stage2-global-clip-sampling-plan.md`). This is the format
+the currently-training `hhi_wide_fusion_stage2_clippool` run actually consumes.
 
 See `README.stage2-data-pipeline.md` for the full pipeline spec and run commands.
 

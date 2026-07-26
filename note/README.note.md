@@ -3575,20 +3575,37 @@ the identical `futex` abort. This rules out Stage 2, the clip-pool code, and che
 entirely: the fault is in this pod's PhysX/kernel interaction, triggered by essentially any
 IsaacGym multi-GPU launch.
 
+**Confirmed hardware-independent (2026-07-25):** retried on two freshly-provisioned pods, one
+6xA40 and one 6xRTX A6000 — different GPU models, presumably different physical hosts. Both hit
+the identical `futex_lock_pi` abort. This rules out "one degraded machine" and points at something
+common across RunPod's fleet rather than specific hardware: a host kernel version rolled out
+broadly, a container-runtime/nvidia-container-toolkit version, or a seccomp/cgroup policy change
+that all their hosts picked up around the same time (PI-futex mutexes need `sched_setscheduler`
+capability / nonzero `RLIMIT_RTPRIO` under the hood — if a security-hardening change restricted
+that at the container level fleet-wide, every pod would hit this regardless of GPU).
+
 **Status: unresolved, deferred — waiting on a different pod / RunPod support.** Decided not to
 chase further in-application since this RunPod instance has been in use for a long time without
-this issue appearing before, and it's now confirmed independent of anything in this codebase:
+this issue appearing before, and it's now confirmed independent of anything in this codebase or
+the specific GPU hardware:
 1. First try forcing PhysX single-threaded to remove the CPU worker-thread pool (and this locking
    path) entirely: `--overrides simulator.sim.physx.num_threads=1`. If the crash stops, that
    confirms the PI-mutex theory; if it still crashes, the CPU dispatcher isn't optional at
-   `num_threads=1` either and something deeper is going on.
-2. If (1) doesn't resolve it, treat it as this specific host and provision a fresh pod rather than
-   continuing to debug — the crash showing up only now, after long prior use of this pod, is
-   itself a data point toward host-level drift (kernel update, degraded hardware) rather than
-   anything in this codebase. Worth reporting to RunPod support with the `gdb` backtrace above
-   (`futex_lock_pi` fatal error inside PhysX's CPU dispatcher) — a specific, actionable report
-   naming the host/pod ID, since this looks like exactly the kind of host-kernel issue their infra
-   team could confirm or rule out directly.
+   `num_threads=1` either and something deeper is going on. (Not yet tried as of 2026-07-25.)
+2. Check the container's realtime-scheduling posture directly, since that's the mechanism PI
+   futexes depend on: `ulimit -r` (RLIMIT_RTPRIO), `cat /proc/self/status | grep -i seccomp`,
+   `cat /proc/self/status | grep Cap` (compare against `capsh --decode=<CapEff>` for `CAP_SYS_NICE`).
+   A `0` rtprio limit or a seccomp filter blocking `sched_setscheduler` would explain the kernel
+   returning something glibc's PI-futex path can't handle — and would point squarely at a
+   RunPod-side container config change rather than hardware.
+3. Test the same Docker image on non-RunPod infra (another cloud, or a local/on-prem GPU box) to
+   separate "RunPod fleet-wide change" from "something baked into our own image" (e.g. a base
+   image bump that pulled in a newer glibc/CUDA driver combo with this bug).
+4. If a known-good older tag of the training image exists (from before 2026-07-24), try it
+   unchanged on a new RunPod pod — isolates image-side regressions from host-side ones.
+5. Report to RunPod support with the strengthened evidence (identical crash on two different GPU
+   models same day) plus the `gdb` backtrace above (`futex_lock_pi` fatal error inside PhysX's CPU
+   dispatcher) — this is a much stronger "your infra changed" signal than a single pod would be.
 
 Debugging recipe worth keeping for next time (no core file needed, `core_pattern` was piped to a
 non-running `apport`):

@@ -32,7 +32,11 @@ python -u humos/infer.py \
     --local-out-dir /home/hlz/datasets/humos_output/extrap
 ```
 
-**Status:** interp DONE (717 files, all 16 beta keys verified). extrap: TODO.
+**Status:** interp ran, produced 717 files, all 16 beta keys verified — **but per
+`note/README.note.md` §11, this output is an accidental artifact of an `infer.py` bug that
+concatenated train/val/test splits, confounding motion-OOD with shape-OOD.** Not a valid E7
+result as-is; needs the `infer.py` fix (also noted in §11) and a re-run before it's usable.
+extrap: TODO.
 
 ---
 
@@ -126,3 +130,5 @@ rsync -avz /home/hlz/datasets/heldout_extrap_offset.pt runpod:/workspace/
 ```
 
 Then see `note/README.eval-transfer.md` Part 1b Step 6 for the IsaacGym eval commands.
+**(Dead link as of 2026-07-26 — this file was never created. The eval commands it was meant to
+hold still need to be written up, e.g. in this file or in `README.note.md`.)**

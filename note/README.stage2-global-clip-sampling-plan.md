@@ -1,6 +1,10 @@
 # Stage 2 Global Clip-Priority Sampling — Design Plan
 
-**Status: plan only, not yet implemented (2026-07-23).** Supersedes the shard-rotation-as-curriculum
+**Status: implemented 2026-07-24** (`note/README.note.md` §37, `protomotions/components/global_clip_pool.py`).
+One shipped deviation from this plan, see the correction note under item 4 below: rebuild cadence
+ended up as a fixed epoch count (`pool_rebuild_every`), not evaluator-tracking as originally
+specced — tracking the evaluator was judged a regression during implementation.
+Supersedes the shard-rotation-as-curriculum
 behavior described in `note/README.stage2-streaming-loader-plan.md` — that plan solved "how do we
 stream 1.1TB through limited memory," this one solves "how do we make the difficulty curriculum
 survive shard rotation and cover the whole dataset instead of resetting every rotation."
@@ -76,7 +80,14 @@ K=256 clips at a time per rank. Local disk cache sized generously above K (e.g. 
 download hysteresis, so clips oscillating near the boundary don't get re-downloaded every rebuild —
 disk is cheap, no reason to pinch this.
 
-**4. Rebuild cadence tracks the evaluator, not a fixed epoch count.** Every time
+**4. Rebuild cadence tracks the evaluator, not a fixed epoch count.**
+> **Correction (2026-07-26): shipped differently.** The implemented `GlobalClipPool` uses a fixed
+> `pool_rebuild_every` epoch count instead — tracking the evaluator directly was judged a
+> regression during implementation (didn't decouple cleanly from eval timing/variance). The
+> rest of this item's mechanics (diff resident set, background-download promotions, monolithic
+> block swap) shipped as described.
+
+Every time
 `MimicEvaluator` produces a fresh success/failure signal (`eval_metrics_every`), recompute the
 top-K clips by `global_clip_weights + exploration_bonus`, diff against the current resident set,
 background-download anything newly promoted that isn't already cached, reassemble a monolithic

@@ -249,10 +249,24 @@ nohup python -u protomotions/train_agent.py \
 
 ## Stage2
 
+> **Status (2026-07-26):** the active run is `hhi_wide_fusion_stage2_clippool` (last command
+> below) — the global clip pool + fusion adapter v4 combo, now training for real for the first
+> time. The three `--r2-motion-source r2:proto-data/hhi_stage2/` commands above it (lora/residual/
+> plain-fusion stage2) are earlier shard-streaming iterations, superseded by the clip-pool
+> approach. Kept as a fallback launch reference only — `hhi_stage2/` itself is intentionally kept
+> on R2 for this reason (see R2 cleanup decision in project notes), not deleted alongside
+> `hhi_stage1/`.
+>
+> Also note: training on RunPod was blocked for a stretch by a host-level `futex_lock_pi` crash
+> inside IsaacGym's PhysX CPU dispatcher, reproduced identically on both 6xA40 and 6xRTX A6000
+> RunPod configs (see `README.note.md` §37.2). Retrying the exact same launch commands on RunPod
+> again on 2026-07-26 worked without the fix ever being identified — so if training locks up with
+> the same symptom on a fresh pod, that's a known (if unresolved) RunPod-side flake, not a code bug.
+
 0. One-time prerequisite (skip if you've already run this against hhi_wide_20946_neutral):
-  python tools/reset_morphology_normalizer.py \
-      --checkpoint results/hhi_wide_20946_neutral/score_based.ckpt \
-      --output results/hhi_wide_20946_neutral/last_morph_reset.ckpt
+python tools/reset_morphology_normalizer.py \
+  --checkpoint results/hhi_wide_20946_neutral/score_based.ckpt \
+  --output results/hhi_wide_20946_neutral/last_morph_reset.ckpt
 
 1. The streaming smoke test — deliberately using a small --epochs-per-shard (2 instead of the production default 64) so
 several rotations actually happen during a short test window, since that's the whole point of this run: exercising the
@@ -462,6 +476,3 @@ sudo apt-get install -y nvidia-container-toolkit
 
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
-
-
-claude --resume 36b9f507-1b60-4b9a-b280-b7c1963a5e72
