@@ -136,6 +136,34 @@ class GlobalClipPoolConfig(MotionLibConfig):
             "subprocess per missing clip (that exhausts the open-file ulimit at K~256/rank)."
         },
     )
+    selection_temperature: float = field(
+        default=1.0,
+        metadata={
+            "help": "Softmax temperature over priority *rank* (not raw value) used to sample "
+            "the resident set. Higher = flatter/more exploratory; near-0 approaches "
+            "deterministic top-K. Rank-based so it stays well-behaved regardless of the "
+            "absolute scale of global_clip_weights."
+        },
+    )
+    weight_ema_alpha: float = field(
+        default=0.1,
+        metadata={
+            "help": "EMA blend factor for global_clip_weights updates: "
+            "weight = alpha*target + (1-alpha)*weight, target=0 on success / 1 on failure. "
+            "Replaces the old one-shot success/failure discount jump with a bounded, gradual "
+            "update so a single eval tick can't move a whole cluster of clips across the "
+            "selection cutoff at once."
+        },
+    )
+    difficulty_scores_path: str = field(
+        default="data/preprocessing/valid_ids_sorted_by_difficulty.txt",
+        metadata={
+            "help": "Path (repo-root-relative or absolute) to a 'clip_id: score' file, "
+            "ascending easy->hard, used to seed global_clip_weights instead of a flat 1.0 -- "
+            "gives the curriculum a real easy-first starting point before any clip has been "
+            "evaluated. Not precise, just a general prior; missing ids fall back to 0.5."
+        },
+    )
 
 
 class GlobalClipPool(MotionLib):
@@ -203,7 +231,11 @@ class GlobalClipPool(MotionLib):
         )
 
         num_clips = len(self.rank_clip_ids)
-        self.global_clip_weights = torch.ones(num_clips, dtype=torch.float32)
+        difficulty_scores = self._load_difficulty_scores(config.difficulty_scores_path)
+        self.global_clip_weights = torch.tensor(
+            [difficulty_scores.get(cid, 0.5) for cid in self.rank_clip_ids],
+            dtype=torch.float32,
+        )
         self.global_clip_visit_counts = torch.zeros(num_clips, dtype=torch.long)
         self.rebuild_count = 0
 
@@ -223,6 +255,23 @@ class GlobalClipPool(MotionLib):
         self._rebuild_resident_pool(self._select_top_k(), force=True)
 
     # ---------------------------------------------------------------- manifest
+
+    def _load_difficulty_scores(self, difficulty_scores_path: str) -> Dict[str, float]:
+        """Parse a 'clip_id: score' file (one per line) into {clip_id: score}.
+
+        Used to seed global_clip_weights with an easy->hard prior instead of a flat 1.0. Not
+        precise by design -- see GlobalClipPoolConfig.difficulty_scores_path.
+        """
+        path = Path(difficulty_scores_path)
+        scores: Dict[str, float] = {}
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                clip_id, score = line.split(":", 1)
+                scores[clip_id.strip()] = float(score.strip())
+        return scores
 
     def _load_manifest(self, r2_source: str, manifest_name: str) -> Dict[str, str]:
         manifest_dir = self.local_cache_dir / "_manifest_dl"
@@ -353,6 +402,12 @@ class GlobalClipPool(MotionLib):
         the highest possible bonus at any given rebuild_count, and that bonus keeps growing
         (slowly, log-scale) with `rebuild_count` even if the clip is never picked, so it's
         guaranteed to eventually outrank a stale already-known-hard clip.
+
+        Selection itself samples proportional to priority *rank* (softmax over -rank/temperature)
+        rather than taking the deterministic top-K. Deterministic top-K swaps a whole cluster of
+        similarly-scored clips into (or out of) residency in lockstep the moment their shared
+        score axis crosses the cutoff -- rank-based sampling still favors high-priority clips but
+        avoids that correlated, all-at-once churn (cf. Prioritized Level Replay, Jiang et al. 2021).
         """
         t = self.rebuild_count
         bonus = self.config.exploration_bonus_coefficient * torch.sqrt(
@@ -360,7 +415,9 @@ class GlobalClipPool(MotionLib):
         )
         priority = self.global_clip_weights + bonus
         k = min(self.config.resident_pool_size, priority.numel())
-        return torch.topk(priority, k, largest=True).indices
+        ranks = priority.argsort(descending=True).argsort()
+        probs = torch.softmax(-ranks.float() / self.config.selection_temperature, dim=0)
+        return torch.multinomial(probs, k, replacement=False)
 
     # ---------------------------------------------------------------- rebuild
 
@@ -527,17 +584,21 @@ class GlobalClipPool(MotionLib):
         self,
         failed_motion_ids: torch.Tensor,
         success_motion_ids: torch.Tensor,
-        success_discount: float,
-        failure_discount: float,
     ) -> None:
-        """Apply the evaluator's success/failure discount to the persistent scoreboard.
+        """Nudge the persistent scoreboard towards the evaluator's latest pass/fail signal.
 
         `failed_motion_ids`/`success_motion_ids` are global motion ids into the *currently
         resident* MotionLib, already expanded to all shape variants of each evaluated clip by the
         caller (`MimicEvaluator._expand_to_clip_variants`). Failure wins over success on overlap,
         matching the existing precedence in `MimicEvaluator._update_motion_sampling_weights`.
+
+        Uses a bounded EMA (`weight = alpha*target + (1-alpha)*weight`, target=0/1) instead of a
+        one-shot multiplicative jump -- a single eval tick can only move each clip's weight a
+        little, not snap a whole cluster of similarly-scored clips across the selection cutoff
+        at once (cf. Graves et al. 2017 on oscillatory curriculum-chasing from hard step updates).
         """
         clip_ids = self.motion_clip_ids
+        alpha = self.config.weight_ema_alpha
 
         def to_local_indices(motion_ids: torch.Tensor) -> torch.Tensor:
             unique_clips = {clip_ids[i] for i in motion_ids.detach().cpu().tolist()}
@@ -547,14 +608,13 @@ class GlobalClipPool(MotionLib):
 
         if success_motion_ids.numel() > 0:
             idx = to_local_indices(success_motion_ids)
-            self.global_clip_weights[idx] *= success_discount
+            self.global_clip_weights[idx] = (1 - alpha) * self.global_clip_weights[idx]
 
         if failed_motion_ids.numel() > 0:
             idx = to_local_indices(failed_motion_ids)
-            if failure_discount != 0:
-                self.global_clip_weights[idx] /= failure_discount
-            else:
-                self.global_clip_weights[idx] = 1.0
+            self.global_clip_weights[idx] = (
+                alpha + (1 - alpha) * self.global_clip_weights[idx]
+            )
 
     def project_global_weights_to_resident_motion_weights(self) -> torch.Tensor:
         """Re-broadcast the current global weights onto the resident MotionLib's per-motion

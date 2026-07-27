@@ -263,28 +263,25 @@ class MimicEvaluator(BaseEvaluator):
             global_failed = self._expand_to_clip_variants(global_failed)
             global_success = self._expand_to_clip_variants(global_success)
 
-        success_discount = math.pow(
-            self.config.motion_weights_rules.motion_weights_update_success_discount,
-            self.config.eval_metrics_every,
-        )
-        failure_discount = math.pow(
-            self.config.motion_weights_rules.motion_weights_update_failure_discount,
-            self.config.eval_metrics_every,
-        )
-
         if hasattr(self.motion_lib, "update_global_clip_weights"):
             # Persistent scoreboard path (GlobalClipPool): the update lands on the vector that
             # survives resident-set churn and resumes, then gets re-broadcast onto whatever's
-            # currently resident. Discount math is identical to the direct-mutation path below --
-            # only *where* the result is stored differs.
+            # currently resident. Uses its own bounded EMA (config.weight_ema_alpha), not the
+            # discount rule below -- see GlobalClipPool.update_global_clip_weights.
             self.motion_lib.update_global_clip_weights(
                 failed_motion_ids=global_failed,
                 success_motion_ids=global_success,
-                success_discount=success_discount,
-                failure_discount=failure_discount,
             )
             new_weights = self.motion_lib.project_global_weights_to_resident_motion_weights()
         else:
+            success_discount = math.pow(
+                self.config.motion_weights_rules.motion_weights_update_success_discount,
+                self.config.eval_metrics_every,
+            )
+            failure_discount = math.pow(
+                self.config.motion_weights_rules.motion_weights_update_failure_discount,
+                self.config.eval_metrics_every,
+            )
             new_weights = self.env.motion_manager.motion_weights.clone()
             new_weights[global_success] *= success_discount
             if failure_discount != 0:

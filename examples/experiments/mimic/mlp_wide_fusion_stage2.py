@@ -137,6 +137,22 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
         help="Scale of the UCB-style exploration bonus added to a clip's selection priority.",
     )
     parser.add_argument(
+        "--global-clip-pool-selection-temperature", type=float, default=1.0,
+        help="Softmax temperature over priority rank used to sample the resident set. Higher "
+        "= flatter/more exploratory; near-0 approaches deterministic top-K.",
+    )
+    parser.add_argument(
+        "--global-clip-pool-weight-ema-alpha", type=float, default=0.1,
+        help="EMA blend factor for global_clip_weights updates (target=0 on success, 1 on "
+        "failure). Replaces a one-shot discount jump with a bounded, gradual update.",
+    )
+    parser.add_argument(
+        "--global-clip-pool-difficulty-scores-path", type=str,
+        default="data/preprocessing/valid_ids_sorted_by_difficulty.txt",
+        help="Path to a 'clip_id: score' file, ascending easy->hard, used to seed "
+        "global_clip_weights instead of a flat 1.0.",
+    )
+    parser.add_argument(
         "--r2-motion-source",
         type=str,
         default=None,
@@ -188,6 +204,9 @@ def motion_lib_config(args: argparse.Namespace):
             pool_rebuild_every=args.global_clip_pool_rebuild_every,
             clip_partition_shuffle_seed=args.global_clip_pool_shuffle_seed,
             exploration_bonus_coefficient=args.global_clip_pool_exploration_coefficient,
+            selection_temperature=args.global_clip_pool_selection_temperature,
+            weight_ema_alpha=args.global_clip_pool_weight_ema_alpha,
+            difficulty_scores_path=args.global_clip_pool_difficulty_scores_path,
         )
     if getattr(args, "r2_motion_source", None):
         from protomotions.components.motion_lib_pool import StreamingMotionLibConfig
@@ -347,6 +366,7 @@ def agent_config(
         # Stage 1 checkpoint has no beta_encoder/fusion_mlp keys -- see note/README.note.md #32.
         allow_partial_checkpoint_load=True,
         evaluator=MimicEvaluatorConfig(
+            eval_metrics_every=256,
             evaluation_components={
                 "gt_error": gt_error_factory(threshold=0.5),
                 "gr_error": gr_error_factory(),
