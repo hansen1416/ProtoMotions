@@ -3615,3 +3615,84 @@ gdb -batch -ex "run" -ex "thread apply all bt full" --args python protomotions/t
   <same args as the failing launch> 2>&1 | tee /tmp/gdb_futex.log
 grep -n "SIGABRT\|received signal\|futex_fatal\|__pthread_kill" /tmp/gdb_futex.log
 ```
+
+## 38. `GlobalClipPool` curriculum fixes — rank-based selection, EMA weights, difficulty seed (2026-07-27)
+
+Commit `1d32c547c7a4d66bdef2fb870f88ddb9aed2ca27` ("stage2 improvement"). Prompted by pulling
+`hhi_wide_fusion_stage2_clippool`'s wandb history (`yugoamaryl/hhi-protomotions/c9xvetac`, epoch
+~12,200-20,900) directly via the `wandb` Python API (WebFetch can't render wandb run pages — JS
+SPA, returns only the username) and noticing every eval-time metric (`eval/success_rate`,
+`gt_error`, `gr_error`, `max_joint_error`, `normalized_jerk`, `high_jerk_frame_percentage`,
+`termination/tracking_error_mean`) swings together in lockstep between two tight clusters — a
+"good" state (~0.72-0.77 success, low error/jerk) and a "bad" state (~0.30-0.55 success, high
+error/jerk) — while `actor/ppo_loss`, `critic_loss`, `grad_norm`, `clip_frac`, and
+`bad_grads_count` stay flat and stable the entire time. Conclusion: not optimizer instability —
+the eval-time resident clip set itself is flipping between qualitatively different difficulty
+batches, because `eval_one_shape_per_motion=True` means the evaluator's eval set is drawn from
+whatever's currently resident in `GlobalClipPool` (up to `resident_pool_size=256`/rank), not a
+fixed held-out set.
+
+**Root causes identified (three, compounding):**
+1. **Cadence misalignment (fixed same day, separately, before this commit):** `eval_metrics_every`
+   was 200, not a multiple of `pool_rebuild_every=64` — so the resident set had rotated ~3.1x
+   between consecutive evals, and the discount-exponent math (`base ** eval_metrics_every`)
+   assumed a fixed 200-epoch gap that didn't actually hold per-clip. User set
+   `eval_metrics_every=256` (`=4*64`) in `mlp_wide_fusion_stage2.py`'s `agent_config()` to fix
+   this — a config-value edit, not part of the commit below.
+2. **Deterministic top-K selection produces correlated batch resampling.** `_select_top_k`'s
+   `torch.topk(priority, k)` swaps a whole cluster of similarly-scored clips into (or out of)
+   residency in lockstep the instant their shared score axis crosses the cutoff. Literature check
+   (web research pass, not re-derived from scratch): Prioritized Level Replay (Jiang et al. 2021)
+   ablated exactly this — greedy top-K underperforms rank-based softmax sampling + a staleness
+   bonus specifically because of this correlated-batch effect; Graves et al. 2017 (curriculum
+   learning as a bandit) deliberately use a stochastic syllabus over greedy argmax for the same
+   reason (avoids the policy "task-chasing" whatever currently looks hardest).
+3. **Hard step-function weight updates.** `update_global_clip_weights` applied the evaluator's
+   pass/fail as a single multiplicative jump once every `eval_metrics_every` epochs
+   (`weight *= 0.999**256 ≈ ×0.774` on success, `weight /= 0.774 ≈ ×1.292` on failure) — a big,
+   instantaneous swing landing on every currently-resident clip at once, which is exactly what
+   feeds cause #2's correlated top-K cutoff-crossing.
+
+Separately (not a fix, a finding): `global_clip_weights` was seeded as `torch.ones(num_clips)` —
+uniform, no prior difficulty ordering. Combined with the exploration bonus being identical for
+every never-visited clip at the first rebuild, the very first several rebuilds pick clips in an
+essentially arbitrary order, not easy-first. User decided this curriculum needs a genuine
+easy→hard start.
+
+**Three changes made, all in `protomotions/components/global_clip_pool.py` (+ one call-site + CLI
+wiring), scoped to `GlobalClipPool` only — the legacy `MotionLibPool`/discount path in
+`mimic_evaluator.py` is untouched:**
+
+1. **Rank-based softmax selection** (`_select_top_k`): priority is converted to rank, then sampled
+   via `torch.multinomial(softmax(-rank/temperature), k, replacement=False)` instead of
+   `torch.topk`. New config `selection_temperature` (default 1.0; higher = flatter/more
+   exploratory, near-0 approaches the old deterministic top-K). Rank-based (not raw-value softmax)
+   so it stays well-behaved regardless of the absolute scale of `global_clip_weights`, which now
+   varies (see #3 below).
+2. **EMA-smoothed weight updates** (`update_global_clip_weights`): replaced the one-shot
+   multiply/divide discount with a bounded blend, `weight = alpha*target + (1-alpha)*weight`
+   (`target=0` on success, `target=1` on failure). New config `weight_ema_alpha` (default 0.1).
+   Dropped the `success_discount`/`failure_discount` args from the function signature entirely —
+   `mimic_evaluator.py`'s call site branches on `hasattr(motion_lib, "update_global_clip_weights")`
+   and only computes the old discount values in the `else` (legacy) branch now. Weight is
+   naturally bounded to `[0, 1]` — same scale as #3's difficulty prior, no unit mismatch.
+3. **Easy→hard initial seed** (`__init__`): `global_clip_weights` is now seeded from
+   `data/preprocessing/valid_ids_sorted_by_difficulty.txt` (git-tracked, already the source
+   `--valid-ids` list `tools/prepare_stage2_data.py` used to build this exact corpus — confirmed
+   20,951 lines, 1:1 match with the clip vocabulary, `clip_id: score` format, ascending
+   easy(~0.0)→hard(~1.0)) via new helper `_load_difficulty_scores`, instead of a flat
+   `torch.ones(num_clips)`. Missing ids (shouldn't occur, counts already match) fall back to 0.5.
+   New config `difficulty_scores_path` (default: that file's repo-relative path).
+
+New CLI flags on `mlp_wide_fusion_stage2.py`: `--global-clip-pool-selection-temperature`,
+`--global-clip-pool-weight-ema-alpha`, `--global-clip-pool-difficulty-scores-path`.
+
+**Verification:** syntax-checked all three edited files; smoke-tested `_select_top_k`'s new logic
+standalone (256/256 unique clips selected, mean priority of selected set higher than corpus mean —
+confirms bias toward hard/unproven clips without being a hard cutoff); smoke-tested the EMA update
+arithmetic; parsed the real difficulty file (20,951 entries, range 0.0-0.9999999998, matches
+expectations). **Not yet run on real training hardware** — this only affects new launches via the
+experiment file (doesn't touch the in-flight `c9xvetac` run, which keeps running under the old
+top-K/discount/uniform-seed logic since resume loads `resolved_configs.pt`, not this file). Next
+real-hardware launch should watch whether the eval-metric lockstep-bimodal pattern actually
+softens, not just assume it from the design reasoning above.
