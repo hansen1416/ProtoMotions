@@ -336,6 +336,26 @@ nohup python -u protomotions/train_agent.py \
   --wandb-project hhi-protomotions \
   --wandb-entity yugoamaryl \
   --wandb-group hhi_wide_fusion_stage2_clippool > /tmp/hhi_wide_fusion_stage2_clippool.log 2>&1 &
+
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide_fusion_stage2.py \
+  --experiment-name hhi_wide_fusion_stage2_clippool \
+  --checkpoint results/hhi_wide_20946_neutral/last_morph_reset.ckpt \
+  --global-clip-pool-source r2:proto-data/hhi_stage2_per_clip/ \
+  --global-clip-pool-cache-dir /workspace/motion_cache \
+  --global-clip-pool-size 256 \
+  --global-clip-pool-rebuild-every 64 \
+  --global-clip-pool-selection-temperature 1.0 \
+  --global-clip-pool-weight-ema-alpha 0.1 \
+  --global-clip-pool-difficulty-scores-path data/preprocessing/valid_ids_sorted_by_difficulty.txt \
+  --num-envs 6144 \
+  --batch-size 24576 \
+  --ngpu 6 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_fusion_stage2_clippool > /tmp/hhi_wide_fusion_stage2_clippool.log 2>&1 &
 ----
 
 
