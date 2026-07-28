@@ -40,6 +40,13 @@ the frame-to-frame jerk that motivated v3's betas-only restriction. Pair with a 
 `action_smoothness` reward weight (see experiment file) rather than relying on architecture
 alone to control jerk.
 
+`freeze_backbone` (default True) controls whether `norm`/`mlp` (the Stage 1 trunk) get frozen
+after the first forward pass. Set False to warm-start from an already-trained fusion checkpoint
+(e.g. `hhi_wide_fusion_stage2_clippool`) and let the whole network -- trunk included -- keep
+training jointly: the trunk was fed `morphology_obs` at its input the whole time but never
+learned to use it (Stage 1 only ever saw one body shape), so no downstream adapter, however
+shaped, can fix that on its own. See `mlp_wide_fusion_stage2_unfrozen.py`.
+
 Key Classes:
     FusionAdapterMLPWithConcatConfig — configuration dataclass
     FusionAdapterMLPWithConcat       — TensorDictModuleBase implementation
@@ -95,6 +102,21 @@ class FusionAdapterMLPWithConcatConfig(MLPWithConcatConfig):
         },
     )
 
+    freeze_backbone: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "If True (default, Stage 2 v4 behavior), freeze norm/mlp (the trunk) after the "
+                "first forward pass -- only beta_encoder/fusion_mlp train. If False, leave the "
+                "trunk trainable too, so the whole network (trunk + adapter) fine-tunes jointly "
+                "from whatever checkpoint is loaded. Does not affect the zero-init of the fusion "
+                "head's last layer, which still happens either way (harmless when warm-starting "
+                "from a checkpoint that already has trained fusion_mlp weights -- the checkpoint "
+                "load overwrites the zero-init)."
+            )
+        },
+    )
+
     def __post_init__(self):
         super().__post_init__()
         assert self.adapter_in_keys, "FusionAdapterMLPWithConcatConfig: adapter_in_keys must be non-empty"
@@ -145,12 +167,13 @@ class FusionAdapterMLPWithConcat(MLPWithConcat):
         Must run after the first forward pass, once LazyLinear layers have materialized into
         real nn.Linear params (UninitializedParameter can't be frozen/zero-initialized).
         """
-        adapter_param_ids = {id(p) for p in self.beta_encoder.parameters()} | {
-            id(p) for p in self.fusion_mlp.parameters()
-        }
-        for p in self.parameters():
-            if id(p) not in adapter_param_ids:
-                p.requires_grad = False
+        if self.config.freeze_backbone:
+            adapter_param_ids = {id(p) for p in self.beta_encoder.parameters()} | {
+                id(p) for p in self.fusion_mlp.parameters()
+            }
+            for p in self.parameters():
+                if id(p) not in adapter_param_ids:
+                    p.requires_grad = False
 
         last_linear = self.fusion_mlp[-1]
         nn.init.zeros_(last_linear.weight)
@@ -161,9 +184,14 @@ class FusionAdapterMLPWithConcat(MLPWithConcat):
     def train(self, mode: bool = True):
         """Keep the frozen trunk's obs-normalizer pinned to eval regardless of the outer
         actor's train()/eval() calls. Same rationale as `ResidualAdapterMLPWithConcat.train`.
+
+        Only applies when `freeze_backbone=True` -- with the trunk unfrozen, `norm`'s running
+        stats should keep updating like any other trainable submodule (Stage 1's stats were
+        calibrated on a single body shape; the trunk now needs to adapt to the full morphology
+        distribution, and freezing normalization while unfreezing weights would fight that).
         """
         super().train(mode)
-        if self._adapter_finalized:
+        if self._adapter_finalized and self.config.freeze_backbone:
             self.norm.eval()
             self.mlp.eval()
         return self
