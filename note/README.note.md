@@ -3696,3 +3696,87 @@ experiment file (doesn't touch the in-flight `c9xvetac` run, which keeps running
 top-K/discount/uniform-seed logic since resume loads `resolved_configs.pt`, not this file). Next
 real-hardware launch should watch whether the eval-metric lockstep-bimodal pattern actually
 softens, not just assume it from the design reasoning above.
+
+## 39. v4 fusion adapter unfrozen — `hhi_wide_fusion_stage2_unfrozen` launched (2026-07-28)
+
+**Why:** `hhi_wide_fusion_stage2_clippool` (v4 fusion adapter + `GlobalClipPool`, wandb
+`8reyx4ci`/`c9xvetac`) plateaus below 70% `eval/success_rate` from early in training — clearly
+worse than v2's (`3skv3b2g`) ~78% plateau, despite `fusion_mlp` and v2's `adapter_mlp` having the
+same capacity (2x512). Root cause read as an information bottleneck, not capacity or curriculum:
+`fusion_mlp` only ever sees `trunk_out` (dimension = `num_actions`, a few dozen) concatenated with
+a 128-dim beta embedding — never the raw pose or motion target directly, only the frozen trunk's
+already-collapsed action decision. A deeper issue sits under that: `morphology_obs` has been part
+of the trunk's own input (`actor_in_keys`) since Stage 1, but Stage 1 only ever trained on one
+body shape, so the trunk's weights never had a reason to route that input into the policy.
+Freezing the trunk for all of Stage 2 locks that blind spot in at the one place in the network
+with the capacity to fix it — no adapter design bolted on afterward, however shaped, can undo that
+from the outside. (Curriculum/eval-set-difficulty drift from `GlobalClipPool` was raised as an
+alternative explanation and not fully ruled out, but the timing argues against it being the main
+cause: v2's climb from cold-start to ~70% took ~1000 epochs before plateauing, and v4 apparently
+never reaches that territory even early, which an eval-set-hardens-over-time effect wouldn't
+explain on its own.)
+
+**Decision:** unfreeze the trunk so it fine-tunes jointly with the adapter, rather than reverting
+to full end-to-end training from the Stage 1 checkpoint directly. Warm-starts from v4's own
+checkpoint (not Stage 1) to keep the GPU-hours already spent — the adapter's partially-learned
+correction carries over, and the trunk gets its first real chance to absorb shape-conditioning
+into its own 6 layers.
+
+**Code changes** (commit after "1"/"note"/"stage2 improvement"):
+- `protomotions/agents/common/fusion_adapter_mlp.py` — new `freeze_backbone: bool = True` config
+  field. `True` (default) is byte-identical to existing behavior — freezes `norm`/`mlp` after the
+  first forward pass, same as before. `False` skips that freeze loop entirely and stops pinning
+  `norm`/`mlp` to `.eval()` in the `train()` override, so the trunk's obs-normalizer running stats
+  (calibrated on Stage 1's single body shape) can adapt to the full 128-shape distribution too.
+- New file `examples/experiments/mimic/mlp_wide_fusion_stage2_unfrozen.py` — same architecture,
+  reward weights, and `GlobalClipPool` config as `mlp_wide_fusion_stage2.py`, just
+  `freeze_backbone=False` and a `--checkpoint` pointing at
+  `results/hhi_wide_fusion_stage2_clippool/last.ckpt` instead of the Stage 1 checkpoint.
+  `actor_optimizer.lr` deliberately left unchanged at `4e-6` (previously safe for a small adapter,
+  now governs the full trunk too) — flagged in the docstring to watch `actor/clip_frac` and
+  `eval/success_rate` closely over the first ~1-2k epochs for signs it's too small (stuck) or too
+  large (regressing below the v4 plateau, i.e. damaging the already-converged motion-tracking
+  skill freezing was meant to protect).
+
+**Verification (CPU, before launch):** built both `freeze_backbone=True/False` variants standalone
+and forward/backward-passed each. `False`: all `mlp` params got nonzero gradient after a real
+forward+backward, `mlp.training`/`norm.training` stayed `True` under `model.train()`, and the
+normalizer's running mean visibly changed across two forward calls. `True`: unchanged from
+existing behavior (`mlp.training=False`, all `mlp` params `requires_grad=False`, running mean
+frozen) — confirms no regression to any currently-frozen run.
+
+**Checkpoint-size sanity check (real data, on the training pod):** before launching, loaded
+`hhi_wide_fusion_stage2_clippool/last.ckpt` (225MB) directly and confirmed `mlp.*` (trunk) keys
+hold 49,277,078 params — the trunk is fully present, not adapter-only. The size gap against Stage
+1's own checkpoint (`hhi_wide_20946_neutral/last.ckpt`, 564MB) is explained by Adam optimizer
+state, not missing weights: Stage 1 had the full trunk trainable, so its optimizer carries
+momentum+variance for all ~45M trunk params (~360MB); v4's frozen trunk never receives a gradient,
+so its optimizer never allocates that state at all (`ppo/agent.py`'s `actor_optimizer` is
+constructed over every actor param unconditionally, but PyTorch's Adam only creates per-param
+state lazily on `.step()`, which frozen params never reach). 564 − 225 ≈ 339MB tracks the
+predicted ~360MB gap. Confirmed the two checkpoints are not additive/complementary halves — the
+trunk weights are a single, duplicated copy across both files, not split between them.
+
+Same reasoning predicted the *new* unfrozen run's checkpoint should land near Stage 1's own size
+(~595MB: trunk weights + newly-reinstated trunk optimizer state + adapter + critic), not the naive
+564+225=789MB sum. First real `last.ckpt` from `hhi_wide_fusion_stage2_unfrozen` measured **569MB**
+— matches the ~595MB prediction, confirming the trunk is training with full optimizer state again
+under the new config, not silently still frozen.
+
+**Launch:** `hhi_wide_fusion_stage2_unfrozen`, same wandb project/entity
+(`yugoamaryl`/`hhi-protomotions`), same `GlobalClipPool` source/size/rebuild-cadence and
+6144 envs/24576 batch/6 GPUs as v4. `/workspace/motion_cache` cleared before this launch (safe —
+`GlobalClipPool` recreates its per-rank cache dirs on startup; the persistent difficulty scoreboard
+lives in the training checkpoint, not the file cache) to avoid inheriting v4's ~250GB steady-state
+cache footprint on top of a fresh run's own downloads. `hhi_wide_fusion_stage2_clippool`'s
+checkpoint was backed up beforehand as an extra precaution before stopping that run.
+
+**Status as of this note:** launched, first checkpoint saved and size-verified as above. No
+`eval/success_rate` data yet — next check should compare its climb shape against v2's
+(`3skv3b2g`, cold-start to ~70% in ~1000 epochs, plateaued ~78% by epoch ~19000) and v4's
+(`8reyx4ci`/`c9xvetac`, plateaued <70%) to see whether unfreezing actually lifts the ceiling.
+
+Frozen-vs-unfrozen architecture diagram (before/after data-flow, what's trainable in each):
+`note/README.stage2-fusion-unfreeze-diagram.md` (Mermaid, renders in any Markdown viewer that
+supports it). Also hosted at https://claude.ai/code/artifact/09f51cb2-c1f2-43da-8d80-c0ab1083a64f
+— private by default, kept as a convenience copy; the repo file is the durable source.
