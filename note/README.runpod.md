@@ -379,6 +379,8 @@ nohup python -u protomotions/train_agent.py \
 
 python tools/deepen_fusion_trunk.py --checkpoint results/hhi_wide_fusion_stage2_unfrozen/last.ckpt --output results/hhi_wide_fusion_stage2_unfrozen/last_deepened1.ckpt --num-new-layers 1 --verify
 
+python tools/deepen_fusion_trunk.py --checkpoint results/hhi_wide_fusion_stage2_unfrozen/last.ckpt --output results/hhi_wide_fusion_stage2_unfrozen/last_deepened1.ckpt --num-new-layers 1 --verify
+
 nohup python -u protomotions/train_agent.py \
   --robot-name smpl_mor --simulator isaacgym \
   --experiment-path examples/experiments/mimic/mlp_wide_fusion_stage2_deepened.py \

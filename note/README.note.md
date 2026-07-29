@@ -3780,3 +3780,74 @@ Frozen-vs-unfrozen architecture diagram (before/after data-flow, what's trainabl
 `note/README.stage2-fusion-unfreeze-diagram.md` (Mermaid, renders in any Markdown viewer that
 supports it). Also hosted at https://claude.ai/code/artifact/09f51cb2-c1f2-43da-8d80-c0ab1083a64f
 — private by default, kept as a convenience copy; the repo file is the durable source.
+
+================================================================================
+
+## 40. v6 — deepen the unfrozen trunk via Net2Net identity insertion (2026-07-29)
+
+**Why:** `hhi_wide_fusion_stage2_unfrozen` (§39, wandb `07c4zjgs`) genuinely plateaued: real
+tfevents pulled from `results/hhi_wide_fusion_stage2_unfrozen/lightning_logs/` show fast climb
+right after unfreezing (52%→77% success_rate in ~1,500 epochs), then flat 76–82% for the next
+~5,100 epochs (tail mean 79.95%, peak 82.16%). Reviewing the original 1024-clip×128-shape pilot
+(§2) confirmed multi-shape training has never cleared 95% here — best was `hhi_1024_motion_tune`'s
+~80% success bought with 3–4× worse jerk. Every Stage 2 architecture tried (frozen fusion,
+unfrozen fusion, v2 full-concat, v3 shape-only) clusters at the same ~78–82% ceiling despite
+different information flow, while the *single-shape* 6-layer trunk (`hhi_wide_20946_neutral`)
+reaches 95–97%. Ambiguous whether that's "6 layers isn't enough depth once it also has to absorb
+128-shape conditioning" or "the ceiling is task-difficulty, not depth" (same
+crawl/kneel/squat/single-leg-balance classes already dominated single-shape failures). Decided to
+test depth directly and cheaply — add 1 layer, continue from the plateaued checkpoint — rather
+than commit to the much larger from-scratch/no-adapter rewrite on a guess.
+
+**Mechanism:** the trunk (`_actor.mu.mlp`) is a plain `Linear→ReLU` stack, uniform 2896-unit
+width, no LayerNorm/residual (confirmed in `protomotions/agents/common/mlp.py`). That makes a
+Net2Net-style function-preserving deepen possible: insert `Linear(2896,2896)` initialized to the
+identity matrix (bias=0) right after the last existing ReLU. Since that ReLU's output is already
+≥0, `ReLU(Identity(x)) == x` exactly — output is bit-for-bit unchanged the moment the layer is
+inserted (verified: `max_diff=0.00e+00`), so none of the ~80%-plateau progress is lost; the new
+layer is simply free to start learning from there. +1 layer only, not +2 — cheaper, isolates one
+variable; a second layer is a follow-up only if this one doesn't move `success_rate`.
+
+**Code:**
+- `tools/deepen_fusion_trunk.py` (new) — checkpoint-surgery CLI. Rewrites `_actor.mu.mlp.*`
+  (keeps hidden layers 0–10 byte-identical, inserts the new identity layer, shifts the final
+  projection's weights unchanged to the new index). Leaves `_actor.mu.norm.*`/`beta_encoder.*`/
+  `fusion_mlp.*` and all `_critic.*` untouched. `--verify` runs a standalone (no-IsaacGym)
+  old-vs-new forward-pass check.
+- `examples/experiments/mimic/mlp_wide_fusion_stage2_deepened.py` (new) — v6 experiment, same as
+  v5 (`mlp_wide_fusion_stage2_unfrozen.py`) except the trunk has 7 hidden layers. `lr` unchanged
+  at 4e-6 (Net2Net's own justification: identity init needs no LR bump since the loss landscape
+  at insertion is smooth). `allow_partial_checkpoint_load=True` is load-bearing here, not just a
+  safety net (see below).
+
+**Bug found and fixed during launch:** first version of the surgery script deleted
+`actor_optimizer` from the checkpoint entirely (reasoning: Adam's per-param state is positionally
+keyed and misaligns once a layer shifts everything after it). That caused an uncaught `KeyError`
+on `state_dict["actor_optimizer"]` in `ppo/agent.py:load_parameters` — the lookup fails *before*
+the existing `except ValueError` guard (which only wraps `load_state_dict` itself) ever runs.
+Fix: leave the stale optimizer state in place instead of deleting it. Loading it into the
+deepened (bigger) optimizer now raises `ValueError: loaded state dict contains a parameter group
+that doesn't match the size of optimizer's group` — confirmed via a standalone repro — which
+`allow_partial_checkpoint_load=True` already catches and skips, the same path v5's own warm-start
+from v4 went through. Moral: don't delete a checkpoint key to avoid a shape mismatch if the
+existing partial-load path already handles shape mismatches — deleting just changes *which*
+exception fires, and the new one isn't caught.
+
+**Verified before launch:** `tools/deepen_fusion_trunk.py --verify` (`max_diff=0.00e+00`, param
+count `45,087,893→53,477,605`, `+8,389,712`); full CPU forward through
+`FusionAdapterMLPWithConcat` built with 7 layers, loading the deepened checkpoint (`strict`-style
+match, no missing/unexpected keys), forward output finite, backward confirmed nonzero gradient
+into both the new layer and the pre-existing first layer (`freeze_backbone=False` intact).
+Checkpoint size dropped 569MB→254MB after the fix, expected: stale `actor_optimizer`'s Adam state
+(`exp_avg`+`exp_avg_sq` for ~45.5M actor params, ≈364MB) now the dominant removed term, partly
+offset by the new layer's +8.39M params (≈34MB added).
+
+**Launch:** `hhi_wide_fusion_stage2_deepened1`, same wandb project/entity, `GlobalClipPool`
+source/size/rebuild-cadence, and 6144 envs/24576 batch/6 GPUs as v5, `--checkpoint
+results/hhi_wide_fusion_stage2_unfrozen/last_deepened1.ckpt`.
+
+**Status as of this note:** launched. Correctness gate: first eval point should land close to
+v5's ~79–80% plateau, not regress sharply. Then watch `eval/success_rate` over the next ~1–2k
+epochs (the window the unfreeze itself took to resolve) — if it breaks past the ~82% peak, depth
+was a real limiting factor; if flat, that's evidence for the from-scratch/no-adapter alternative
+instead.
