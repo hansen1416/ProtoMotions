@@ -37,8 +37,10 @@ final num_actions projection). Since that ReLU's output is already >= 0, ReLU(Id
 exactly -- the network computes bit-for-bit the same thing the moment the layer is inserted, so
 none of v5's ~80%-plateau progress is lost; the new layer is simply free to start learning a
 nontrivial transformation from that point on. See that script's module docstring for the full
-mechanism and why `actor_optimizer` state is dropped (Adam's state is keyed by position in the
-flattened param list, which shifts once a layer is inserted mid-trunk).
+mechanism and why `actor_optimizer` state is left stale rather than deleted -- it fails to load
+with a `ValueError` (param-group size mismatch) once the trunk has an extra layer's worth of
+params, which `allow_partial_checkpoint_load=True` below catches and skips, same as v5's own
+warm-start from v4.
 
 Deliberately +1 layer, not +2: cheaper, isolates one variable. If `eval/success_rate` doesn't
 move within the same ~1-2k epoch window the unfreeze itself took to resolve, that's evidence the
@@ -182,9 +184,9 @@ def agent_config(
         training_max_steps=args.training_max_steps,
         gradient_clip_val=50.0,
         clip_critic_loss=True,
-        # tools/deepen_fusion_trunk.py drops actor_optimizer entirely and writes mlp keys that
-        # match this config's expected layout -- allow_partial_checkpoint_load=True is a safety
-        # net, kept for consistency with v4/v5's launch, not strictly required here.
+        # Required, not just a safety net this time: tools/deepen_fusion_trunk.py writes mlp
+        # keys matching this config's layout exactly, but leaves actor_optimizer stale (see that
+        # script's docstring) -- its ValueError on load is only caught when this is True.
         allow_partial_checkpoint_load=True,
         evaluator=MimicEvaluatorConfig(
             eval_metrics_every=256,

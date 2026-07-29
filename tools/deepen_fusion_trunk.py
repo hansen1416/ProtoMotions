@@ -28,10 +28,16 @@ success_rate; this tests whether depth was the limiting factor, cheaply, without
 Only `_actor.mu.mlp.*` is touched. `_actor.mu.norm.*`, `_actor.mu.beta_encoder.*`,
 `_actor.mu.fusion_mlp.*`, and all `_critic.*` keys pass through unchanged.
 
-`actor_optimizer` state is dropped entirely (not just for the new layer): Adam's per-param
-state is keyed by position in the flattened `model.parameters()` order, which shifts once a
-layer is inserted in the middle of the trunk, so the old state doesn't align with the new
-param list. `critic_optimizer` is left untouched since the critic isn't modified.
+`actor_optimizer` state is left untouched (stale) rather than deleted: the new actor has more
+params than the old optimizer state was saved for, so `Adam.load_state_dict` raises `ValueError`
+("parameter group that doesn't match the size of optimizer's group") when the checkpoint is
+loaded into the deepened experiment. That's caught by the existing `allow_partial_checkpoint_load`
+path in `protomotions/agents/ppo/agent.py:load_parameters` (`except ValueError: ... Skipping
+actor_optimizer state load`), same as every prior warm-start in this codebase whose actor gained
+new params. Deleting the key instead (an earlier version of this script did this) causes a plain
+`KeyError` on `state_dict["actor_optimizer"]` itself, which happens *before* `load_state_dict`
+runs and is not caught -- don't do that. `critic_optimizer` is real and valid since the critic
+isn't modified.
 
 Usage:
     python tools/deepen_fusion_trunk.py \\
@@ -144,8 +150,12 @@ def main():
         model_sd[f"{MLP_PREFIX}{k}"] = v
 
     if "actor_optimizer" in ckpt:
-        print("Dropping actor_optimizer state (positional indices no longer align with the deepened param list).")
-        del ckpt["actor_optimizer"]
+        print(
+            "Leaving actor_optimizer state as-is (stale) -- it will fail to load with a "
+            "ValueError (param-group size mismatch) once the trunk is deepened, which "
+            "allow_partial_checkpoint_load=True catches and skips. Do not delete this key: "
+            "that turns into an uncaught KeyError instead. See module docstring."
+        )
 
     out_path = args.output
     if out_path is None:
