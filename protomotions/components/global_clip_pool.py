@@ -164,6 +164,35 @@ class GlobalClipPoolConfig(MotionLibConfig):
             "evaluated. Not precise, just a general prior; missing ids fall back to 0.5."
         },
     )
+    eval_holdout_size: int = field(
+        default=0,
+        metadata={
+            "help": "Number of clips/rank permanently excluded from the trainable vocabulary "
+            "and reserved for a fixed generalization probe (see MimicEvaluator._evaluate_holdout). "
+            "0 (default) disables the holdout entirely -- exactly today's behavior, no clips "
+            "withheld. Holdout clips never enter global_clip_weights/_select_top_k's candidate "
+            "space, so they can never be trained on and never influence the curriculum."
+        },
+    )
+    weight_floor: float = field(
+        default=0.0,
+        metadata={
+            "help": "Minimum value global_clip_weights can EMA-decay to on repeated success. "
+            "0.0 (default) reproduces the old unbounded-decay behavior exactly. A small positive "
+            "floor (e.g. 0.05) guarantees a 'solved' clip retains a nonzero selection priority "
+            "forever instead of only being rediscoverable via the slow log-scale UCB bonus."
+        },
+    )
+    random_fraction: float = field(
+        default=0.0,
+        metadata={
+            "help": "Fraction of each rebuild's K resident slots filled by pure uniform random "
+            "selection (ignoring priority entirely), instead of the priority-rank softmax. 0.0 "
+            "(default) reproduces the old fully-priority-based selection exactly. A nonzero "
+            "fraction (e.g. 0.2) guarantees every clip gets periodic forced rehearsal regardless "
+            "of how low its weight has decayed."
+        },
+    )
 
 
 class GlobalClipPool(MotionLib):
@@ -211,22 +240,39 @@ class GlobalClipPool(MotionLib):
         all_clip_ids = sorted(clip_id_to_remote_name.keys())
         rng = random.Random(config.clip_partition_shuffle_seed)
         rng.shuffle(all_clip_ids)
-        self.rank_clip_ids: List[str] = all_clip_ids[self.rank :: self.world_size]
-        if not self.rank_clip_ids:
+        rank_clip_ids_full: List[str] = all_clip_ids[self.rank :: self.world_size]
+        if not rank_clip_ids_full:
             raise RuntimeError(
                 f"No clips assigned to rank {self.rank} (world_size={self.world_size}) "
                 f"out of {len(all_clip_ids)} clips in the manifest at {config.r2_source}. "
                 "world_size is larger than the number of clips."
             )
+
+        # Carve a fixed, deterministic eval holdout off the END of the (already shuffled)
+        # per-rank list, BEFORE building the trainable vocabulary below -- holdout clips must
+        # never enter rank_clip_ids/clip_id_to_local_index/global_clip_weights, so they can never
+        # be selected by _select_top_k or trained on. See GlobalClipPoolConfig.eval_holdout_size.
+        holdout_size = min(config.eval_holdout_size, max(len(rank_clip_ids_full) - 1, 0))
+        if holdout_size > 0:
+            self.eval_holdout_clip_ids: List[str] = rank_clip_ids_full[-holdout_size:]
+            self.rank_clip_ids: List[str] = rank_clip_ids_full[:-holdout_size]
+        else:
+            self.eval_holdout_clip_ids = []
+            self.rank_clip_ids = rank_clip_ids_full
+
         self._clip_remote_name: Dict[str, str] = {
             cid: clip_id_to_remote_name[cid] for cid in self.rank_clip_ids
+        }
+        self._eval_holdout_remote_name: Dict[str, str] = {
+            cid: clip_id_to_remote_name[cid] for cid in self.eval_holdout_clip_ids
         }
         self.clip_id_to_local_index: Dict[str, int] = {
             cid: i for i, cid in enumerate(self.rank_clip_ids)
         }
         log.info(
             f"[GlobalClipPool] rank {self.rank}/{self.world_size}: "
-            f"{len(self.rank_clip_ids)}/{len(all_clip_ids)} clips assigned, "
+            f"{len(self.rank_clip_ids)}/{len(all_clip_ids)} clips assigned "
+            f"({len(self.eval_holdout_clip_ids)} held out for eval), "
             f"resident_pool_size={config.resident_pool_size}"
         )
 
@@ -408,16 +454,43 @@ class GlobalClipPool(MotionLib):
         similarly-scored clips into (or out of) residency in lockstep the moment their shared
         score axis crosses the cutoff -- rank-based sampling still favors high-priority clips but
         avoids that correlated, all-at-once churn (cf. Prioritized Level Replay, Jiang et al. 2021).
+
+        `config.random_fraction` reserves that fraction of the K slots for pure uniform-random
+        selection (ignoring priority entirely), sampled BEFORE the priority pass and excluded from
+        it. The slow log-scale exploration bonus above already guarantees eventual re-selection of
+        a long-deprioritized clip, but only asymptotically -- a bounded random slice gives every
+        clip a fixed, non-vanishing per-rebuild chance of forced rehearsal regardless of how low
+        its weight has decayed. 0.0 (default) reproduces the old fully-priority-based behavior
+        exactly (k_random=0).
         """
+        num_clips = self.global_clip_weights.numel()
+        k = min(self.config.resident_pool_size, num_clips)
+        k_random = min(round(self.config.random_fraction * k), k)
+        k_priority = k - k_random
+
+        if k_random > 0:
+            random_idx = torch.randperm(num_clips)[:k_random]
+        else:
+            random_idx = torch.empty(0, dtype=torch.long)
+
+        if k_priority == 0:
+            return random_idx
+
+        remaining_mask = torch.ones(num_clips, dtype=torch.bool)
+        remaining_mask[random_idx] = False
+        remaining_indices = torch.nonzero(remaining_mask).flatten()
+
         t = self.rebuild_count
         bonus = self.config.exploration_bonus_coefficient * torch.sqrt(
-            2.0 * math.log(t + 1) / (self.global_clip_visit_counts.float() + 1.0)
+            2.0 * math.log(t + 1) / (self.global_clip_visit_counts[remaining_indices].float() + 1.0)
         )
-        priority = self.global_clip_weights + bonus
-        k = min(self.config.resident_pool_size, priority.numel())
+        priority = self.global_clip_weights[remaining_indices] + bonus
         ranks = priority.argsort(descending=True).argsort()
         probs = torch.softmax(-ranks.float() / self.config.selection_temperature, dim=0)
-        return torch.multinomial(probs, k, replacement=False)
+        chosen_sub = torch.multinomial(probs, k_priority, replacement=False)
+        priority_idx = remaining_indices[chosen_sub]
+
+        return torch.cat([random_idx, priority_idx])
 
     # ---------------------------------------------------------------- rebuild
 
@@ -444,13 +517,22 @@ class GlobalClipPool(MotionLib):
         self.global_clip_visit_counts[target_local_idx] += 1
         return True
 
-    def _materialize_resident_set(self, target_local_idx: torch.Tensor) -> None:
-        """Mechanically load `target_local_idx` as the resident MotionLib data. Pure I/O +
-        tensor-assembly -- does NOT touch `rebuild_count`/`visit_counts` (see
-        `_rebuild_resident_pool` for the curriculum-decision wrapper that does)."""
-        target_local_idx = target_local_idx.sort().values
-        target_clip_ids = [self.rank_clip_ids[i] for i in target_local_idx.tolist()]
+    def _load_clip_set(
+        self,
+        clip_ids: List[str],
+        remote_name_map: Dict[str, str],
+        motion_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        """Download (if needed), assemble, and load `clip_ids` as the live MotionLib data.
 
+        Generic over the (clip_id -> remote_name) mapping so both the training resident set
+        (`self._clip_remote_name`) and the fixed eval holdout (`self._eval_holdout_remote_name`)
+        can share this one download/assemble/load path. Pure I/O + tensor-assembly -- does NOT
+        touch `rebuild_count`/`visit_counts`/`_resident_local_indices`; callers decide what, if
+        anything, to update around this (see `_materialize_resident_set` vs. `load_eval_holdout`).
+
+        Returns the per-clip shape counts (needed by callers that track `_resident_shape_counts`).
+        """
         # Download anything missing in ONE batched rclone call (bounded internal concurrency via
         # --transfers), not one OS subprocess per file. Unlike MotionLibPool's shard prefetch
         # (which downloads the *known* next shard during the *current* shard's many epochs of
@@ -458,21 +540,16 @@ class GlobalClipPool(MotionLib):
         # computed -- there's no way to know it in advance, so this download is unavoidably
         # synchronous from the training loop's perspective.
         missing_remote_names = [
-            self._clip_remote_name[clip_id]
-            for clip_id in target_clip_ids
-            if not (self.local_cache_dir / self._clip_remote_name[clip_id]).exists()
+            remote_name_map[clip_id]
+            for clip_id in clip_ids
+            if not (self.local_cache_dir / remote_name_map[clip_id]).exists()
         ]
         self._download_missing_clips(missing_remote_names)
 
-        log.info(
-            f"[GlobalClipPool] rank {self.rank}: rebuilding resident pool "
-            f"({len(target_clip_ids)} clips, rebuild_count={self.rebuild_count})"
-        )
-
         clip_dicts = []
         shape_counts = []
-        for clip_id in target_clip_ids:
-            local_path = self.local_cache_dir / self._clip_remote_name[clip_id]
+        for clip_id in clip_ids:
+            local_path = self.local_cache_dir / remote_name_map[clip_id]
             clip_data = torch.load(local_path, map_location="cpu", weights_only=False)
             clip_dicts.append(clip_data)
             shape_counts.append(len(clip_data["motion_lengths"]))
@@ -481,27 +558,75 @@ class GlobalClipPool(MotionLib):
 
         assembled = self._concat_clip_dicts(clip_dicts)
 
-        # Overwrite the assembled per-motion weights with this rank's persistent scoreboard
-        # value for each clip, broadcast across its shape count -- the per-clip file's own
-        # `motion_weights` is just a stale placeholder from packaging time, the scoreboard
-        # (`global_clip_weights`) is the source of truth.
+        # Overwrite the assembled per-motion weights with the caller-supplied per-clip value,
+        # broadcast across its shape count -- the per-clip file's own `motion_weights` is just a
+        # stale placeholder from packaging time.
         shape_counts_t = torch.tensor(shape_counts, dtype=torch.long)
-        assembled["motion_weights"] = self.global_clip_weights[
-            target_local_idx
-        ].repeat_interleave(shape_counts_t)
+        assembled["motion_weights"] = motion_weights.repeat_interleave(shape_counts_t)
 
         self._load_motion_state_dict(assembled)
 
         # `_load_motion_state_dict` only overwrites fields present in the loaded dict -- it never
-        # touches these caches, so a stale mapping from the previous resident set would otherwise
-        # silently outlive this rebuild (same reasoning as `MotionLibPool._ensure_shard_loaded`).
+        # touches these caches, so a stale mapping from whatever was previously loaded would
+        # otherwise silently outlive this load (same reasoning as
+        # `MotionLibPool._ensure_shard_loaded`).
         self._asset_id_to_motion_ids_cache = None
         self._clip_id_to_motion_ids_cache = None
+
+        return shape_counts_t
+
+    def _materialize_resident_set(self, target_local_idx: torch.Tensor) -> None:
+        """Mechanically load `target_local_idx` as the resident MotionLib data. Pure I/O +
+        tensor-assembly -- does NOT touch `rebuild_count`/`visit_counts` (see
+        `_rebuild_resident_pool` for the curriculum-decision wrapper that does)."""
+        target_local_idx = target_local_idx.sort().values
+        target_clip_ids = [self.rank_clip_ids[i] for i in target_local_idx.tolist()]
+
+        log.info(
+            f"[GlobalClipPool] rank {self.rank}: rebuilding resident pool "
+            f"({len(target_clip_ids)} clips, rebuild_count={self.rebuild_count})"
+        )
+
+        shape_counts_t = self._load_clip_set(
+            target_clip_ids, self._clip_remote_name, self.global_clip_weights[target_local_idx]
+        )
 
         self._resident_local_indices = target_local_idx.clone()
         self._resident_shape_counts = shape_counts_t
 
         self._evict_cache(keep_clip_ids=set(target_clip_ids))
+
+    def has_eval_holdout(self) -> bool:
+        return len(self.eval_holdout_clip_ids) > 0
+
+    def load_eval_holdout(self) -> None:
+        """Swap the live MotionLib data to the fixed, permanently-excluded eval holdout set.
+
+        Does NOT touch `rebuild_count`/`visit_counts`/`_resident_local_indices` -- the training
+        resident set's bookkeeping stays intact in memory while holdout data is loaded in its
+        place, so `restore_training_resident_set` can reload it afterward. Callers must also
+        trigger `env.motion_manager.on_motion_lib_reloaded()` since the underlying tensors change
+        size/identity (see `MimicEvaluator._evaluate_holdout`).
+        """
+        log.info(
+            f"[GlobalClipPool] rank {self.rank}: loading eval holdout "
+            f"({len(self.eval_holdout_clip_ids)} clips)"
+        )
+        # Weight value is irrelevant here -- holdout clips are never selected via priority, this
+        # just satisfies _load_clip_set's motion_weights broadcast contract.
+        motion_weights = torch.ones(len(self.eval_holdout_clip_ids), dtype=torch.float32)
+        self._load_clip_set(self.eval_holdout_clip_ids, self._eval_holdout_remote_name, motion_weights)
+
+    def restore_training_resident_set(self) -> None:
+        """Reload whatever was resident for training before `load_eval_holdout` was called."""
+        assert self._resident_local_indices is not None, (
+            "restore_training_resident_set called before any training resident set was loaded."
+        )
+        target_local_idx = self._resident_local_indices
+        target_clip_ids = [self.rank_clip_ids[i] for i in target_local_idx.tolist()]
+        self._load_clip_set(
+            target_clip_ids, self._clip_remote_name, self.global_clip_weights[target_local_idx]
+        )
 
     @staticmethod
     def _concat_clip_dicts(clip_dicts: List[dict]) -> dict:
@@ -608,7 +733,9 @@ class GlobalClipPool(MotionLib):
 
         if success_motion_ids.numel() > 0:
             idx = to_local_indices(success_motion_ids)
-            self.global_clip_weights[idx] = (1 - alpha) * self.global_clip_weights[idx]
+            self.global_clip_weights[idx] = torch.clamp(
+                (1 - alpha) * self.global_clip_weights[idx], min=self.config.weight_floor
+            )
 
         if failed_motion_ids.numel() > 0:
             idx = to_local_indices(failed_motion_ids)

@@ -42,6 +42,10 @@ class MimicEvaluator(BaseEvaluator):
         super().__init__(agent, fabric, config)
         self._clip_expansion_all_ids: Optional[torch.Tensor] = None
         self._clip_expansion_id_to_col: Optional[torch.Tensor] = None
+        # Set while evaluating GlobalClipPool's fixed eval holdout (see _evaluate_holdout) --
+        # a holdout probe must never feed back into the training curriculum, otherwise it stops
+        # being a clean generalization measure and leaks eval signal into clip selection.
+        self._skip_weight_update = False
 
     @property
     def motion_lib(self) -> MotionLib:
@@ -236,6 +240,8 @@ class MimicEvaluator(BaseEvaluator):
 
     def _update_motion_sampling_weights(self) -> None:
         """Update motion sampling weights based on evaluation component failures."""
+        if self._skip_weight_update:
+            return
         if self._motion_failed is None:
             return
 
@@ -462,6 +468,53 @@ class MimicEvaluator(BaseEvaluator):
         del self._cached_motion_times
         self._eval_motion_subset = None
         super().cleanup_after_evaluation()
+
+    @torch.no_grad()
+    def evaluate(self) -> Tuple[Dict, Optional[float]]:
+        """Run the normal (curriculum-pool) eval, then -- if the motion_lib has a fixed eval
+        holdout (GlobalClipPool with eval_holdout_size > 0) -- an additional, read-only holdout
+        probe merged into the same log dict under `eval_holdout/*` keys.
+
+        The normal pass drives the curriculum (unchanged); the holdout pass never does (see
+        `_evaluate_holdout`). `self.eval_count` is bumped exactly once, inside `super().evaluate()`.
+        """
+        to_log, evaluated_score = super().evaluate()
+        if getattr(self.motion_lib, "has_eval_holdout", lambda: False)():
+            to_log.update(self._evaluate_holdout())
+        return to_log, evaluated_score
+
+    def _evaluate_holdout(self) -> Dict:
+        """Evaluate GlobalClipPool's fixed, permanently-excluded holdout set.
+
+        Swaps the live MotionLib content to the holdout clips, reuses the exact same
+        initialize/run/process/cleanup sequence `evaluate()` already uses (not duplicated) with
+        curriculum weight updates disabled, then swaps the training resident set back.
+
+        No `agent._force_full_env_reset` is needed: `cleanup_after_evaluation()`'s
+        `env.restore_state(...)` restores the env to its exact pre-holdout-eval snapshot, and
+        `restore_training_resident_set()` puts the motion_lib content back to the exact same
+        training data that snapshot was valid against -- together they leave everything
+        byte-identical to before this method ran.
+        """
+        if not self.config.evaluation_components:
+            return {}
+
+        self.motion_lib.load_eval_holdout()
+        self.env.motion_manager.on_motion_lib_reloaded()
+        self._skip_weight_update = True
+        try:
+            self._metrics = self.initialize_eval()
+            if self._metrics is None:
+                return {}
+            self.run_evaluation()
+            holdout_log, _ = self.process_eval_results()
+        finally:
+            self._skip_weight_update = False
+            self.cleanup_after_evaluation()
+            self.motion_lib.restore_training_resident_set()
+            self.env.motion_manager.on_motion_lib_reloaded()
+
+        return {k.replace("eval/", "eval_holdout/", 1): v for k, v in holdout_log.items()}
 
     def _plot_per_frame_metrics(
         self, metrics: Dict, actions_storage: list = None
