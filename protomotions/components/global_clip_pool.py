@@ -463,20 +463,21 @@ class GlobalClipPool(MotionLib):
         its weight has decayed. 0.0 (default) reproduces the old fully-priority-based behavior
         exactly (k_random=0).
         """
+        device = self.global_clip_weights.device
         num_clips = self.global_clip_weights.numel()
         k = min(self.config.resident_pool_size, num_clips)
         k_random = min(round(self.config.random_fraction * k), k)
         k_priority = k - k_random
 
         if k_random > 0:
-            random_idx = torch.randperm(num_clips)[:k_random]
+            random_idx = torch.randperm(num_clips, device=device)[:k_random]
         else:
-            random_idx = torch.empty(0, dtype=torch.long)
+            random_idx = torch.empty(0, dtype=torch.long, device=device)
 
         if k_priority == 0:
             return random_idx
 
-        remaining_mask = torch.ones(num_clips, dtype=torch.bool)
+        remaining_mask = torch.ones(num_clips, dtype=torch.bool, device=device)
         remaining_mask[random_idx] = False
         remaining_indices = torch.nonzero(remaining_mask).flatten()
 
