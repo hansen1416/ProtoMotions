@@ -3851,3 +3851,191 @@ v5's ~79–80% plateau, not regress sharply. Then watch `eval/success_rate` over
 epochs (the window the unfreeze itself took to resolve) — if it breaks past the ~82% peak, depth
 was a real limiting factor; if flat, that's evidence for the from-scratch/no-adapter alternative
 instead.
+
+================================================================================
+
+## 41. Stage 2 from scratch (`hhi_wide_stage2_scratch`) — data/eval pipeline fixes, launch, two
+crashes, and epoch ~2300–2600 dip explained (2026-07-29/30)
+
+**Why:** the adapter/warm-start lineage (§32–40, v1–v6) plateaued at ~78–82% `eval/success_rate`
+no matter the architecture, while the single-shape `hhi_wide_20946_neutral` trunk (same width,
+same obs, no adapter) reaches 95–97%. Decided to abandon the adapter lineage and train a plain,
+from-scratch trunk on the full 128-shape Stage 2 data — same architecture family as `mlp_wide.py`
+(6×2896, flat-concat `morphology_obs`, no adapter), reusing already-validated capacity rather than
+guessing a bigger width.
+
+Before launching, found two real problems with `GlobalClipPool` (§37/§38) that every v1–v6 run
+shared and that would undermine a from-scratch run just as much:
+
+1. **Resident-pool sizing never re-derived for this dataset.** `resident_pool_size=256` was
+   carried over unchanged from the `hhi_1024_motion` pilot, where 256 clips/rank was the *entire*
+   per-rank vocabulary (100% resident). At Stage 2's real per-rank vocabulary (3,492 clips), 256
+   is only ~7.3% resident at once. Real scoreboard data pulled from
+   `hhi_wide_fusion_stage2_unfrozen/env_global_clip_pool_rank0.ckpt` (107 rebuild cycles) showed
+   the consequence: 61% of clips (2,143/3,492) visited exactly twice ever, 38 clips resident 100+
+   times — a ~50x exposure disparity, since the priority scoreboard deprioritizes a clip the
+   moment it starts succeeding with only a slow log-scale UCB bonus to bring it back.
+2. **`eval/success_rate` measured on the resident pool itself, not a fixed holdout.**
+   `MimicEvaluator.motion_lib` is the live `GlobalClipPool` object; `eval_one_shape_per_motion`
+   samples one shape per *currently resident* clip. Since residency is priority-biased toward
+   hard/unproven clips, the eval sample is a moving, harder-than-average subsample — none of
+   v1–v6's reported numbers are trustworthy as an estimate of true full-dataset performance.
+
+**Three additive, backward-compatible fixes to `protomotions/components/global_clip_pool.py`**
+(all new `GlobalClipPoolConfig` fields default to exactly the old behavior, so any in-flight
+run/resume is unaffected):
+
+- `eval_holdout_size` (0 default): carves the **last** N entries of each rank's already-shuffled
+  `rank_clip_ids` into `self.eval_holdout_clip_ids` *before* the trainable vocabulary/
+  `clip_id_to_local_index`/`global_clip_weights` are built — holdout clips never enter
+  `_select_top_k`'s candidate space and can never be trained on. New methods `has_eval_holdout()`,
+  `load_eval_holdout()`, `restore_training_resident_set()`, all built on a new shared
+  `_load_clip_set()` helper refactored out of `_materialize_resident_set`'s
+  download+assemble+load body (behavior-preserving split, not a rewrite). `_evict_cache` always
+  protects `eval_holdout_clip_ids` from eviction.
+- `weight_floor` (0.0 default): `update_global_clip_weights`'s success branch now
+  `torch.clamp((1-alpha)*weight, min=weight_floor)` instead of unbounded decay toward 0 — a
+  "solved" clip keeps a nonzero selection priority forever instead of only being rediscoverable
+  via the slow UCB bonus.
+- `random_fraction` (0.0 default): `_select_top_k` splits K into `k_random` (uniform random,
+  ignoring priority) and `k_priority` (existing UCB/rank-softmax logic, restricted to the
+  remaining candidates) — guarantees every clip a fixed, non-vanishing per-rebuild rehearsal
+  chance regardless of how low its weight has decayed.
+
+**`protomotions/agents/evaluators/mimic_evaluator.py`** — additive holdout eval pass:
+`_evaluate_holdout()` swaps `motion_lib` to the holdout set, reuses the exact same
+initialize/run/process/cleanup sequence `evaluate()` already uses (not duplicated), guards
+`_update_motion_sampling_weights` off via a new `self._skip_weight_update` flag (so a holdout
+probe can never leak into the training curriculum), then swaps back. Logs everything under
+`eval_holdout/*`. Overridden `evaluate()` calls `super().evaluate()` (unchanged pool-eval) then
+appends `_evaluate_holdout()`'s results if `motion_lib.has_eval_holdout()`.
+
+**New experiment file** `examples/experiments/mimic/mlp_wide_stage2_scratch.py`: `env_config` from
+`mlp_wide.py` (not `mlp_wide_fusion_stage2.py` — the latter's `action_smoothness=-0.1` was tuned
+for the fusion adapter's pose-dependent jerk risk, which a plain trunk doesn't have; kept at
+`mlp_wide.py`'s original -0.02). `agent_config` copies `mlp_wide.py` exactly — 6×2896 actor,
+lr `2e-5` (real from-scratch training, not the `4e-6` used for adapter fine-tuning), 4×1024
+critic, `evaluator=MimicEvaluatorConfig(eval_metrics_every=256)`. No `--checkpoint`.
+
+Launch:
+```
+python protomotions/train_agent.py \
+    --robot-name smpl_mor --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_wide_stage2_scratch.py \
+    --experiment-name hhi_wide_stage2_scratch \
+    --global-clip-pool-source r2:proto-data/hhi_stage2_per_clip/ \
+    --global-clip-pool-cache-dir /workspace/motion_cache \
+    --global-clip-pool-size 256 --global-clip-pool-rebuild-every 256 \
+    --global-clip-pool-eval-holdout-size 128 --global-clip-pool-weight-floor 0.05 \
+    --global-clip-pool-random-fraction 0.2 \
+    --num-envs 6144 --batch-size 24576 --ngpu 6 \
+    --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+    --wandb-group hhi_wide_stage2_scratch
+```
+wandb run: `yugoamaryl/hhi-protomotions/hl2g9b0m`.
+
+**Crash 1 — CUDA device-side assert ("index out of bounds") in `slerp`/`interpolate_quat`,
+during the first holdout eval.** User's first hypothesis was GPU OOM (suggested reducing
+`--num-envs`/`--batch-size`); ruled out by direct evidence — no "CUDA out of memory" string
+anywhere in the log, only device-side assertion strings. Root cause: `_evaluate_holdout()` swapped
+`motion_lib` to the much smaller holdout set without forcing a full env reset across *all* envs.
+`EnvContext`'s `context` property rebuilds globally (`_build_global_context()`, no `env_ids` param)
+on *any* `env.reset()` call, and `mimic_control.py`'s `populate_context()` reads
+`self.env.motion_manager.motion_ids` — the full per-env array, not scoped to the reset subset. So
+every env outside the small eval batch kept its pre-swap motion_ids, valid against the (much
+larger) training pool but out of bounds against the (much smaller) holdout set, crashing
+`motion_lib.get_motion_state()`'s indexing. `on_motion_lib_reloaded()`'s own docstring is explicit
+it does NOT touch `motion_ids`/`motion_times` — callers must force a full reset, exactly the
+pattern `GlobalClipPoolRebuildCallback` already uses via `agent._force_full_env_reset = True`
+after a real pool rebuild, which the original `_evaluate_holdout()` had missed applying. **Fix:**
+`self.env.reset(torch.arange(self.env.num_envs))` immediately after the holdout swap, and
+`agent._force_full_env_reset = True` after swapping back to the training set.
+
+**Crash 2 — `RuntimeError: indices should be either on cpu or on the same device as the indexed
+tensor (cpu)` in `_select_top_k()`, during checkpoint resume.** Root cause: `_select_top_k`'s
+`torch.randperm(num_clips)` / `torch.ones(num_clips, dtype=torch.bool)` had no `device=` arg,
+defaulting to CPU, while `self.global_clip_weights` lives on CUDA after
+`load_global_clip_weights_state_dict()` clones tensors straight from the loaded (CUDA) checkpoint
+— so `remaining_indices[chosen_sub]` indexed a CPU tensor with a CUDA index tensor. Invisible to
+the original standalone CPU-only unit tests (no GPU in that sandbox), so it only surfaced on the
+first real GPU + resume execution — this bug class doesn't trigger on a fresh launch (both
+`global_clip_weights` and the constructed tensors are CPU by default there), only on resume, where
+the loaded weights are CUDA. **Fix:** derive `device = self.global_clip_weights.device` at the top
+of the method, pass `device=device` to `randperm`/`ones`/the empty-tensor fallback.
+
+**Follow-up finding (2026-07-30, this session):** re-checking the repo found Crash 2's fix had
+never actually landed — `git diff HEAD` showed the working tree byte-identical to HEAD for
+`global_clip_pool.py`, and no commit since `9f0676c` ("stage2 scratch") touched the file. The fix
+existed only in a prior session's summary, not in the code. Re-applied and verified via
+`py_compile`. **This still needs to be synced to the pod** before any future resume of the
+currently-running job, or the identical resume crash will recur. While re-checking, also confirmed
+`load_eval_holdout()`'s `motion_weights = torch.ones(...)` (also no `device=`) is *not* a live bug
+— `_load_clip_set` builds it purely on CPU and hands it to the inherited `_load_motion_state_dict`,
+which does the CPU→device transfer uniformly, the same path `_materialize_resident_set` always
+used safely.
+
+**Epoch ~2300–2600 dip investigated (2026-07-30) — not a real regression.** User observed
+`env/total_env_reward_mean`, `eval/success_rate`, `info/episode_length`, and
+`rewards/unnormalized_task_rewards` all dip together (peak at epoch 2047, trough at 2559, partial
+recovery by 2815). Pulled the run's wandb history directly:
+
+| epoch | eval/success_rate (pool) | eval_holdout/success_rate (fixed) | env/total_env_reward_mean | info/episode_length | distinct_motions_seen |
+|---|---|---|---|---|---|
+| 1791 | 0.506 | 0.402 | 0.826 | 91.8 | 7133 |
+| 2047 | 0.531 (peak) | 0.453 | 0.828 (peak) | 92.9 (peak) | 7951 |
+| 2303 | 0.467 | 0.478 | 0.796 | 78.8 | 8693 |
+| 2559 | 0.393 (trough) | 0.491 | 0.768 (trough) | 66.2 (trough) | 8963 |
+| 2815 | 0.493 | 0.553 (new high) | 0.781 | 79.2 | 9162 |
+
+`eval_holdout/success_rate` — the fixed 128-clip/rank holdout added in this same set of fixes —
+climbs **monotonically** through the exact window where the pool-side metrics dip, and
+`eval_holdout/gt_error/mean` improves the whole time too (0.647→0.538). `data/distinct_motions_seen`
+never stalls. Conclusion: this is exactly the metric-bias failure mode the holdout fix was built
+to catch — `--global-clip-pool-rebuild-every 256` swaps the resident training set roughly every
+256 epochs, and the batch that came in around epoch ~2200–2300 happened to skew toward
+harder/newer clips, so every metric measured *against whatever's currently resident* (rollout
+reward, episode length, pool-side eval) dropped even though the policy kept improving cleanly —
+confirmed by the holdout metric, which is immune to resident-set composition by construction.
+
+**`num_mini_epochs` question investigated (2026-07-30) — held off.** User asked whether the model
+undertrains each rollout batch. `agent.num_mini_epochs=1` (default, not overridden in this
+experiment) — with `num_envs=6144`, `num_steps=32`, `batch_size=24576`, each rollout's 196,608
+transitions get exactly one gradient pass (8 minibatches) before being discarded, on the low end
+vs. other experiments in this repo (`mlp_bm_l2c2.py`: 2, tutorial: 4, `transformer.py`: 6).
+Counter-evidence against raising it: `actor/clip_frac` already averages ~0.23 (std 0.09) over the
+last 1000 epochs — a moderate-to-fairly-high trust-region-clipping rate already at 1 pass, so more
+mini-epochs over the same data would likely push the policy further from its behavior policy and
+raise clip_frac further rather than provide free extra signal. Decision: don't touch it now: no
+sign of underfitting severe enough to justify the tradeoff, and the run is healthy (clip_frac
+stable, no bad gradients, `eval_holdout/success_rate` still climbing with no plateau). Revisit only
+if holdout success plateaus meaningfully below the ~95–97% single-shape ceiling.
+
+**Rebuild cadence and volume, precisely (2026-07-30):** `--global-clip-pool-rebuild-every 256`
+confirmed against the wandb log's exact eval-point spacing (255, 511, 767, ...). Each rebuild
+picks K=256 clips/rank: 51 slots (20%, `random_fraction=0.2`) pure uniform random, 205 slots (80%)
+via the UCB-priority rank-softmax. Since `eval_metrics_every=256` too, each rebuild's genuinely-new
+(never-before-resident) clip count is exactly the `data/distinct_motions_seen` delta between
+consecutive eval points:
+
+| rebuild → epoch | new clips this rebuild |
+|---|---|
+| →511 | 1079 |
+| →767 | 942 |
+| →1023 | 939 |
+| →1279 | 899 |
+| →1535 | 877 |
+| →1791 | 861 |
+| →2047 | 818 |
+| →2303 | 742 |
+| →2559 | 270 |
+| →2815 | 199 |
+
+New-clip introduction rate is declining steadily as cumulative coverage grows (9162 distinct
+motions seen by epoch 2815) and the never-before-seen fraction of the vocabulary shrinks — expected
+behavior, not a bug.
+
+**Status as of this note:** run healthy and ongoing at epoch ~2900+ (~8.5 training hours),
+`eval_holdout/success_rate` climbing with no plateau (0.40→0.55 over the last 5 eval points).
+Recommendation: let it continue; ~16,400 epochs was needed for `hhi_moe_20946_neutral_stable`
+(§26) to reach its ceiling, so this is still early. Open item: sync Crash 2's re-applied fix to
+the pod before any future resume.
