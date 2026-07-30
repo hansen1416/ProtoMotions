@@ -490,17 +490,32 @@ class MimicEvaluator(BaseEvaluator):
         initialize/run/process/cleanup sequence `evaluate()` already uses (not duplicated) with
         curriculum weight updates disabled, then swaps the training resident set back.
 
-        No `agent._force_full_env_reset` is needed: `cleanup_after_evaluation()`'s
-        `env.restore_state(...)` restores the env to its exact pre-holdout-eval snapshot, and
-        `restore_training_resident_set()` puts the motion_lib content back to the exact same
-        training data that snapshot was valid against -- together they leave everything
-        byte-identical to before this method ran.
+        `on_motion_lib_reloaded()`'s own docstring is explicit that it does NOT touch
+        `motion_manager.motion_ids`/`motion_times` -- callers must force a full env reset so every
+        env resamples against the new motion set. Eval only resets the small per-batch subset of
+        envs (`env_ids` in `evaluate_episode`), but `EnvContext` is rebuilt globally on every
+        `env.reset()` call (`mimic_control.py`'s `populate_context` reads
+        `motion_manager.motion_ids` for *all* envs, not just the reset subset) -- so every env
+        outside this batch would otherwise keep its pre-swap motion_ids, which are valid against
+        the (much larger) training resident pool but out of bounds against the (much smaller)
+        holdout set, crashing `motion_lib.get_motion_state()`'s indexing the moment `env.reset()`
+        rebuilds context. Fix: force a full reset of every env right after swapping in the holdout
+        set, exactly like `GlobalClipPoolRebuildCallback` does after a real resident-pool rebuild.
+
+        On the way back out, `agent._force_full_env_reset = True` applies that same fix for
+        training's own resumption: `cleanup_after_evaluation()` restores each env's pre-holdout
+        `motion_ids` (captured before the full reset above), which stay in-bounds against the
+        just-restored training set, but are stale/meaningless for envs not naturally reset before
+        the next rollout -- the flag forces every env to resample cleanly, matching how a real
+        pool rebuild is handled during training.
         """
         if not self.config.evaluation_components:
             return {}
 
         self.motion_lib.load_eval_holdout()
         self.env.motion_manager.on_motion_lib_reloaded()
+        all_env_ids = torch.arange(self.env.num_envs, device=self.device)
+        self.env.reset(all_env_ids)
         self._skip_weight_update = True
         try:
             self._metrics = self.initialize_eval()
@@ -513,6 +528,7 @@ class MimicEvaluator(BaseEvaluator):
             self.cleanup_after_evaluation()
             self.motion_lib.restore_training_resident_set()
             self.env.motion_manager.on_motion_lib_reloaded()
+            self.agent._force_full_env_reset = True
 
         return {k.replace("eval/", "eval_holdout/", 1): v for k, v in holdout_log.items()}
 
