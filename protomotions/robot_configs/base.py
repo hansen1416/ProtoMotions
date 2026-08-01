@@ -181,6 +181,19 @@ class ControlConfig:
     # the positional limits used for rewards
     soft_pos_limit: float = 0.9
 
+    # If True, scale stiffness/damping/effort_limit per-env by that env's actual simulated body
+    # mass relative to pd_gain_reference_mass. For multi-shape robots (e.g. smpl_mor) with a single
+    # shared control_info, override_control_info's fixed values are otherwise applied identically
+    # to every body regardless of mass -- a body far from the reference mass ends up under- or
+    # over-actuated relative to what its own weight requires. Requires pd_gain_reference_mass to be
+    # set. Default False: exactly today's behavior for every robot that doesn't opt in.
+    mass_scaled_gains: bool = False
+
+    # Reference body mass (kg) that override_control_info's absolute stiffness/damping/effort_limit
+    # values are tuned for. Only used when mass_scaled_gains=True. A body at this mass gets gains
+    # unscaled (scale=1.0); heavier/lighter bodies scale proportionally.
+    pd_gain_reference_mass: Optional[float] = None
+
     # The following field is loaded post-init and populated from the MJCF asset
     # Note: Using Field(init=False) to exclude from __init__ signature
     control_info: Dict[str, ControlInfo] = field(init=False)

@@ -4039,3 +4039,159 @@ behavior, not a bug.
 Recommendation: let it continue; ~16,400 epochs was needed for `hhi_moe_20946_neutral_stable`
 (§26) to reach its ceiling, so this is still early. Open item: sync Crash 2's re-applied fix to
 the pod before any future resume.
+
+## 42. Mass-Scaled PD Gains for `smpl_mor` (2026-08-01)
+
+### Why
+
+By 2026-08-01, `hhi_wide_stage2_scratch` (§41) had climbed to `eval_holdout/success_rate` ≈ 0.78
+at epoch ~16,000 (up from 0.68 at epoch 7679, full-vocabulary-coverage point) — healthy and still
+climbing, no plateau. Separately, user raised a standing concern: the 128 SMPL body shapes used
+for morphology conditioning are AI/statistically generated, not measured from real humans, and
+some may be physically implausible in ways that destabilize simulation — a possible confound
+sitting underneath every multi-shape result in this project (§18 MoE, §32-40 adapter lineage,
+§41 from-scratch), separate from architecture or curriculum questions.
+
+Tested this directly rather than theorizing. `HHIFaultEvaluator`
+(`protomotions/agents/evaluators/hhi_fault_evaluator.py`) already logs per-motion `gender`/
+`beta_key` plus `mean_body_dist` in its CSV output, but had never been run against this project's
+checkpoints (task E1, previously blocked only on "needs a Stage 2 checkpoint" — no longer true).
+Ran it via `protomotions/evaluate_hhi_faults.py --checkpoint epoch_16000.ckpt --simulator isaacgym
+--num-envs 256 --overrides motion_lib.resident_pool_size=100`, producing
+`results/hhi_wide_stage2_scratch/hhi_fault_report.csv` (100 difficulty-sampled clips × 128 shapes
+= 12,800 rows).
+
+**Metric caveat:** `HHIFaultEvaluator` never resets on failure and always runs the full clip
+length ("No threshold. No gt_error. No reset/termination logic." — its own docstring), so a single
+early stumble poisons the rest of that row's average. This reads far harsher than the training-time
+success metric (17.7% "success" by `mean_body_dist<0.5` here, vs. 77.9% `eval_holdout/success_rate`
+in wandb at the same checkpoint) — **not comparable in absolute terms**, but valid for relative/
+correlational comparison across shapes and clips, since the same harsh methodology applies
+uniformly to every row.
+
+Two-way variance decomposition (100 clips × 128 shapes): **clip/motion identity explains 47.6%**
+of total error variance (expected — matches the difficulty-stratified sampling design); **shape
+identity explains only 3.7%**. So shape is a real but secondary effect against motion difficulty.
+
+Tested the "implausible/extreme AI-generated shape" hypothesis directly: joined `beta_key` back to
+the raw 10-dim SMPL betas (`protomotions/data/assets/all_betas.pt`) and correlated ‖β‖₂ (generic
+PCA-space extremity) against error. **r = −0.373 (p<0.0001) — wrong sign.** More extreme β-shapes
+tracked slightly *better*, not worse. Also tested a second hypothesis (absolute, non-normalized
+position-error metrics unfairly penalizing taller bodies — see the reward/termination code in
+`protomotions/envs/rewards/tracking.py` and `mean_body_pos_error`): raw correlation with
+`total_height` was r=+0.19, but after partialling out mass (regress mass out of both variables,
+correlate residuals), height's independent effect vanished (partial r=−0.159, p=0.072, wrong
+sign) — concluded this was mass riding along with a correlated size variable, not an independent
+driver, and deprioritized it (also more invasive: touches reward/termination/success semantics
+used by every past experiment, vs. control-parameters-only for the fix below).
+
+Joined a third, more physically-grounded dataset instead —
+`protomotions/data/assets/mjcf/smpl_mor/physics_features.pt` (mass, segment lengths, widths,
+already precomputed per shape). **`total_mass` was the standout predictor:**
+
+| | Pearson r vs. `mean_body_dist` | p |
+|---|---|---|
+| `total_mass` | **+0.533** (shape-level, n=128) | <0.0001 |
+| `hip_width` | +0.441 | <0.0001 |
+| `shoulder_width` | +0.409 | <0.0001 |
+| `torso_height` | +0.357 | <0.0001 |
+| limb lengths (thigh/shin/arm) | ~0.03–0.18 | mostly n.s. |
+
+`total_mass` ranges 26–144 kg across the 128 shapes (5.5× spread). The mass effect survives
+controlling for clip difficulty: within-clip residual (row's error minus that clip's mean, so
+motion difficulty is subtracted out) still correlates with mass at r=+0.142 across all 12,800
+rows, p=1.6×10⁻⁵⁸. Raw success rate (`mean_body_dist<0.5`) drops monotonically by mass quartile:
+19.3% (lightest) → 18.9% → 17.0% → 15.5% (heaviest).
+
+Traced to a concrete root cause in code: `smpl_mor.py`'s `ControlConfig.override_control_info`
+sets **one fixed** stiffness/damping/effort_limit per DOF-name regex (e.g. all `*_Hip_*` /
+`*_Knee_*` / `*_Ankle_*` get `effort_limit=500` regardless of which of the 128 shapes owns that
+DOF). Confirmed via `ControlConfig.initialize_control_info()`
+(`protomotions/robot_configs/base.py`) that `control_info` is extracted **once**, from a single
+canonical MJCF asset, then applied identically to every env's DOF properties in
+`IsaacGymSimulator._build_env()` (`protomotions/simulator/isaacgym/simulator.py`) — regardless of
+which specific body-shape asset that env actually spawned. A 144 kg body gets the exact same
+500 N·m effort cap as a 26 kg body.
+
+### Theory
+
+Standard multi-morphology RL/robotics heuristic: PD stiffness/damping and torque limits should
+scale with body mass (more precisely inertia) to preserve consistent closed-loop dynamics across
+differently-sized bodies, rather than leaving one gain set tuned for a single reference body
+applied to all of them.
+
+For a PD joint, natural frequency ω = √(k/I) and damping ratio ζ = b/(2√(k·I)), where I is the
+joint's effective inertia. At roughly similar geometry, I scales ~linearly with body mass. If
+stiffness k and damping b **both** scale linearly with mass, ω and ζ stay approximately constant
+across body sizes — every shape gets the same qualitative response character (same "feel"),
+instead of a body far from the reference mass ending up either over-damped/over-gained (small
+body, same absolute gains as a much heavier reference → jittery, excessive corrective torque
+relative to its own inertia) or under-damped/under-actuated (heavy body, same gains → sluggish,
+can't produce enough corrective torque relative to its own weight and inertia). `effort_limit`
+scales the same way for a more direct reason: a heavier body needs proportionally more peak torque
+just to support its own weight and produce equivalent accelerations.
+
+Reference mass = **73.445278 kg**, the population mean `total_mass` across the 128 `smpl_mor`
+shapes (`physics_features.pt`). Chosen so the existing `override_control_info` values — already
+in use, presumably reasonable as a starting point — apply **unscaled** (`gain_scale=1.0`) at
+exactly the population's average body, with lighter/heavier shapes scaling proportionally down/up
+from that anchor rather than picking an arbitrary new baseline.
+
+Mass is read from the **live physics engine at env-creation time**
+(`get_actor_rigid_body_properties`, summed across all rigid bodies of that specific env's actor),
+not from the precomputed `physics_features.pt` side file — guarantees exact consistency with what
+IsaacGym is actually simulating for that env, with no risk of drift if MJCF assets are ever
+regenerated independently of that file.
+
+Scope deliberately kept narrow: only `stiffness`, `damping`, `effort_limit` scale with mass.
+`velocity_limit`, `armature`, `friction` are left untouched — they aren't clearly mass-dependent
+in the same way, and the goal is the smallest change that addresses the specific, empirically-
+supported r=0.53 mass→error effect, not a general physics-realism pass.
+
+### Code change briefing
+
+Three files, all additive/opt-in — every other robot config keeps exactly today's behavior.
+
+**`protomotions/robot_configs/base.py`** — two new `ControlConfig` fields, both off by default:
+```python
+mass_scaled_gains: bool = False
+pd_gain_reference_mass: Optional[float] = None
+```
+
+**`protomotions/robot_configs/smpl_mor.py`** — opts in:
+```python
+mass_scaled_gains=True,
+pd_gain_reference_mass=73.445278,
+```
+
+**`protomotions/simulator/isaacgym/simulator.py`, `_build_env()`** — the part that actually takes
+effect. Right after the per-env actor is created:
+```python
+gain_scale = 1.0
+if self.robot_config.control.mass_scaled_gains:
+    reference_mass = self.robot_config.control.pd_gain_reference_mass
+    body_props = self._gym.get_actor_rigid_body_properties(env_ptr, humanoid_handle)
+    actor_mass = sum(bp.mass for bp in body_props)
+    gain_scale = actor_mass / reference_mass
+```
+`gain_scale` then multiplies `effort_limit` in the existing per-DOF `control_info` loop, and
+`stiffness`/`damping` in the existing `BUILT_IN_PD` gain-assignment loop. `velocity_limit`,
+`armature`, `friction` pass through unscaled, matching the "Theory" scope above.
+
+**Verified:** `py_compile` on all three files; local dataclass instantiation confirms
+`SmplMorRobotConfig()` gets `mass_scaled_gains=True` / `pd_gain_reference_mass=73.445278` wired
+through, while `G1RobotConfig()` (and by extension every other robot config — same default path)
+still shows `mass_scaled_gains=False` / `pd_gain_reference_mass=None` — no regression to any
+other robot.
+
+**Known limitation:** only `IsaacGymSimulator._build_env()` reads `mass_scaled_gains`. `isaaclab`/
+`newton`/`genesis`/`mujoco` don't implement this yet — a future sim2sim comparison (train IsaacGym
+→ test Newton, the documented workflow in CLAUDE.md) would silently fall back to unscaled gains on
+those backends until ported.
+
+**Not yet trained.** This changes robot dynamics, so it needs a fresh training run, not a
+hot-patch into the live `hhi_wide_stage2_scratch` job — that policy's ~16k epochs of weights are
+tuned against the old fixed-gain dynamics, and swapping gains under it mid-run would be an
+uncontrolled experiment. Plan: launch a fresh comparison run, then re-run
+`evaluate_hhi_faults.py` against a checkpoint from it to check whether the mass↔error correlation
+(r=0.53 above) weakens or disappears.

@@ -1143,13 +1143,25 @@ class IsaacGymSimulator(Simulator):
                 gymapi.Vec3(0.54, 0.85, 0.2),
             )
 
+        gain_scale = 1.0
+        if self.robot_config.control.mass_scaled_gains:
+            reference_mass = self.robot_config.control.pd_gain_reference_mass
+            assert reference_mass is not None and reference_mass > 0, (
+                "mass_scaled_gains=True requires a positive pd_gain_reference_mass."
+            )
+            body_props = self._gym.get_actor_rigid_body_properties(
+                env_ptr, humanoid_handle
+            )
+            actor_mass = sum(bp.mass for bp in body_props)
+            gain_scale = actor_mass / reference_mass
+
         dof_props = self._gym.get_actor_dof_properties(env_ptr, humanoid_handle)
 
         for dof_name, dof_info in self.robot_config.control.control_info.items():
             if dof_info.effort_limit is not None:
                 dof_props["effort"][
                     self.robot_config.kinematic_info.dof_names.index(dof_name)
-                ] = dof_info.effort_limit
+                ] = dof_info.effort_limit * gain_scale
             if dof_info.velocity_limit is not None:
                 dof_props["velocity"][
                     self.robot_config.kinematic_info.dof_names.index(dof_name)
@@ -1172,6 +1184,13 @@ class IsaacGymSimulator(Simulator):
                 # This disables additional stiffness-damping that is added by the built-in PD controller.
                 stiffness = 0.0
                 damping = 0.0
+            elif stiffness is not None and damping is not None:
+                # Scale to match this env's actual mass (see gain_scale above). Natural frequency
+                # omega=sqrt(k/I) and damping ratio zeta=b/(2*sqrt(k*I)) stay constant across body
+                # sizes if k and b both scale linearly with mass (I scales ~linearly with mass at
+                # fixed geometry).
+                stiffness = stiffness * gain_scale
+                damping = damping * gain_scale
 
             dof_props["stiffness"][i] = stiffness
             dof_props["damping"][i] = damping

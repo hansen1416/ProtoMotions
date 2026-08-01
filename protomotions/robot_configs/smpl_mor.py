@@ -83,6 +83,17 @@ class SmplMorRobotConfig(RobotConfig):
     control: ControlConfig = field(
         default_factory=lambda: ControlConfig(
             control_type=ControlType.BUILT_IN_PD,
+            # Multi-shape robot: override_control_info below applies one fixed set of gains to
+            # every one of the 128 body shapes regardless of actual mass (26-144 kg range).
+            # Empirically, heavier bodies track worse even controlling for motion difficulty
+            # (see note/README.note.md, HHIFaultEvaluator per-shape analysis: mass vs mean_body_dist
+            # r=0.53, p<0.0001) -- consistent with heavier bodies being under-actuated relative to
+            # a fixed effort_limit. Scale gains by each env's actual mass to compensate.
+            mass_scaled_gains=True,
+            # Population mean total_mass across the 128 smpl_mor shapes
+            # (protomotions/data/assets/mjcf/smpl_mor/physics_features.pt) -- the override values
+            # below apply unscaled (scale=1.0) at this reference mass.
+            pd_gain_reference_mass=73.445278,
             # overrides PD parameters by regex over DOF names:
             override_control_info={
                 ".*_(Hip|Knee|Ankle)_.*": ControlInfo(

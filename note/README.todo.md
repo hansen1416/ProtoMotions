@@ -14,6 +14,34 @@
 
 ---
 
+## On Hold
+
+- **H1 (MED) — small multi-shape ablation, on hold 2026-07-31.** `eval/success_rate` /
+  `eval_holdout/success_rate` for `hhi_wide_stage2_scratch` (full 20,946 clips x 128 shapes) has
+  been stuck in the 63-70% band around epoch 8500, matching where the abandoned adapter lineage
+  (v1-v6) also plateaued (78-82%) and where the isolated `hhi_1_motion_128_shape` pilot hard-
+  plateaued (65-70% from epoch ~2200 to 8500, run manually killed after stabilizing) — converging
+  evidence the ceiling is a shape-conditioning capacity/architecture bottleneck, not a data-scale
+  or curriculum problem, since single-shape training on the same 20,946 clips reaches 91%+ by
+  epoch 4000 and 95-97% eventually.
+  Proposed next step (drafted, not yet launched): isolate the shape-conditioning problem from
+  data-scale/curriculum noise by training the exact same architecture (`mlp_wide.py`, unmodified)
+  on a small (~100-200 clip), difficulty-stratified, full-128-shape **static** motion file — no
+  `GlobalClipPool`, no residency streaming, so `eval/success_rate` is a clean full-distribution
+  number from the first eval point and iteration is fast. Target: clear 95%+ where GPU-hours-per-
+  clip is no longer scarce. If it still plateaus in the 65-82% band, that's strong confirmation the
+  fix needs to be architectural (capacity or how `morphology_obs` is injected); if it clears 90%+,
+  the full run's scale/pool mechanics need another look instead.
+  Tooling ready: `tools/build_small_multishape_subset.py` (builds the small static file from R2,
+  difficulty-stratified sampling) + launch command using unmodified `mlp_wide.py` — see chat log
+  2026-07-31 or `README.note.md` for the full command.
+  **Decision: hold until `hhi_wide_stage2_scratch` has had more time to run** — it's still slowly
+  climbing (`eval_holdout/success_rate` 0.63 -> 0.70 over the last ~3600 epochs, not yet flat like
+  the 1-motion pilot was), so it's not yet confirmed to have hit the same hard ceiling. Revisit
+  once that run's `eval_holdout/success_rate` trend flattens or clearly breaks past ~80%.
+
+---
+
 ## Active — Pre-Stage-2 (historical — all resolved)
 
 - **N1 (CRITICAL) — DONE.** Normalizer reset before Stage 2, via `tools/reset_morphology_normalizer.py`.
@@ -110,3 +138,21 @@ frozen trunk's normalizer — re-evaluate relevance before picking this up.
 
 `hhi_1024_transfer` and `hhi_phy_1024_transfer` are on R2 (`r2:proto-data/ckpt/`). Run E1
 against the 1024×128 pilot dataset if needed for ablation comparison against Stage 2.
+
+
+------
+
+
+1. PD gains are literally identical across all 128 shapes. smpl_mor.py's override_control_info sets
+  stiffness/damping/effort/velocity limits purely by joint-name regex (e.g. all *_Hip_* get stiffness=800, effort_limit=500) —
+  there's no scaling by that shape's actual mass/inertia. A heavy/tall shape may be structurally under-actuated (500 N·m
+  isn't enough torque to support more mass), while a light/small shape is over-gained relative to its inertia (jittery, prone
+  to oscillation). This is a classic multi-morphology RL pitfall — gains should scale with computed segment mass/length, not
+  stay fixed.
+  2. Tracking reward and success/termination criteria use absolute, non-normalized position error. mean_body_pos_error (used
+  both for the hard 0.5m termination threshold and eval success) and compute_rh_rew/gt reward (gt_coef=-25, root-height
+  success threshold 0.3m) all operate on raw meters of position error — never divided by that shape's actual height/limb
+  length. A taller shape's joints are geometrically farther from the root at the same relative pose accuracy, so it
+  accumulates more meters of error for identical skill, making it more likely to hit the 0.5m termination and less likely to
+  pass the 0.3m/0.5m success test — pure geometry bias, not policy quality. This alone predicts exactly the signature you'd
+  expect if shape were the bottleneck: large/tall shapes systematically failing more, independent of skill.
