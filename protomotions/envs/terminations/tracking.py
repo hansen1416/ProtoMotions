@@ -222,6 +222,36 @@ def compute_tracking_error(
     return terminate
 
 
+def compute_mean_tracking_error(
+    current_rigid_body_pos: Tensor,
+    ref_rigid_body_pos: Tensor,
+    threshold: float = 0.5,
+) -> Tensor:
+    """Tracking error termination based on mean (not max) body position error.
+
+    Terminates when the AVERAGE position error across all bodies exceeds threshold, instead
+    of any single body's error (see compute_tracking_error). This tolerates one or two bodies
+    drifting from a reference pose that may not be achievable exactly for a given body shape
+    -- e.g. a retargeted reference asking for a joint configuration a particular body's limb
+    proportions can't reach -- as long as overall tracking stays reasonable, rather than
+    resetting the episode on a single-body outlier. Intended to pair with a genuine fall
+    termination (see fall_termination in terminations/base.py) rather than being the only
+    failure signal.
+
+    Args:
+        current_rigid_body_pos: Current body positions [num_envs, num_bodies, 3].
+        ref_rigid_body_pos: Reference body positions [num_envs, num_bodies, 3].
+        threshold: Maximum mean joint error threshold in meters.
+
+    Returns:
+        Boolean tensor [num_envs] indicating which envs should terminate.
+    """
+    gt_per_joint_err = (ref_rigid_body_pos - current_rigid_body_pos).pow(2).sum(-1).sqrt()
+    mean_joint_err = gt_per_joint_err.mean(-1)
+    terminate = mean_joint_err > threshold
+    return terminate
+
+
 def anchor_height_error_value(
     current_anchor_pos: Tensor,
     ref_rigid_body_pos: Tensor,

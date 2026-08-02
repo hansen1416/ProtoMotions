@@ -530,6 +530,10 @@ class EnvContext:
 
     # Contact tracking
     contact_body_ids: Optional[Tensor] = FieldPath()
+    non_termination_contact_body_ids: Optional[Tensor] = FieldPath()
+
+    # Episode progress counter [num_envs] (steps since last reset)
+    progress_buf: Optional[Tensor] = FieldPath()
 
     # Morphology (optional — only present with smpl_mor multi-shape assets)
     env_morphology: Optional[Tensor] = FieldPath()
@@ -558,6 +562,8 @@ class EnvContext:
         current_contact_force_magnitudes: Optional[Tensor] = None,
         prev_contact_force_magnitudes: Optional[Tensor] = None,
         contact_body_ids: Optional[Tensor] = None,
+        non_termination_contact_body_ids: Optional[Tensor] = None,
+        progress_buf: Optional[Tensor] = None,
         env_morphology: Optional[Tensor] = None,
         env_physics_features: Optional[Tensor] = None,
         mimic: Optional[MimicContext] = None,
@@ -582,6 +588,9 @@ class EnvContext:
             current_contact_force_magnitudes: Current contact force magnitudes (optional).
             prev_contact_force_magnitudes: Previous contact forces (optional).
             contact_body_ids: Indices of bodies to track contacts for (optional).
+            non_termination_contact_body_ids: Indices of bodies allowed to contact the ground
+                without triggering a fall termination (optional).
+            progress_buf: Episode progress counter [num_envs], steps since last reset (optional).
             mimic: Mimic control context (optional).
             masked_mimic: Masked mimic context (optional).
             steering: Steering control context (optional).
@@ -610,6 +619,10 @@ class EnvContext:
 
         # Contact tracking
         self.contact_body_ids = contact_body_ids
+        self.non_termination_contact_body_ids = non_termination_contact_body_ids
+
+        # Episode progress
+        self.progress_buf = progress_buf
 
         self.env_morphology = env_morphology
         self.env_physics_features = env_physics_features

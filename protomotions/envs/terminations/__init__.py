@@ -42,6 +42,7 @@ from protomotions.envs.terminations.base import (
 # Tracking termination kernels
 from protomotions.envs.terminations.tracking import (
     compute_tracking_error,
+    compute_mean_tracking_error,
     compute_anchor_pos_error_term,
     compute_anchor_ori_error_term,
     compute_relative_body_pos_error_term,
@@ -78,6 +79,7 @@ __all__ = [
     "contact_termination",
     # Tracking termination kernels
     "compute_tracking_error",
+    "compute_mean_tracking_error",
     "compute_anchor_pos_error_term",
     "compute_anchor_ori_error_term",
     "compute_relative_body_pos_error_term",

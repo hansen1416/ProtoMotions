@@ -741,6 +741,67 @@ def tracking_error_term_factory(threshold: float = 0.5) -> MdpComponent:
     )
 
 
+def mean_tracking_error_term_factory(threshold: float = 0.5) -> MdpComponent:
+    """Factory for mean (not max) tracking error termination.
+
+    Unlike tracking_error_term_factory (which resets on any single body's error), this
+    terminates only when the AVERAGE error across all bodies exceeds threshold -- tolerates
+    one or two bodies drifting from a reference pose that may not be exactly achievable for a
+    given body shape, as long as overall tracking stays reasonable. Intended to be combined
+    with fall_term_factory (genuine physical failure) rather than used as the only failure
+    signal -- see note/README.note.md for the rationale.
+
+    Args:
+        threshold: Maximum mean joint error threshold in meters.
+
+    Returns:
+        MdpComponent configured for mean tracking error termination.
+    """
+    from protomotions.envs.terminations import compute_mean_tracking_error
+
+    return MdpComponent(
+        compute_func=compute_mean_tracking_error,
+        dynamic_vars={
+            "current_rigid_body_pos": EnvContext.current.rigid_body_pos,
+            "ref_rigid_body_pos": EnvContext.mimic.ref_state.rigid_body_pos,
+        },
+        static_params={"threshold": threshold},
+    )
+
+
+def fall_term_factory(termination_height: float = 0.15) -> MdpComponent:
+    """Factory for genuine fall-detection termination (contact + height), independent of
+    pose-tracking error.
+
+    An env only terminates here if a body that isn't allowed ground contact (per the robot's
+    non_termination_contact_bodies) is BOTH in contact with the ground AND below
+    termination_height -- i.e. it has actually fallen over, not merely drifted from the
+    reference pose. Meant to be the primary "did it fail" signal, paired with a loosened
+    tracking-error termination (mean_tracking_error_term_factory) rather than relying on pose
+    deviation alone to end episodes.
+
+    Args:
+        termination_height: Height (meters, above local ground) below which a disallowed-
+            contact body is considered fallen.
+
+    Returns:
+        MdpComponent configured for fall termination.
+    """
+    from protomotions.envs.terminations import fall_termination
+
+    return MdpComponent(
+        compute_func=fall_termination,
+        dynamic_vars={
+            "rigid_body_pos": EnvContext.current.rigid_body_pos,
+            "rigid_body_contacts": EnvContext.current.rigid_body_contacts,
+            "ground_heights": EnvContext.ground_heights,
+            "non_termination_contact_body_ids": EnvContext.non_termination_contact_body_ids,
+            "progress_buf": EnvContext.progress_buf,
+        },
+        static_params={"termination_height": termination_height},
+    )
+
+
 # =============================================================================
 # BeyondMimic Reward Factories
 # =============================================================================
@@ -1338,6 +1399,8 @@ __all__ = [
     "global_body_ang_vel_rew",
     # Termination factories
     "tracking_error_term",
+    "mean_tracking_error_term",
+    "fall_term",
     "anchor_pos_error_term",
     "anchor_ori_error_term",
     "relative_body_pos_error_term",

@@ -1028,6 +1028,10 @@ class BaseEnv:
             dt=self.dt,
             # Contact tracking
             contact_body_ids=self.contact_body_ids,
+            non_termination_contact_body_ids=self.non_termination_contact_body_ids,
+
+            # Episode progress
+            progress_buf=self.progress_buf,
 
             env_morphology=self.simulator.env_morphology if getattr(self.simulator, "morphology", False) else None,
             env_physics_features=self.simulator.env_physics_features if getattr(self.simulator, "morphology", False) else None,

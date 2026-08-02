@@ -4418,3 +4418,161 @@ has the full snippets: single `gain_scale = actor_mass / reference_mass` float i
 `resolved_configs.pt`/`resolved_configs_inference.pt` pickle the resolved `reference_body_masses`
 dict directly, so old checkpoints keep working for inference/resume regardless of what the
 in-repo code looks like later. Only *future* training runs are affected by reverting.
+
+**Relaunch command actually used** (supersedes §43's `..._massgain` command — same small-150 data,
+new experiment name reflecting the §44 upgrade from whole-actor to per-segment scaling; the old
+`aeu9e3un` whole-actor-only run was stopped rather than continued once this comparison was in):
+
+```bash
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide.py \
+  --experiment-name hhi_wide_150motion_128shape_seggain \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 1 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_150motion_128shape_seggain > /tmp/train_150motion_seggain.log 2>&1 &
+```
+
+## 45. Soft Tracking: Fall-Detection Termination + Mean-Based Tracking + Anchor Reward (2026-08-02)
+
+**Why**
+
+User's hypothesis: the 128 `smpl_mor` shapes' reference motions are retargeted from a single
+captured/generated trajectory onto each shape. That retargeted trajectory isn't guaranteed to be
+exactly achievable for every shape's actual proportions — a joint configuration fine for one
+body's limb lengths may be kinematically/dynamically infeasible for another. Rather than forcing
+every shape to match the reference exactly, the policy should be allowed to follow the "overall
+feeling" of the motion — general trajectory, balance, timing — without being penalized as hard
+for exact per-joint mismatch, especially when that mismatch may be a property of the (possibly
+infeasible-for-this-shape) reference itself, not a policy failure.
+
+Checked what `mlp_wide.py` (used by every `smpl_mor` run to date, including §42/§43/§44) actually
+enforces. Finding: **there is no separate fall-detection termination.** The only termination
+component is `tracking_error_term_factory` → `compute_tracking_error`, which resets the episode
+the moment **any single body's** position error exceeds 0.5m from the reference (a MAX over all
+bodies, not a mean). `fall_termination` (contact + height based, using each robot's
+`non_termination_contact_bodies` — feet allowed to touch ground, everything else isn't) is fully
+implemented in `terminations/base.py` but was never wired into any experiment config in this
+repo — confirmed via repo-wide grep, zero usages outside its own definition. So today, a shape
+doing something completely stable — just not bit-for-bit matching one hand's exact captured
+position — gets reset exactly the same way as a shape that's actually collapsed on the floor.
+
+**Design**
+
+Three changes, implemented as a new experiment file (`mlp_wide_soft_tracking.py`), not a `mlp_wide.py`
+edit — keeps `mlp_wide.py` reproducible for existing runs/checkpoints, matches this repo's existing
+convention (e.g. `mlp_wide_stage2_scratch.py` vs `mlp_wide_fusion_stage2.py`) of forking rather
+than mutating an experiment file once other runs depend on its exact behavior:
+
+1. **Wire in real fall detection**, separate from pose tracking. New `termination_components["fall"]`
+   using the existing-but-unused `fall_termination`. An episode now only ends on genuine physical
+   failure (a disallowed-contact body both touching the ground and near it), not on pose deviation
+   alone.
+
+2. **Loosen the tracking-error termination**: switched from MAX-per-body (`compute_tracking_error`)
+   to a new MEAN-across-all-bodies check (`compute_mean_tracking_error`, same formula, `.mean(-1)`
+   instead of `.max(-1)[0]`). Tolerates one or two individually-infeasible bodies as long as overall
+   tracking stays reasonable, instead of resetting on any single-body outlier. Threshold kept at
+   0.5 — chosen to exactly match `agent_config`'s existing `gt_error_factory(threshold=0.5)` eval-
+   success criterion, which (already) uses `mean_body_pos_error`, not max. Training now terminates
+   exactly when an episode would already be counted as failing by the existing eval convention, not
+   earlier (old MAX rule) or arbitrarily looser.
+
+3. **Reweight reward toward the coarse signal**: `gt_weight` 0.5→0.3, `gr_weight` 0.3→0.2,
+   `gav_weight` 0.2→0.1 (de-emphasize exact per-body position/rotation/angular-velocity matching);
+   `rh_weight` 0.2→0.25 (root height, already the coarsest existing signal, bumped slightly). Added
+   `global_anchor_pos_rew`/`global_anchor_ori_rew` (BeyondMimic-style root/anchor-only global
+   position + orientation tracking — already implemented in `rewards/tracking.py`, just unused in
+   `mlp_wide.py`) at weight 0.3/0.2 — a genuinely new "is it going the right way and facing the
+   right direction" signal that didn't exist before, distinct from any existing per-body reward.
+
+AMP-style discriminator/style reward (judge "does this look natural" rather than any explicit
+position target) was discussed as the more complete version of this idea, but deferred — this repo
+already supports AMP architecturally (`PPO → AMP`), but switching frameworks is a real experiment
+redesign (discriminator, replay buffer), not a tracking-reward reweight. Tried the cheaper version
+first.
+
+**Code change briefing**
+
+- **`protomotions/envs/terminations/tracking.py`**: new `compute_mean_tracking_error(current_rigid_body_pos,
+  ref_rigid_body_pos, threshold=0.5)` — identical to `compute_tracking_error` except
+  `.mean(-1)` instead of `.max(-1)[0]`. Exported through `terminations/__init__.py`.
+
+- **`protomotions/envs/context_views.py`** (`EnvContext`): added two fields needed to wire up
+  `fall_termination`, which wasn't previously reachable from any MdpComponent: `non_termination_contact_body_ids`
+  (mirrors the existing `contact_body_ids` field/pattern exactly) and `progress_buf` (episode step
+  counter, previously only accessible as `env.progress_buf` directly, not exposed to MdpComponent
+  functions). Both `Optional[Tensor]`, default `None`, additive — no existing field changed.
+
+- **`protomotions/envs/base_env/env.py`**: populated the two new fields in the single `EnvContext(...)`
+  construction site (confirmed via grep — only one call site in the file) from
+  `self.non_termination_contact_body_ids` (existing `cached_property`, already used elsewhere for
+  the same body-id resolution) and `self.progress_buf` (existing attribute).
+
+- **`protomotions/envs/component_factories.py`**: two new factories, `mean_tracking_error_term_factory`
+  and `fall_term_factory`, following the exact pattern of the existing `tracking_error_term_factory`.
+  `fall_term_factory` binds `EnvContext.current.rigid_body_contacts` — the **full** per-body contact
+  tensor from `RobotState` (confirmed via `get_binary_body_contacts`/`get_bodies_contact_buf`: this
+  is always populated for all bodies from IsaacGym's global net-contact-force tensor, independent of
+  the robot's `contact_bodies` config, which only subsets a *separate*, smaller `contact_body_ids`
+  tensor used for observations/`contact_match_rew`) — not the narrowed top-level `EnvContext.body_contacts`,
+  which is deliberately pre-subset to `contact_body_ids` (feet only, for `smpl_mor`) and would have
+  silently made fall detection blind to torso/head contact if used by mistake.
+
+- **`examples/experiments/mimic/mlp_wide_soft_tracking.py`** (new file): copy of `mlp_wide.py` with
+  only `termination_components` and `reward_components` changed as described above. Everything else
+  — architecture, observations, actions, motion manager, `agent_config`, `configure_robot_and_simulator`,
+  `apply_inference_overrides` — byte-identical to `mlp_wide.py`.
+
+**Verification performed:** `py_compile` on all five changed/new files. Built `env_config()` +
+`agent_config()` end-to-end on CPU (no IsaacGym needed for config construction) for `smpl_mor`
+via the new experiment file — confirmed `termination_components == ['fall', 'tracking_error']`,
+confirmed `reward_components` includes `global_anchor_pos_rew`/`global_anchor_ori_rew` alongside
+the reweighted `gt_rew`/`gr_rew`/etc. Confirmed all new `EnvContext` FieldPaths
+(`current.rigid_body_contacts`, `ground_heights`, `non_termination_contact_body_ids`, `progress_buf`)
+resolve without error at class-level access (no typos in `dynamic_vars` keys). Regression-checked
+`mlp_wide.py` (smpl_mor) and `mlp.py` (g1) still build unchanged (`termination_components == ['tracking_error']`
+for both, as before) — confirms the new optional `EnvContext` fields don't affect any existing
+experiment that doesn't reference them.
+
+**Known limitation:** `termination_height=0.15` and the reward weight values above are reasoned
+defaults (documented above), not empirically tuned — this run itself is how we calibrate them.
+**Not yet trained.**
+
+**2026-08-02 update — decoupled from §42/§44 (mass-scaled gains):** originally planned to combine
+soft-tracking with §44's per-segment gain fix in one run, since `smpl_mor.py` defaults
+`mass_scaled_gains=True` and any `smpl_mor` experiment inherits it automatically. Decided against
+this: the in-flight seg-gain-only run (`hhi_wide_150motion_128shape_seggain`, §44) hadn't shown a
+promising enough trend on its own to justify stacking a second, unvalidated change on top of it —
+doing so would make it impossible to attribute soft-tracking's effect cleanly if the combined run
+under- or over-performed. `configure_robot_and_simulator()` in `mlp_wide_soft_tracking.py` now
+explicitly sets `robot_cfg.control.mass_scaled_gains = False` for this experiment only (confirmed
+via live check: a fresh `SmplMorRobotConfig()` elsewhere is unaffected, `mass_scaled_gains` stays
+`True` — this is a per-experiment override, not a change to §42/§44's default). This run is now a
+clean, fully isolated test of soft-tracking alone against the pre-§42 baseline behavior, decoupled
+from the mass-gain question entirely. Plan: wait for the seg-gain run to produce enough signal
+(see §44) before deciding whether to layer these changes together in a follow-up run.
+
+**Launch command** (prepared, not yet run — holding per the decision above):
+
+```bash
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide_soft_tracking.py \
+  --experiment-name hhi_wide_150motion_128shape_softtrack \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 1 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_150motion_128shape_softtrack > /tmp/train_150motion_softtrack.log 2>&1 &
+```
