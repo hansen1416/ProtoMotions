@@ -4195,3 +4195,52 @@ tuned against the old fixed-gain dynamics, and swapping gains under it mid-run w
 uncontrolled experiment. Plan: launch a fresh comparison run, then re-run
 `evaluate_hhi_faults.py` against a checkpoint from it to check whether the mass↔error correlation
 (r=0.53 above) weakens or disappears.
+
+## 43. Small Multi-Shape Ablation Launched — `hhi_wide_150motion_128shape_massgain` (2026-08-01)
+
+**Why:** this is the small-scale architecture-isolation test proposed earlier and parked on hold
+in `README.todo.md` (task H1), now unparked. Rather than spend more GPU-hours confirming the
+shape-conditioning ceiling at the full 20,946-clip scale, train the same architecture
+(`mlp_wide.py`, unmodified) on a small (150-clip), difficulty-stratified, full-128-shape **static**
+motion file — no `GlobalClipPool`, no residency streaming, so `eval/success_rate` is a clean
+full-distribution number from the first eval point and iteration is fast. This run also serves as
+the first real test of §42's mass-scaled PD gain fix, since `--robot-name smpl_mor` now carries
+`mass_scaled_gains=True` automatically (no experiment-file changes needed). Target: 95%+
+`eval/success_rate`. If it clears that, continue to the full-scale data; if it still plateaus in
+the 65-82% band seen everywhere else (adapter lineage §32-40, `hhi_1_motion_128_shape` pilot,
+from-scratch §41), that's strong evidence of a deeper architectural bottleneck the mass-gain fix
+alone doesn't resolve.
+
+**Step 1 — build the small static multi-shape file** (run on the pod, needs rclone + R2 creds):
+```bash
+python tools/build_small_multishape_subset.py \
+    --num-clips 150 \
+    --output /workspace/motion_cache/small150_128shape.pt
+```
+Pulls 150 difficulty-stratified clips × 128 shapes (~19,200 motions) from
+`r2:proto-data/hhi_stage2_per_clip/`, assembles via `GlobalClipPool._concat_clip_dicts` (reused,
+not reimplemented), writes the `.pt` file plus a `.clip_ids.txt` sidecar listing which clips were
+selected.
+
+**Step 2 — train:**
+```bash
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide.py \
+  --experiment-name hhi_wide_150motion_128shape_massgain \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 1 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_150motion_128shape_massgain > /tmp/train_150motion_massgain.log 2>&1 &
+```
+Plain static `MotionLibConfig(motion_file=...)` load via `mlp_wide.py`'s existing
+`motion_lib_config()` — no `GlobalClipPool` flags needed. `--ngpu 1`: dataset is much smaller than
+the 20,946-clip runs, so single-GPU iteration should be fast enough; bump to match pod GPU count
+for faster wall-clock if preferred.
+
+**Status:** launched, running as of this note.
