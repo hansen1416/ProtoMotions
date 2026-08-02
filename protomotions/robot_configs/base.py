@@ -181,22 +181,26 @@ class ControlConfig:
     # the positional limits used for rewards
     soft_pos_limit: float = 0.9
 
-    # If True, scale stiffness/damping/effort_limit per-env by that env's actual simulated body
-    # mass relative to pd_gain_reference_mass. For multi-shape robots (e.g. smpl_mor) with a single
-    # shared control_info, override_control_info's fixed values are otherwise applied identically
-    # to every body regardless of mass -- a body far from the reference mass ends up under- or
-    # over-actuated relative to what its own weight requires. Requires pd_gain_reference_mass to be
-    # set. Default False: exactly today's behavior for every robot that doesn't opt in.
+    # If True, scale each DOF's stiffness/damping/effort_limit per-env by that env's actual
+    # simulated mass for the specific body that DOF actuates, relative to that same body's mass
+    # in the canonical reference asset (asset.asset_file_name). For multi-shape robots (e.g.
+    # smpl_mor) with a single shared control_info, override_control_info's fixed values are
+    # otherwise applied identically to every body regardless of mass -- a body far from the
+    # reference mass ends up under- or over-actuated relative to what its own weight requires.
+    # Scaling per-body-segment (rather than by one whole-actor mass scalar) also corrects for
+    # shapes whose limb geometry doesn't scale proportionally with total mass (e.g. a light
+    # shape with long legs still needs leg gains scaled for its actual leg mass, not its total
+    # mass). Default False: exactly today's behavior for every robot that doesn't opt in.
     mass_scaled_gains: bool = False
 
-    # Reference body mass (kg) that override_control_info's absolute stiffness/damping/effort_limit
-    # values are tuned for. Only used when mass_scaled_gains=True. A body at this mass gets gains
-    # unscaled (scale=1.0); heavier/lighter bodies scale proportionally.
-    pd_gain_reference_mass: Optional[float] = None
-
-    # The following field is loaded post-init and populated from the MJCF asset
+    # The following fields are loaded post-init and populated from the MJCF asset
     # Note: Using Field(init=False) to exclude from __init__ signature
     control_info: Dict[str, ControlInfo] = field(init=False)
+
+    # body_name -> mass (kg) in the canonical reference asset. Only populated when
+    # mass_scaled_gains=True. A body at this mass gets gains unscaled (scale=1.0) for the DOFs
+    # it actuates; heavier/lighter bodies (of the same body, across shapes) scale proportionally.
+    reference_body_masses: Dict[str, float] = field(init=False, default_factory=dict)
 
     def __post_init__(self):
         """Validate that override_control_info is a dictionary."""
@@ -210,14 +214,21 @@ class ControlConfig:
             self.override_control_info = override_control_info
 
     def initialize_control_info(self, asset: RobotAssetConfig):
-        """Initialize control info from asset configuration."""
+        """Initialize control info (and, if enabled, reference body masses) from asset configuration."""
+        mjcf_path = os.path.join(asset.asset_root, asset.asset_file_name)
+
         if not hasattr(self, "control_info"):
             from protomotions.components.pose_lib import extract_control_info
 
             self.control_info = extract_control_info(
-                mjcf_path=os.path.join(asset.asset_root, asset.asset_file_name),
+                mjcf_path=mjcf_path,
                 override_control_info=self.override_control_info,
             )
+
+        if self.mass_scaled_gains and not self.reference_body_masses:
+            from protomotions.components.pose_lib import extract_body_masses
+
+            self.reference_body_masses = extract_body_masses(mjcf_path)
 
 
 @dataclass

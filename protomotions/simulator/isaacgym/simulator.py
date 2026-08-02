@@ -1143,29 +1143,40 @@ class IsaacGymSimulator(Simulator):
                 gymapi.Vec3(0.54, 0.85, 0.2),
             )
 
-        gain_scale = 1.0
+        # Per-DOF gain scale, indexed like kinematic_info.dof_names / dof_props. Defaults to 1.0
+        # (today's behavior) for every DOF unless mass_scaled_gains is enabled.
+        gain_scale = np.ones(self._num_dof, dtype=np.float32)
         if self.robot_config.control.mass_scaled_gains:
-            reference_mass = self.robot_config.control.pd_gain_reference_mass
-            assert reference_mass is not None and reference_mass > 0, (
-                "mass_scaled_gains=True requires a positive pd_gain_reference_mass."
+            reference_body_masses = self.robot_config.control.reference_body_masses
+            assert reference_body_masses, (
+                "mass_scaled_gains=True requires reference_body_masses to be populated "
+                "(see ControlConfig.initialize_control_info)."
             )
             body_props = self._gym.get_actor_rigid_body_properties(
                 env_ptr, humanoid_handle
             )
-            actor_mass = sum(bp.mass for bp in body_props)
-            gain_scale = actor_mass / reference_mass
+            body_names = self.robot_config.kinematic_info.body_names
+            dof_body_ids = self.robot_config.kinematic_info.dof_body_ids
+            # Scale each DOF by its OWN body's mass relative to that same body's mass in the
+            # canonical reference asset -- not one whole-actor scalar -- so limb-level actuation
+            # matches this env's actual limb mass even when a shape's limb-length/mass ratio
+            # differs from the reference (see smpl_mor.py for the empirical motivation).
+            for i, body_idx in enumerate(dof_body_ids):
+                body_name = body_names[body_idx]
+                reference_mass = reference_body_masses[body_name]
+                assert reference_mass > 0, (
+                    f"Reference mass for body '{body_name}' must be positive."
+                )
+                gain_scale[i] = body_props[body_idx].mass / reference_mass
 
         dof_props = self._gym.get_actor_dof_properties(env_ptr, humanoid_handle)
 
         for dof_name, dof_info in self.robot_config.control.control_info.items():
+            dof_idx = self.robot_config.kinematic_info.dof_names.index(dof_name)
             if dof_info.effort_limit is not None:
-                dof_props["effort"][
-                    self.robot_config.kinematic_info.dof_names.index(dof_name)
-                ] = dof_info.effort_limit * gain_scale
+                dof_props["effort"][dof_idx] = dof_info.effort_limit * gain_scale[dof_idx]
             if dof_info.velocity_limit is not None:
-                dof_props["velocity"][
-                    self.robot_config.kinematic_info.dof_names.index(dof_name)
-                ] = dof_info.velocity_limit
+                dof_props["velocity"][dof_idx] = dof_info.velocity_limit
 
         if self.control_type == ControlType.BUILT_IN_PD:
             dof_props["driveMode"] = gymapi.DOF_MODE_POS
@@ -1185,12 +1196,12 @@ class IsaacGymSimulator(Simulator):
                 stiffness = 0.0
                 damping = 0.0
             elif stiffness is not None and damping is not None:
-                # Scale to match this env's actual mass (see gain_scale above). Natural frequency
-                # omega=sqrt(k/I) and damping ratio zeta=b/(2*sqrt(k*I)) stay constant across body
-                # sizes if k and b both scale linearly with mass (I scales ~linearly with mass at
-                # fixed geometry).
-                stiffness = stiffness * gain_scale
-                damping = damping * gain_scale
+                # Scale to match this DOF's own body's actual mass (see gain_scale above).
+                # Natural frequency omega=sqrt(k/I) and damping ratio zeta=b/(2*sqrt(k*I)) stay
+                # constant across body sizes if k and b both scale linearly with mass (I scales
+                # ~linearly with mass at fixed geometry).
+                stiffness = stiffness * gain_scale[i]
+                damping = damping * gain_scale[i]
 
             dof_props["stiffness"][i] = stiffness
             dof_props["damping"][i] = damping

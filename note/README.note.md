@@ -4244,3 +4244,177 @@ the 20,946-clip runs, so single-GPU iteration should be fast enough; bump to mat
 for faster wall-clock if preferred.
 
 **Status:** launched, running as of this note.
+
+## 44. Per-Body-Segment Mass-Scaled PD Gains (2026-08-02)
+
+**Why**
+
+Compared three wandb runs at matched training steps to see whether the §42/§43 work is closing
+the gap to the single-shape baseline: `hhi_wide_20946_neutral` (single shape, `260r3m5v`,
+converged 97.2% success), `hhi_wide_stage2_scratch` (all 128 shapes + full data, `hl2g9b0m`, no
+mass-gain fix — predates §42), and `hhi_wide_150motion_128shape_massgain` (128 shapes, small
+static 150-clip subset, §42's whole-actor mass-gain fix, `aeu9e3un`).
+
+Pulled full wandb histories (not just summaries) for all three via the wandb Python API. Per-step
+reward is nearly identical across all three runs (`env/total_env_reward_mean` 0.88-0.98,
+`env/scaled_r/rh_rew_mean` ~0.19 in all three) — the gap is not in per-step tracking quality. What
+diverges violently is jerk and everything downstream of it:
+
+| step | metric | neutral | all_data (no fix) | small150 (§42 fix) |
+|---|---|---|---|---|
+| ~4000 | normalized_jerk_mean | 364 | 1923 | 1223 |
+| ~4000 | high_jerk_frame_% | 7.2 | 26.8 | 16.8 |
+| ~8000 | normalized_jerk_mean | 407 | 1999 | 2027 |
+| latest | episode_length | 264 | 102 | 108 |
+| latest | eval success_rate | 0.972 | 0.729 (pool) / 0.801 (holdout) | 0.680 |
+| latest | adv_norm/std_ema | 0.51 | 1.45 | 1.46 |
+
+Both shape-variation runs run at 5-8x neutral's jerk from the first eval point on, and
+`adv_norm/std_ema` never drops below ~1.4-1.5 even after 17k+ steps (all_data), vs. neutral
+converging to 0.51 by step 8k — a persistently noisier regime, not one that's "still catching up."
+`all_data`'s jerk actually climbed (1999→2275) between step 8k and 16k. Episodes end early because
+the policy is fighting itself into falls, not because per-step tracking is failing.
+
+`small150` (has the §42 whole-actor mass-gain fix) runs ~35-40% lower jerk than `all_data`
+(doesn't have it) at matched early steps (1223 vs 1923 @ 4k, 1700 vs 2086 @ 6k) — a real but small
+effect, not close to neutral's regime.
+
+Checked why the whole-actor fix undershoots: correlated `total_mass` against the other
+`physics_features.pt` shape descriptors across the 128 `smpl_mor` shapes.
+
+| feature | r with mass | r² (variance explained by mass) |
+|---|---|---|
+| shoulder_width | 0.79 | 0.62 |
+| torso_height | 0.68 | 0.46 |
+| hip_width | 0.63 | 0.39 |
+| l_shin_length | 0.46 | 0.21 |
+| leg_length | 0.36 | 0.13 |
+| l_thigh_length | 0.22 | **0.05** |
+
+A single whole-actor mass scalar leaves 80-95% of thigh/shin-length variance unaccounted for. Two
+shapes with identical total mass can have very different limb lengths (hence very different limb
+rotational inertia at the hip/knee), and §42's fix gave them the same gain scale-factor. That's
+exactly where the residual jerk/fall problem concentrates — legs, not the whole body. User decided
+(given the run-to-run comparison above was already conclusive) not to wait longer on `small150` and
+to go straight to per-body-segment gain scaling instead of a single whole-actor scalar.
+
+**Theory**
+
+Same ω=√(k/I), ζ=b/(2√(k·I)) argument as §42, but applied per body segment instead of to the whole
+actor: each DOF's stiffness/damping/effort_limit should scale with the mass of the *specific body
+that DOF actuates*, not with total body mass, because a given DOF's local inertia tracks its own
+body's mass far more tightly than it tracks the actor's total mass (the r² table above). A light
+shape with unusually long legs needs its leg gains scaled for its actual (possibly-average-or-below
+mass) leg segment, independent of what its arms or torso weigh.
+
+The reference point for each body is that same body's mass in the canonical reference MJCF asset
+(the same file `RobotConfig.__post_init__` already uses to build `kinematic_info`/`control_info` —
+`asset.asset_file_name`, deterministically the first asset file alphabetically for `smpl_mor`).
+Using the canonical asset's own per-body masses keeps everything anchored to one coherent
+reference file rather than mixing a population-mean scalar (§42's choice) with per-body detail;
+scale=1.0 for a body at exactly the canonical asset's mass for that body, proportional otherwise.
+
+MJCF geoms in these assets specify `density`, not mass directly — actual per-body mass only exists
+after MuJoCo compiles the model (geom volume × density), so getting the canonical asset's per-body
+reference masses requires compiling it (`dm_control.mjcf.Physics.from_mjcf_model`), not just
+reading XML attributes. This is a one-time, CPU-only, ~0.1s cost at config-build time, not
+per-env/per-step.
+
+**Code change briefing**
+
+- **`protomotions/components/pose_lib.py`**:
+  - `KinematicInfo` gets a new field `dof_body_ids: List[int]` — for each entry in `dof_names`,
+    which body index (into `body_names`) that DOF actuates. Populated in `extract_kinematic_info`
+    by appending `body_idx` alongside `non_root_dof_names.append(joint.name)` in the existing
+    per-body joint traversal loop (joints for a given body are already appended contiguously, so
+    this is a direct 1:1 parallel list, no reconstruction/inference needed).
+  - New function `extract_body_masses(mjcf_path) -> Dict[str, float]`: compiles the MJCF via
+    `dm_control.mjcf.Physics.from_mjcf_model` and reads `physics.named.model.body_mass[name]` for
+    every non-root body. Placed next to `extract_control_info`, same signature style.
+
+- **`protomotions/robot_configs/base.py`** (`ControlConfig`):
+  - Removed `pd_gain_reference_mass: Optional[float]` (§42's whole-actor reference scalar — no
+    longer needed, superseded by per-body references below).
+  - Added `reference_body_masses: Dict[str, float] = field(init=False, default_factory=dict)` —
+    body_name → mass (kg) in the canonical reference asset. Only populated when
+    `mass_scaled_gains=True`.
+  - `initialize_control_info()`: after the existing `control_info` extraction, if
+    `mass_scaled_gains and not reference_body_masses`, calls `extract_body_masses(mjcf_path)` and
+    stores the result. Guarded the same way as `control_info`'s own idempotency check.
+  - `mass_scaled_gains: bool` field itself unchanged — still opt-in, defaults `False`, so every
+    robot that doesn't set it (confirmed: G1 and all others) is unaffected — `reference_body_masses`
+    stays `{}` and no MuJoCo compile happens for them.
+
+- **`protomotions/simulator/isaacgym/simulator.py`** (`_build_env`):
+  - `gain_scale` changed from a single `float` (whole-actor mass ratio) to a
+    `np.ones(self._num_dof, dtype=np.float32)` array. When `mass_scaled_gains=True`: for each DOF
+    index `i`, look up its body via `kinematic_info.dof_body_ids[i]`, get that body's *live*
+    simulated mass from `get_actor_rigid_body_properties(env_ptr, humanoid_handle)[body_idx].mass`
+    (same IsaacGym call already used for COM domain randomization elsewhere in this file — body
+    index alignment with `kinematic_info.body_names` is an already-established pattern, see
+    `_process_center_of_mass_domain_randomization` in `base_simulator/simulator.py`), divide by
+    `reference_body_masses[body_name]`.
+  - `effort_limit` and `stiffness`/`damping` assignments now index `gain_scale[dof_idx]` /
+    `gain_scale[i]` per-DOF instead of applying one scalar to every DOF. `velocity_limit`,
+    `armature`, `friction` remain unscaled, same as §42.
+  - `smpl_mor.py`: dropped the `pd_gain_reference_mass=73.445278` kwarg (field no longer exists);
+    `mass_scaled_gains=True` kwarg and comments updated to describe per-segment scaling and cite
+    the r² table above as the empirical motivation.
+
+**Verification performed:** `py_compile` on all four changed files. Live instantiation of every
+`RobotConfig` subclass in `protomotions/robot_configs/` (`SmplMorRobotConfig`, `G1RobotConfig`,
+`H1_2`, `SOMA23`, `SMPL`, `SMPLX`, `RigV1`, etc.) — confirmed `smpl_mor` populates 24 non-root
+`reference_body_masses` (e.g. `L_Hip`: 3.02 kg, `L_Knee`: 1.64 kg for the canonical asset) and all
+69 DOFs correctly map to their owning body (`L_Hip_x/y/z` → body `L_Hip`, etc.); confirmed every
+other robot's `reference_body_masses` stays `{}` (no regression, no unnecessary MuJoCo compile).
+Pickle round-trip check (`resolved_configs.pt` uses pickle) confirmed `reference_body_masses`
+survives serialization. Synthetic per-limb gain check: manually inflated only the leg-body masses
+in a fake "actual mass" dict and confirmed only leg DOFs (`L_Hip_x`, `L_Knee_x`, ...) get scaled
+while unrelated DOFs (`Neck_x`) stay at `gain_scale=1.0` — confirms per-segment isolation is
+working as intended, not accidentally collapsing back to a global scalar.
+
+**Known limitation, unchanged from §42:** only `isaacgym/simulator.py` implements this;
+`isaaclab`/`newton`/`genesis`/`mujoco` don't yet. **Not yet trained** — needs a fresh run; the
+in-flight `hhi_wide_150motion_128shape_massgain` (§43, whole-actor fix only) was stopped rather
+than continued, per the run comparison above.
+
+**Revert instructions**
+
+As of this note, none of §42's or §44's code is committed to git — `git status --short` shows
+`pose_lib.py`, `robot_configs/base.py`, `robot_configs/smpl_mor.py`, and
+`simulator/isaacgym/simulator.py` as plain uncommitted working-tree modifications. Until these are
+committed, the fastest full revert of *both* §42 and §44 is:
+
+```bash
+git checkout -- protomotions/components/pose_lib.py \
+                 protomotions/robot_configs/base.py \
+                 protomotions/robot_configs/smpl_mor.py \
+                 protomotions/simulator/isaacgym/simulator.py
+```
+
+If these have since been committed (check `git log --oneline -- protomotions/robot_configs/smpl_mor.py`
+first), the equivalent is `git revert <that commit's hash>`, or `git log -p -- <file>` to locate and
+manually reverse the specific diff if it got squashed into a larger commit.
+
+**Fastest partial revert (disable without deleting code) — do this first if in doubt:** the whole
+mechanism (§42 and §44 together) is gated behind one flag. Setting
+`mass_scaled_gains=False` in `protomotions/robot_configs/smpl_mor.py`'s `control=ControlConfig(...)`
+immediately restores the original fixed-gain behavior (every shape gets the literal
+`override_control_info` values, unscaled) for any *future* run, with zero risk of missing a
+call site — `_build_env` in `isaacgym/simulator.py` already no-ops the entire per-DOF `gain_scale`
+computation when this flag is `False` (`gain_scale` stays `np.ones(...)`, i.e. scale=1.0
+everywhere, byte-identical to pre-§42 behavior). This does not require touching
+`base.py`/`pose_lib.py`/`simulator.py` at all, and is trivially reversible itself (flip the flag
+back).
+
+**If reverting to §42 specifically (whole-actor scaling) rather than all the way to pre-§42:** §44
+replaced `ControlConfig.pd_gain_reference_mass: Optional[float]` with
+`reference_body_masses: Dict[str, float]`, so §42's code can't be restored by a partial patch —
+it needs the actual pre-§44 diff (previous version of this note, §42's own "Code change briefing",
+has the full snippets: single `gain_scale = actor_mass / reference_mass` float in `_build_env`,
+`pd_gain_reference_mass=73.445278` kwarg in `smpl_mor.py`).
+
+**What does NOT need reverting:** any checkpoint already trained under §44 is self-contained —
+`resolved_configs.pt`/`resolved_configs_inference.pt` pickle the resolved `reference_body_masses`
+dict directly, so old checkpoints keep working for inference/resume regardless of what the
+in-repo code looks like later. Only *future* training runs are affected by reverting.

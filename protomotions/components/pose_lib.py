@@ -96,6 +96,7 @@ class KinematicInfo:
 
     body_names: List[str]
     dof_names: List[str]  # exclude floating root DOFs
+    dof_body_ids: List[int]  # for each entry in dof_names, the body_idx (into body_names) it belongs to
     parent_indices: List[int]
     local_pos: torch.Tensor
     local_rot_ref_mat: torch.Tensor
@@ -429,6 +430,7 @@ def extract_kinematic_info(mjcf_path: str) -> KinematicInfo:
 
     bodies = []
     non_root_dof_names = []
+    dof_body_ids_list = []
     parent_indices_list = []
     local_pos_list = []
     local_quat_list = []
@@ -501,6 +503,7 @@ def extract_kinematic_info(mjcf_path: str) -> KinematicInfo:
                     axis_val = np.array(axis, dtype=np.float32)
                     current_hinge_axes.append(axis_val)
                     non_root_dof_names.append(joint.name)
+                    dof_body_ids_list.append(body_idx)
 
                     # Extract joint limits (convert to radians if needed)
                     joint_range = joint.range
@@ -547,6 +550,7 @@ def extract_kinematic_info(mjcf_path: str) -> KinematicInfo:
     return KinematicInfo(
         body_names=bodies,
         dof_names=non_root_dof_names,
+        dof_body_ids=dof_body_ids_list,
         parent_indices=parent_indices_list,
         local_pos=torch.from_numpy(local_pos_numpy),
         local_rot_ref_mat=local_rot_ref_mat_tensor,
@@ -686,6 +690,32 @@ def extract_control_info(
 
     # Convert lists to tensors
     return control_info
+
+
+def extract_body_masses(mjcf_path: str) -> Dict[str, float]:
+    """Extract each non-root body's simulated mass (kg) from an MJCF file, keyed by body name.
+
+    MJCF geoms in these assets specify `density`, not an explicit mass -- the actual per-body
+    mass is a function of geom volume and only exists after MuJoCo compiles the model. This
+    compiles the model (CPU-only, no simulator needed) and reads off the resolved masses.
+
+    Args:
+        mjcf_path (str): Path to the MJCF XML file.
+    Returns:
+        Dict[str, float]: body_name -> mass (kg), excluding the "world" body.
+    """
+    try:
+        mjcf_model = mjcf.from_path(mjcf_path)
+        physics = mjcf.Physics.from_mjcf_model(mjcf_model)
+    except Exception as e:
+        raise ValueError(f"Failed to compile MJCF file {mjcf_path}: {e}")
+
+    body_names = physics.named.model.body_mass.axes.row.names
+    return {
+        name: float(physics.named.model.body_mass[name])
+        for name in body_names
+        if name != "world"
+    }
 
 
 # --- Helper: Extract Transforms from qpos ---
