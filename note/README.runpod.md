@@ -424,6 +424,22 @@ nohup python -u protomotions/train_agent.py \
   --wandb-project hhi-protomotions \
   --wandb-entity yugoamaryl \
   --wandb-group hhi_wide_stage2_scratch > /tmp/hhi_wide_stage2_scratch.log 2>&1 &
+
+# AMP style
+
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide_amp.py \
+  --experiment-name hhi_wide_150motion_128shape_amp \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 1 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_150motion_128shape_amp > /tmp/train_150motion_amp.log 2>&1 &
 ----
 
 
