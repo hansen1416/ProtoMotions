@@ -36,6 +36,10 @@ rclone copy r2:proto-data/hhi_stage1_merged6/ /workspace/hhi_stage1_merged6/ \
     --multi-thread-chunk-size=128M \
     --progress
 
+python tools/build_small_multishape_subset.py \
+    --num-clips 150 \
+    --output /workspace/motion_cache/small150_128shape.pt
+
 pip install -e . && wandb login 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 && python tools/extract_smpl_physics_features.py
 
 ------

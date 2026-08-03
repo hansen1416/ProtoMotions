@@ -47,6 +47,7 @@ from protomotions.envs.obs.humanoid_historical import (
     compute_historical_poses_with_time,
     compute_historical_poses_with_time_reduced_coords,
     compute_historical_max_coords_from_motion_lib,
+    compute_morphology_from_motion_lib,
 )
 
 # Target pose building compute kernels
@@ -105,6 +106,7 @@ __all__ = [
     "compute_historical_poses_with_time",
     "compute_historical_poses_with_time_reduced_coords",
     "compute_historical_max_coords_from_motion_lib",
+    "compute_morphology_from_motion_lib",
     # Target pose building compute kernels
     "build_max_coords_target_poses_future_rel",
     "build_max_coords_target_poses",

@@ -485,5 +485,28 @@ def compute_historical_max_coords_from_motion_lib(
     # Stack and flatten: [num_samples, num_steps, obs_dim] -> [num_samples, num_steps * obs_dim]
     historical_obs = torch.stack(all_obs, dim=1)
     obs_dim = historical_obs.shape[-1]
-    
+
     return historical_obs.view(num_samples, num_steps * obs_dim)
+
+
+def compute_morphology_from_motion_lib(
+    motion_lib,
+    motion_ids: Tensor,
+    motion_times: Tensor,
+    dt: float,
+) -> Tensor:
+    """Per-clip [gender_id, betas] shape descriptor, matching compute_morphology_obs's format.
+
+    Used by AMP discriminator to condition expert reference samples on the real shape
+    each clip was retargeted for (motion_lib.get_motion_betas/get_motion_gender_ids),
+    not the shape of whatever env happens to occupy that batch slot. motion_times/dt are
+    unused (shape doesn't change over time) but accepted for get_expert_disc_obs's uniform
+    call signature (motion_lib, motion_ids, motion_times, dt injected for every reference
+    obs component).
+
+    Returns:
+        [num_samples, 11] tensor: [gender_id, betas (10)].
+    """
+    gender_ids = motion_lib.get_motion_gender_ids(motion_ids).float().unsqueeze(-1)
+    betas = motion_lib.get_motion_betas(motion_ids)
+    return torch.cat([gender_ids, betas], dim=-1)

@@ -4576,3 +4576,129 @@ nohup python -u protomotions/train_agent.py \
   --wandb-entity yugoamaryl \
   --wandb-group hhi_wide_150motion_128shape_softtrack > /tmp/train_150motion_softtrack.log 2>&1 &
 ```
+
+================================================================================
+
+## 46. AMP-Style Discriminator Reward (2026-08-03)
+
+**Why:** both §44 (per-segment mass-scaled PD gains) and §45 (soft tracking) came back without
+outperforming once trained — the two levers aimed directly at the diagnosed root cause (control
+instability/jerk under shape variation) both disappointed. Discussed a third, different lever: an
+AMP-style adversarial discriminator/style reward (Peng et al. 2021), so the policy is judged on
+"does this look like natural motion" rather than chasing an exact (and possibly per-shape-
+infeasible) reference pose every frame. AMP vs. ASE was also discussed — ASE exists to let one
+policy represent many diverse skills without a single discriminator arbitrating between them all
+(needed at large/diverse-dataset scale), but its whole point is unsupervised skill discovery for
+later reuse, with no notion of "reproduce clip #4213 exactly." Since this project's actual goal is
+exact per-clip retargeting, not open-ended skill discovery, AMP-as-regularizer was chosen first;
+ASE's latent-skill machinery stays parked unless AMP itself shows mode-collapse/uninformative-
+reward symptoms.
+
+**Design decisions:**
+- **Built on unmodified `mlp_wide.py`**, not `mlp_wide_soft_tracking.py` — isolates "does AMP
+  help" as one clean axis, and makes the in-flight `hhi_wide_150motion_128shape_seggain` run the
+  direct same-everything-else comparator, since `mlp_wide.py` never disables `smpl_mor`'s default
+  `mass_scaled_gains=True` the way `mlp_wide_soft_tracking.py` deliberately does (confirmed live:
+  `mlp_wide_amp.py`'s `configure_robot_and_simulator()` leaves `mass_scaled_gains=True`).
+- **Not built on `MimicADD`** (`protomotions/agents/mimic/agent_add.py`,
+  `examples/experiments/add/mlp.py`) — its discriminator input (`mimic_target_poses_diff`,
+  expert=0) is frame-locked to the current reference index, which is really an adversarial
+  reformulation of the tracking loss, not "looks natural regardless of exact phase." Used the base
+  `AMP` class directly, discriminator wired the way `examples/experiments/amp/mlp.py` already does
+  it — `historical_max_coords_obs` sampled at random unaligned times from the whole motion
+  library, so the "real" class is a general style prior, not a specific per-frame target.
+- **Shape-conditioned the discriminator — corrected reasoning, kept here since the first pass was
+  wrong.** Initially assumed the motion library was shape-agnostic mocap (one canonical
+  trajectory), meaning conditioning on `morphology_obs` would be inert — pairing real pose content
+  with an arbitrary borrowed shape label would carry no signal, since the same trajectory would
+  appear under every shape label with equal frequency. This was **wrong**: `motion_lib.py` stores
+  `motion_betas`/`motion_gender_ids` per clip (lines 147-148), and
+  `mimic_motion_manager.py:84-110`'s `sample_motions()` only ever assigns an env a clip matching
+  that env's own body shape ("Morphology-consistent sampling ... restrict sampling to motions that
+  share the same gender/betas as each env's humanoid asset"). Reference clips genuinely were
+  retargeted per-shape, so pairing each expert sample with its real originating shape (via
+  `motion_lib.get_motion_betas`/`get_motion_gender_ids`, not a label borrowed from an unrelated
+  env) is grounded — the discriminator can actually learn "this deceleration profile is expected
+  for this mass," not just ignore an uninformative feature.
+- **Reward blend, not pure style.** Both `add/mlp.py` and `amp/mlp.py` set `task_reward_w=0.0`
+  (pure discriminator reward, no explicit task). Kept `task_reward_w=0.5` alongside
+  `discriminator_reward_w=0.5` — anchored on the 0.5/0.5 split used successfully on a prior PHC
+  project — since this project still needs to reproduce a *specific* retargeted clip per env, not
+  just "some natural human motion." Both knobs are pre-existing and independent, combining at the
+  advantage level (`protomotions/agents/ppo/agent.py:700`, `protomotions/agents/amp/agent.py:394-397`)
+  — no new blending code needed.
+
+**Code change briefing:**
+
+- **`protomotions/envs/obs/humanoid_historical.py`**: new `compute_morphology_from_motion_lib(motion_lib,
+  motion_ids, motion_times, dt)` — pulls `get_motion_gender_ids`/`get_motion_betas` for the sampled
+  clips, concatenates to the same `[gender_id, betas]` 11-dim format `compute_morphology_obs` uses.
+  `motion_times`/`dt` unused (shape doesn't change over time) but required by `AMP.get_expert_disc_obs`'s
+  uniform call signature across all `reference_obs_components` entries. Exported through
+  `protomotions/envs/obs/__init__.py`.
+
+- **Bug avoided, not inherited**: `compute_historical_max_coords_from_motion_lib` takes
+  `num_state_history_steps` as a plain required argument with no default. `amp/mlp.py`'s existing
+  `reference_obs_components` omits it from `static_params`, and nothing else injects it — calling
+  that path as written would raise a `TypeError`. Consistent with note.md's earlier observation
+  (§21/§23) that AMP is "already unused in this repo," this looks like dead/never-exercised code.
+  `mlp_wide_amp.py` passes `num_state_history_steps` explicitly in `static_params` to avoid the
+  same bug.
+
+- **`examples/experiments/mimic/mlp_wide_amp.py`** (new file): `mlp_wide.py`'s
+  `control_components`/`termination_components`/`reward_components` unchanged.
+  `observation_components` gets one new discriminator-only entry, `historical_max_coords_obs`
+  (`historical_max_coords_obs_factory`, dilated `HISTORY_STEPS = [1,2,3,4,8,16,32]` matching
+  `amp/mlp.py`), not consumed by actor/critic (mirrors how `add/mlp.py` keeps its own
+  discriminator-only key out of the actor's `in_keys`). `num_state_history_steps` bumped from `2`
+  to `32` to hold that window — real memory cost, same order as `amp/mlp.py`'s own working config.
+  `agent_config()` uses `AMPAgentConfig` (`_target_` defaults to `protomotions.agents.amp.agent.AMP`),
+  actor/critic identical to `mlp_wide.py`, `DiscriminatorConfig(in_keys=["historical_max_coords_obs",
+  "morphology_obs"])`, `disc_critic` mirroring `amp/mlp.py`'s, `reference_obs_components` wiring
+  both the historical-pose and new morphology compute functions. `configure_robot_and_simulator()`
+  and `apply_inference_overrides()` otherwise reuse `mlp_wide.py`'s (plus `amp/mlp.py`'s
+  discriminator-threshold-zeroing override at inference, same two-call pattern `add/mlp.py:167-196`
+  already uses).
+
+**Known inherent behavior change (not a design choice, just flagging):**
+`AMP.post_env_step_modifications` (`protomotions/agents/amp/agent.py:289-303`) adds an automatic
+discriminator-based termination — after `discriminator_max_cumulative_bad_transitions` (default
+10) consecutive steps where the discriminator's reward falls below `discriminator_reward_threshold`
+(0.03), the episode ends — layered on top of `mlp_wide.py`'s existing tracking-error termination.
+Inherent to using the `AMP` agent class. Watch `amp_discriminator_termination`/
+`amp_cumulative_bad_transitions` in early logs in case it dominates.
+
+**Verification performed:** live-instantiation smoke test (CPU, `SmplMorRobotConfig()`) — built
+`env_config()`/`agent_config()` end-to-end, confirmed `discriminator.in_keys ==
+['historical_max_coords_obs', 'morphology_obs']`, `disc_critic.in_keys == ['max_coords_obs',
+'historical_max_coords_obs']`, `task_reward_w == 0.5`, `discriminator_reward_w == 0.5`, confirmed
+`configure_robot_and_simulator()` leaves `mass_scaled_gains == True`, confirmed the full
+`AMPAgentConfig` pickles and round-trips (same path `resolved_configs.pt` uses). Verified
+`compute_morphology_from_motion_lib`'s output against `compute_morphology_obs` with a mock
+motion_lib — 11-dim `[gender_id, betas]`, byte-identical format. `py_compile` clean on all
+changed/new files. `git status --short` confirmed only the intended 3 files touched
+(`humanoid_historical.py`, `obs/__init__.py`, new `mlp_wide_amp.py`).
+
+**Known limitation:** `task_reward_w=0.5`/`discriminator_reward_w=0.5`/
+`discriminator_reward_threshold=0.03` are a single PHC-anchored starting point, not swept —
+first get one run's signal, then tune. Full functional verification (does training actually run,
+GPU memory headroom at `num_state_history_steps=32`/`num_envs=4096`) needs the pod, same
+limitation as every prior experiment in this project. **Not yet trained.**
+
+**Launch command:**
+
+```bash
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide_amp.py \
+  --experiment-name hhi_wide_150motion_128shape_amp \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 1 \
+  --use-wandb \
+  --wandb-project hhi-protomotions \
+  --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_150motion_128shape_amp > /tmp/train_150motion_amp.log 2>&1 &
+```
