@@ -4805,3 +4805,36 @@ moved the needle so far.
 whether `MimicEvaluator`'s eval-subset selection is itself weight-biased (oversampling
 already-known-hard clips into later eval windows) to fully explain the 97%-vs-32% gap. Not
 investigated this pass.
+
+================================================================================
+
+## 48. Same Hard-Clip Overlap Confirmed on the 150-Motion Seggain Ablation (2026-08-04)
+
+**Why:** sanity-check §47's finding on a second, independent run — `hhi_wide_150motion_128shape_seggain`
+uses a static 150-clip/128-shape motion file (`tools/analyze_shape_failure_correlation.py`'s
+STATIC mode, not clip-pool mode), so unlike §47 it can also re-check the per-shape extremity
+correlation directly, not just per-clip.
+
+**Result** (`results/hhi_wide_150motion_128shape_seggain/ckpt_failure_correlation_analysis.txt`,
+20 eval epochs, 1517 failure events over 1422/19200 unique clip×shape ids):
+
+- **Shape extremity still doesn't matter**: Pearson r = **-0.090** across all 128 shapes (beta
+  L2-norm vs. failure count) — same near-zero conclusion as §47's full-scale run.
+- **Same hard-clip cluster, weaker signal**: top-30 clips by fail-events overlap
+  `hhi_20946_neutral`'s persistent-failure list at **15-16/30 (~50-53%)**, vs. a 32.3% baseline
+  chance rate (6772/20946 clips are on that list) — real enrichment, same direction as §47's
+  97%/100% overlap, but much weaker. Likely just noise from short history (20 eval epochs vs.
+  a fully-converged scoreboard) and small sample (n=30 vs. n=343), not a contradiction.
+
+**Bottom line across both checks: some motions are just hard to learn**, independent of body
+shape. Two independent runs (full 20,946-clip clip-pool curriculum, and a 150-clip static
+ablation) agree that (a) failure doesn't correlate with shape extremity, and (b) failures
+concentrate on the same clips that were already hard with a single, unvaried body shape (the
+crawl/kneel/squat/backward-type cluster from §17/§22). Shape-conditioning levers (AMP, mass/seg-gain,
+soft tracking) aren't the fix because they're aimed at the wrong axis — the priority should shift
+to attacking that intrinsically-hard-clip cluster directly (see memory's Hard Motion Solutions
+Survey).
+
+**Tooling note:** `tools/analyze_shape_failure_correlation.py` gained an `--output <path>` flag
+(mirrors the printed report to a file, e.g. `results/<exp>/failure_correlation_analysis.txt`) —
+no functional change to the analysis itself.
