@@ -4838,3 +4838,48 @@ Survey).
 **Tooling note:** `tools/analyze_shape_failure_correlation.py` gained an `--output <path>` flag
 (mirrors the printed report to a file, e.g. `results/<exp>/failure_correlation_analysis.txt`) —
 no functional change to the analysis itself.
+
+================================================================================
+
+## 49. Research Survey — Recent Techniques for Hard/Contact-Rich Motion Imitation (2026-08-04)
+
+**Why:** §48 confirmed the plateau is a hard-clip-content problem, not shape-conditioning. Existing
+levers (mass/seg-gain, soft tracking, AMP) all attack control instability, which §47 showed isn't
+the bottleneck. Surveyed recent NVIDIA/NVIDIA-adjacent research for techniques beyond the standing
+Hard Motion Solutions Survey (CoM-over-foot reward, symmetry loss, termination curriculum,
+reference distillation), ranked by novelty/actionability:
+
+1. **Discover-then-refine curriculum** — *Learning Getting-Up Policies for Real-World Humanoid
+   Robots* (CMU, [arXiv:2502.12152](https://arxiv.org/abs/2502.12152), 2025-02). Stage 1: train with
+   no jerk/effort penalty and wide termination margin, goal is just finding *any* successful
+   trajectory. Stage 2: refine those successful-but-ugly rollouts into a smooth policy. Decouples
+   "solvable at all" from "solvable nicely" more fully than our termination-curriculum work does.
+   **Most actionable — cheap diagnostic**: run persistently-failing clips through a fully relaxed
+   pass; success there → use rollouts as BC/RSI seed data; failure even there → points at
+   retargeting/kinematic infeasibility, not an RL problem.
+
+2. **GMT two-regime adaptive sampling + MoE-helps-hardest-motions evidence** — *General Motion
+   Tracking* (UCSD/SFU, [arXiv:2506.14770](https://arxiv.org/abs/2506.14770), 2025-06). Sampling
+   weight: gentle decay while solved, steep power-law (`(error/threshold)^5`) once chronically
+   stuck — refinement over our flat `GlobalClipPool` EMA. Their ablation shows MoE's benefit
+   concentrates almost entirely on the hardest percentile, invisible in aggregate metrics — directly
+   relevant to [[architecture_research]]'s reopened "does routing matter" question; our
+   capacity-matched wide-vs-MoE comparison only measured aggregate success, exactly where this would
+   hide. Worth re-running that comparison filtered to the persistent-failure cluster.
+
+3. **ASAP residual/delta-action correction** (NVIDIA+CMU,
+   [arXiv:2502.01143](https://arxiv.org/abs/2502.01143), 2025-02). Small residual network correcting
+   a base policy's systematic errors, trained separately. Architecturally distinct from the
+   abandoned shape-conditioned [[stage2_residual_adapter]] lineage — this would instead be a
+   clip-difficulty-conditioned specialist trained only on the persistent-failure cluster.
+
+4. **SONIC** (NVIDIA GEAR, [arXiv:2511.07820](https://arxiv.org/abs/2511.07820), 2025-11) — same
+   resampling family as #2, no hard-motion breakdown reported, answer is essentially more
+   data/compute. Low novelty for us. Also noted in passing: *Embrace Collisions*
+   ([arXiv:2502.01465](https://arxiv.org/abs/2502.01465), not NVIDIA) argues full-body (not just
+   feet/hands) collision modeling is needed for crawl/kneel-type contact — worth sanity-checking
+   IsaacGym's contact simplification isn't capping the ceiling on these clips.
+
+**Next step (not yet started):** prototype #1 (relaxed-constraint discovery pass on the persistent-
+failure cluster) as the cheapest, most diagnostic option — it directly tests whether the remaining
+gap is an RL-optimization problem or a retargeting/kinematic-infeasibility ceiling.
