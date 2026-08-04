@@ -4702,3 +4702,106 @@ nohup python -u protomotions/train_agent.py \
   --wandb-entity yugoamaryl \
   --wandb-group hhi_wide_150motion_128shape_amp > /tmp/train_150motion_amp.log 2>&1 &
 ```
+
+================================================================================
+
+## 47. AMP Result + Full-Scale Root-Cause Check — Jerk Ruled Out, Hard-Clip Overlap Found (2026-08-03)
+
+**Why:** §46's AMP run (`o8rwxj7m`, `hhi_wide_150motion_128shape_amp`) had enough eval history to
+compare against §44/§45's runs at matched epochs. User also asked to re-run the shape-vs-content
+root-cause check against `hhi_wide_stage2_scratch` (`hl2g9b0m`) — the actual full ~20,946-clip/
+128-shape run, not the small150 ablation — which needed the diagnostic script adapted for a
+different data pipeline (`GlobalClipPool` vs. a static motion file).
+
+**AMP result — jerk is not the bottleneck.** Pulled full wandb histories (not just summaries) for
+`massgain` (`aeu9e3un`), `seggain` (`d3w5k8t2`), `softtrack` (`c8xl79bq`), and `amp` (`o8rwxj7m`) via
+the wandb Python API. At matched epoch (~1600):
+
+| run | jerk | eval/success_rate |
+|---|---|---|
+| massgain | 905 | 0.493 |
+| seggain | 2607 | 0.493 |
+| softtrack | 3786 | 0.513 |
+| amp | **558** | 0.433 |
+
+AMP cuts jerk 5-7x below every other lever — by far the largest smoothness effect seen — but
+success_rate is flat to slightly worse, not better. If control instability/jerk were actually
+capping success under shape variation (the §44 working theory), crushing it this hard should have
+moved the needle. It didn't. Separately, the discriminator itself saturates almost immediately
+(`discriminator/pos_acc`≈1.0, `agent_acc`≈0.92 by epoch 166, still ≈0.97 at epoch 1800) and
+`rewards/amp_rewards` collapses 0.47→0.032 over the same window — a classic discriminator-
+overpowers-generator collapse, so the style signal goes uninformative well before success_rate has
+any chance to benefit. (Discriminator-based termination is not the confound — only ~7% of total
+terminations; tracking-error termination still dominates throughout.)
+
+Four different interventions now (mass-scaled gains, per-segment gains, soft tracking, AMP), all
+aimed at "control instability under shape variation," all land in the same ~40-65% success band at
+matched early training. Combined with the Stage2 adapter lineage (§32-40) and from-scratch (§41)
+all plateauing 65-82% regardless of architecture, this reopens whether the bottleneck is reward-
+shaping/control-stability at all, vs. something structural to training one shared-weight policy
+across 128 shapes.
+
+**Diagnostic tool:** `tools/analyze_shape_failure_correlation.py` (new). Two modes:
+
+- **Static mode** (`--motion-file <path>`), for the small150/128shape ablations: reads
+  `results/<exp>/failed_motions/failed_motions_epoch_*_rank_*.txt` (each line is already a GLOBAL
+  motion_lib id — `MimicEvaluator._save_failed_motions` writes global ids directly, no rank
+  arithmetic needed, unlike the older `tools/analyse_failed_clip_overlap.py`'s per-rank clip-major
+  layout for a different 1024-clip dataset), loads the matching static `MotionLib` .pt file, and
+  reports (1) Pearson r between per-shape failure-event count and that shape's beta-L2-norm
+  ("extremity"), (2) per-clip failure ranking. Unit-tested against a synthetic motion library with
+  an injected shape/clip failure pattern — correctly recovered both signals (r=0.93, correct
+  clip-vs-shape attribution).
+
+- **Clip-pool mode** (`--motion-file` omitted), for `GlobalClipPool` runs (`hhi_wide_stage2_scratch`
+  and similar full-dataset runs): the static mode's per-shape correlation is **not reconstructable**
+  here. `GlobalClipPool` streams a resident subset (`resident_pool_size=256/rank` out of
+  `~3,364/rank` for this run) and rebuilds it every `pool_rebuild_every` epochs (default 64) — far
+  more often than eval cycles run (`eval_metrics_every=200` in the small150 configs). A
+  resident-local `motion_id` in an old `failed_motions_epoch_*.txt` file doesn't reliably map back
+  to the same (clip, shape) pair it did at that epoch, and reloading the checkpoint re-derives a
+  *fresh* top-K resident set rather than replaying history
+  (`GlobalClipPool.load_global_clip_weights_state_dict`'s own docstring says as much). Instead,
+  this mode reads `results/<exp>/env_global_clip_pool_rank*.ckpt` directly — the checkpointed
+  `global_clip_weights`/`global_clip_visit_counts` (`GlobalClipPool.get_global_clip_weights_state_dict`),
+  a persistent, stable-clip-id-keyed EMA difficulty scoreboard that survives resident-set churn.
+  It's deliberately shape-blind by design (`MimicEvaluator._expand_to_clip_variants` propagates any
+  one shape's failure to all 128 shape variants of a clip before this scoreboard updates), so it
+  can only answer "which clips are hardest," not the shape-extremity question — flagged explicitly
+  in the script's printed output, not silently glossed over.
+
+**Full-scale result (`hhi_wide_stage2_scratch`, 6 ranks, `env_global_clip_pool_rank*.ckpt` already
+synced locally under `results/hhi_wide_stage2_scratch/`, no pod/R2 access needed for this pass):**
+
+- 20,183 clips total, **0% never-visited** (min 2 visits) — rules out "curriculum hasn't reached
+  most of the dataset yet" as an explanation for the plateau.
+- `global_clip_weights`: mean 0.284, 25.6% of clips sitting exactly at the floor (0.05, `weight_floor`)
+  after only 2-3 visits (solved almost immediately), 29.1% above 0.5, only 1.7% (343 clips) above
+  0.9 — a small genuinely-hard tail dominates the visit budget (up to 64-65 visits, resident nearly
+  continuously) while most of the dataset is easy and gets swapped out fast.
+- **Cross-referenced the 343 hardest clips (weight > 0.9) against `results/hhi_20946_neutral/
+  persistent_failures.txt`** (single body shape, no beta variation, 6772/20946 clips persistently
+  failing in that run's tail window). Overlap: **333/343 (97.1%)** — vs. a **33.6%** baseline
+  overlap rate expected by chance (6772/20183). The very-hardest tail (weight > 0.99, n=17) is
+  **100%** overlap.
+
+**Interpretation:** the multi-shape run's hardest-ever clips are overwhelmingly the *same* clips
+that were already persistently hard with zero shape variation — far above chance. This points at
+intrinsic motion-content difficulty (the crawl/kneel/squat/backward-type cluster already
+characterized in §17/§22, plus the "Hard Motion Solutions Survey" candidates in memory) as a large
+share of what's capping the multi-shape plateau, rather than shape-conditioning introducing a new,
+distinct failure mode on top of it. Doesn't fully explain the gap on its own (single-shape neutral's
+per-eval `success_rate` still reads ~97%, not ~68% as a naive 1-minus-persistent-failure-rate
+would suggest — likely an artifact of `max_eval_motions=2000`-vs-20,946 subsampling combined with
+curriculum-driven resampling of hard clips into the eval-tail window; not fully reconciled here,
+flagged as a loose end rather than glossed over) — but reopens the priority ordering: attacking the
+intrinsically-hard-clip cluster directly (curriculum/architecture changes targeted at *that*
+cluster — see memory's Hard Motion Solutions Survey: CoM-over-foot reward, symmetry loss,
+termination curriculum, reference distillation) may be higher-leverage next than further
+shape-conditioning-specific interventions (AMP, mass/seg-gain, soft tracking), none of which have
+moved the needle so far.
+
+**Known limitation:** the eval-subsampling reconciliation above is unresolved — would need to check
+whether `MimicEvaluator`'s eval-subset selection is itself weight-biased (oversampling
+already-known-hard clips into later eval windows) to fully explain the 97%-vs-32% gap. Not
+investigated this pass.

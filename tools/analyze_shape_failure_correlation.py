@@ -13,22 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Diagnose whether shape-variation training failures on the 150motion/128shape ablation
-correlate with body-shape "extremity" (pointing at kinematic infeasibility of specific
-shapes) or are roughly shape-independent (pointing at optimization interference from
-sharing one policy trunk across 128 body shapes, since jerk-reduction levers -- mass-
-scaled gains, per-segment gains, soft tracking, AMP -- all plateau in the same success-
-rate band regardless of how much they cut control instability; see note/README.note.md
-§44-46).
+Diagnose whether shape-variation training failures correlate with body-shape "extremity"
+(pointing at kinematic infeasibility of specific shapes) or are roughly shape-independent
+(pointing at optimization interference from sharing one policy trunk across 128 body
+shapes, since jerk-reduction levers -- mass-scaled gains, per-segment gains, soft
+tracking, AMP -- all plateau in the same success-rate band regardless of how much they
+cut control instability; see note/README.note.md §44-46).
 
-Reads every results/<experiment>/failed_motions/failed_motions_epoch_*_rank_*.txt file.
-Each line is already a GLOBAL motion_lib id -- MimicEvaluator._save_failed_motions writes
-global ids directly (mapped from local eval-subset indices before the file is written, see
+Two modes, auto-selected by whether --motion-file is given:
+
+STATIC mode (--motion-file given, e.g. the 150motion/128shape ablations): reads every
+results/<experiment>/failed_motions/failed_motions_epoch_*_rank_*.txt file. Each line is
+already a GLOBAL motion_lib id -- MimicEvaluator._save_failed_motions writes global ids
+directly (mapped from local eval-subset indices before the file is written, see
 mimic_evaluator.py:230-239/261-263), so no rank-based index arithmetic is needed here,
 unlike tools/analyse_failed_clip_overlap.py's older per-rank clip-major layout assumption
-for a different (1024-clip, multi-GPU sharded) dataset.
-
-Loads the same MotionLib .pt file used for training and reports:
+for a different (1024-clip, multi-GPU sharded) dataset. Loads the same static MotionLib
+.pt file used for training and reports:
 
 1. Per-shape (128 body assets) failure-event count vs. that shape's beta L2-norm
    ("extremity") -- Pearson r. High |r| => certain shapes are genuinely harder
@@ -40,10 +41,35 @@ Loads the same MotionLib .pt file used for training and reports:
    a much broader/different set of clips is failing that were fine in the single-shape
    case.
 
-Usage (run on the pod, where both the failed_motions/ logs and the motion .pt file live):
+CLIP-POOL mode (--motion-file omitted, e.g. hhi_wide_stage2_scratch / any GlobalClipPool
+run on the full ~20,946-clip dataset): the STATIC mode's per-shape correlation is NOT
+reconstructable for these runs. GlobalClipPool streams a resident subset of clips
+(`resident_pool_size`, e.g. 256/rank out of ~3,364/rank here) and rebuilds it every
+`pool_rebuild_every` epochs (default 64) -- far more often than eval cycles run. A
+resident-local motion_id in an old failed_motions_epoch_*.txt file does not reliably
+refer to the same (clip, shape) pair it did at that epoch, and reloading the checkpoint
+re-derives a *fresh* top-K resident set rather than replaying history verbatim (see
+GlobalClipPool.load_global_clip_weights_state_dict's own docstring). So this mode instead
+reads every results/<experiment>/env_global_clip_pool_rank*.ckpt file directly -- the
+motion_manager's checkpointed `global_clip_weights`/`global_clip_visit_counts`, a
+persistent, stable-clip-id-keyed EMA difficulty scoreboard that survives resident-set
+churn (GlobalClipPool.get_global_clip_weights_state_dict). It is deliberately shape-blind
+by design (MimicEvaluator._expand_to_clip_variants propagates any one shape's failure to
+ALL 128 shape variants of that clip before this scoreboard is updated), so it can only
+answer "which clips are hardest" (plus how much of the vocabulary has been visited at
+all) -- not the shape-extremity question.
+
+Usage:
+    # Static motion file (150motion/128shape ablations) -- run on the pod, where both the
+    # failed_motions/ logs and the motion .pt file live:
     python tools/analyze_shape_failure_correlation.py \\
         --results-dir results/hhi_wide_150motion_128shape_seggain \\
         --motion-file /workspace/motion_cache/small150_128shape.pt
+
+    # GlobalClipPool (full dataset) -- runs anywhere the env_global_clip_pool_rank*.ckpt
+    # files have been synced, no motion data or R2 credentials needed:
+    python tools/analyze_shape_failure_correlation.py \\
+        --results-dir results/hhi_wide_stage2_scratch
 """
 
 from __future__ import annotations
@@ -82,6 +108,67 @@ def pearson_r(x: torch.Tensor, y: torch.Tensor) -> float:
     return (x @ y / denom).item()
 
 
+def run_clip_pool_mode(results_dir: Path, top_n_clips: int) -> None:
+    """GlobalClipPool mode -- see module docstring. Reads the persistent, checkpointed
+    clip-difficulty scoreboard directly; does not touch failed_motions/ logs at all."""
+    ckpts = sorted(results_dir.glob("env_global_clip_pool_rank*.ckpt"))
+    if not ckpts:
+        raise SystemExit(
+            f"No env_global_clip_pool_rank*.ckpt files in {results_dir}, and no "
+            "--motion-file given for static mode. Nothing to analyze."
+        )
+
+    print(f"Found {len(ckpts)} rank checkpoint(s) for GlobalClipPool.")
+    print(
+        "\nNOTE: per-shape extremity correlation is NOT reconstructable for a GlobalClipPool "
+        "run (resident-local motion ids in old failed_motions logs don't reliably map back to "
+        "a stable (clip, shape) identity -- see module docstring). Reporting per-clip "
+        "difficulty from the persistent, shape-blind global_clip_weights scoreboard instead.\n"
+    )
+
+    all_clip_ids: list[str] = []
+    weight_parts = []
+    visit_parts = []
+    for ckpt_path in ckpts:
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        gcp = ckpt["motion_manager"]["global_clip_pool"]
+        all_clip_ids.extend(gcp["clip_ids"])
+        weight_parts.append(gcp["weights"])
+        visit_parts.append(gcp["visit_counts"])
+        print(
+            f"  {ckpt_path.name}: {len(gcp['clip_ids'])} clips, "
+            f"rebuild_count={gcp['rebuild_count']}"
+        )
+
+    weights = torch.cat(weight_parts)
+    visits = torch.cat(visit_parts)
+    n_clips = len(all_clip_ids)
+    print(f"\nTotal clips across all ranks: {n_clips}\n")
+
+    print("=== global_clip_weights distribution ===")
+    print(
+        f"mean={weights.mean():.4f}  std={weights.std():.4f}  "
+        f"min={weights.min():.4f}  max={weights.max():.4f}"
+    )
+    n_unvisited = int((visits == 0).sum())
+    print(
+        f"Never-visited clips: {n_unvisited}/{n_clips} "
+        f"({100 * n_unvisited / n_clips:.1f}%) -- how much of the vocabulary the resident-pool "
+        "curriculum hasn't reached at all yet.\n"
+    )
+
+    order = weights.argsort(descending=True)
+    print(f"=== Top {top_n_clips} hardest clips (highest EMA difficulty weight) ===")
+    print(f"{'clip_id':<15} {'weight':>10} {'visits':>8}")
+    for i in order[:top_n_clips].tolist():
+        print(f"{all_clip_ids[i]:<15} {weights[i].item():>10.4f} {visits[i].item():>8}")
+
+    print(f"\n=== Bottom {top_n_clips} (easiest / most-solved) clips ===")
+    print(f"{'clip_id':<15} {'weight':>10} {'visits':>8}")
+    for i in order[-top_n_clips:].tolist():
+        print(f"{all_clip_ids[i]:<15} {weights[i].item():>10.4f} {visits[i].item():>8}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -95,11 +182,18 @@ def main():
     parser.add_argument(
         "--motion-file",
         type=Path,
-        required=True,
-        help="Same .pt file passed as --motion-file for this run",
+        default=None,
+        help=(
+            "Same .pt file passed as --motion-file for this run. Omit to auto-switch to "
+            "GlobalClipPool mode (reads env_global_clip_pool_rank*.ckpt instead)."
+        ),
     )
     parser.add_argument("--top-n-clips", type=int, default=30)
     args = parser.parse_args()
+
+    if args.motion_file is None:
+        run_clip_pool_mode(args.results_dir, args.top_n_clips)
+        return
 
     failed_dir = args.results_dir / "failed_motions"
     if not failed_dir.exists():
