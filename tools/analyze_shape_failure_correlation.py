@@ -75,13 +75,30 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 
 import torch
 
 from protomotions.components.motion_lib import MotionLib, MotionLibConfig
+
+class _Tee:
+    """Writes to multiple streams at once, so --output can mirror stdout to a file."""
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
 
 FAILED_FILE_RE = re.compile(r"failed_motions_epoch_(\d+)_rank_(\d+)\.txt")
 
@@ -189,8 +206,28 @@ def main():
         ),
     )
     parser.add_argument("--top-n-clips", type=int, default=30)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help=(
+            "Optional file path to also write the full report to (mirrors everything "
+            "printed to stdout), e.g. results/<experiment>/clip_pool_analysis.txt"
+        ),
+    )
     args = parser.parse_args()
 
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output, "w") as f:
+            with contextlib.redirect_stdout(_Tee(sys.stdout, f)):
+                _run(args)
+        print(f"\nReport written to {args.output}")
+    else:
+        _run(args)
+
+
+def _run(args) -> None:
     if args.motion_file is None:
         run_clip_pool_mode(args.results_dir, args.top_n_clips)
         return
