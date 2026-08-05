@@ -4883,3 +4883,22 @@ reference distillation), ranked by novelty/actionability:
 **Next step (not yet started):** prototype #1 (relaxed-constraint discovery pass on the persistent-
 failure cluster) as the cheapest, most diagnostic option — it directly tests whether the remaining
 gap is an RL-optimization problem or a retargeting/kinematic-infeasibility ceiling.
+
+================================================================================
+
+## 50. "Discover" Stage 1 Pilot — `mlp_wide_discover.py` (2026-08-04)
+
+**Why:** implements §49's #1 pick (CMU's getting-up-policy discover-then-refine curriculum),
+scoped to Stage 1 only for now. Reuses the existing `small150_128shape.pt` ablation set (same data
+as massgain/seggain/soft-track/AMP) instead of a new hard-clip-only dataset, so it's a direct
+same-data comparator. No trajectory-saving/Stage 2 machinery — evaluator is byte-identical to
+`mlp_wide.py`.
+
+**Change:** new `examples/experiments/mimic/mlp_wide_discover.py`, a copy of `mlp_wide.py` with
+only termination (`fall_term_factory` only, no tracking-error termination) and reward
+(`action_smoothness`/`pow_rew`/`contact_match_rew` dropped, tracking terms unchanged) relaxed.
+Everything else — architecture, optimizers, RSI, evaluator, `mass_scaled_gains` — identical.
+
+Commit: `32abcd781fb30c65b751f0c10ccadc16fa786fcc`.
+
+Not yet launched on the pod.
