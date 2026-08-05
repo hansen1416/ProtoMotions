@@ -20,6 +20,8 @@ Frames are piped directly to ffmpeg — no temp PNG files written to disk.
 
 A single motion can be selected from the motion file by index, so you can
 record any specific clip without loading the entire dataset into the env.
+With --num-envs > 1 and --same-motion, the SAME clip is rendered across up to
+--num-envs different body shapes side by side (matched via motion_clip_ids).
 
 Example
 -------
@@ -30,6 +32,14 @@ Example
         --motion-index 3 \\
         --video-steps 300 \\
         --output output/videos/g1_motion3.mp4
+
+    # Same clip across 8 different body shapes:
+    python protomotions/record_video_mor.py \\
+        --checkpoint results/hhi_wide_150motion_128shape_discover/last.ckpt \\
+        --motion-file /workspace/motion_cache/small150_128shape.pt \\
+        --simulator isaacgym \\
+        --motion-index 3 --num-envs 8 --same-motion \\
+        --output output/videos/discover_motion3_8shapes.mp4
 """
 
 
@@ -81,6 +91,15 @@ def create_parser():
     )
     parser.add_argument("--fps", type=int, default=30, help="Output video framerate")
     parser.add_argument("--num-envs", type=int, default=1)
+    parser.add_argument(
+        "--same-motion",
+        action="store_true",
+        help=(
+            "With --num-envs > 1, render the SAME clip as --motion-index across up to "
+            "--num-envs different body shapes (matched via motion_clip_ids), instead of "
+            "the default behaviour of an arbitrary motion per shape."
+        ),
+    )
     parser.add_argument("--scenes-file", type=str, default=None)
     parser.add_argument(
         "--overrides",
@@ -218,41 +237,8 @@ def extract_motion_by_index(motion_file: str, index: int):
     return tmp.name, asset_id
 
 
-def slim_motion_file(motion_file: str, motions_per_shape: int = 1):
-    """Reduce a large motion file to K motions per body shape.
-
-    With 8192 motions × 128 shapes this trims from ~3.4 GB down to ~50 MB
-    (K=1), making multi-env recording feasible on limited GPU memory.
-
-    Returns the path to a temp .pt file (caller must delete it).
-    """
-    if not str(motion_file).endswith(".pt"):
-        return motion_file
-
-    log.info(f"Slimming motion file to {motions_per_shape} motion(s) per shape ...")
-    data = torch.load(motion_file, map_location="cpu", weights_only=False)
-
-    asset_ids = data.get("motion_asset_ids")
-    if asset_ids is None:
-        log.info("No motion_asset_ids found — using file as-is.")
-        return motion_file
-
-    # Pick up to K motion indices per unique asset_id, preserving original order.
-    from collections import defaultdict
-    counts: dict = defaultdict(int)
-    keep_indices = []
-    for i, aid in enumerate(asset_ids):
-        if counts[aid] < motions_per_shape:
-            keep_indices.append(i)
-            counts[aid] += 1
-
-    total_in = len(asset_ids)
-    total_out = len(keep_indices)
-    log.info(
-        f"Keeping {total_out}/{total_in} motions "
-        f"({len(counts)} shapes × {motions_per_shape})."
-    )
-
+def _slice_motions_by_indices(data: dict, keep_indices: list) -> dict:
+    """Slice a packaged motion dict down to `keep_indices`, rebuilding length_starts."""
     ls = data["length_starts"]
     nf = data["motion_num_frames"]
     frame_keys = ("gts", "grs", "gvs", "gavs", "dvs", "dps", "contacts", "lrs")
@@ -290,11 +276,100 @@ def slim_motion_file(motion_file: str, motions_per_shape: int = 1):
         if data.get(key) is not None:
             sliced[key] = [data[key][i] for i in keep_indices]
 
+    return sliced
+
+
+def slim_motion_file(motion_file: str, motions_per_shape: int = 1):
+    """Reduce a large motion file to K motions per body shape.
+
+    With 8192 motions × 128 shapes this trims from ~3.4 GB down to ~50 MB
+    (K=1), making multi-env recording feasible on limited GPU memory.
+
+    Returns the path to a temp .pt file (caller must delete it).
+    """
+    if not str(motion_file).endswith(".pt"):
+        return motion_file
+
+    log.info(f"Slimming motion file to {motions_per_shape} motion(s) per shape ...")
+    data = torch.load(motion_file, map_location="cpu", weights_only=False)
+
+    asset_ids = data.get("motion_asset_ids")
+    if asset_ids is None:
+        log.info("No motion_asset_ids found — using file as-is.")
+        return motion_file
+
+    # Pick up to K motion indices per unique asset_id, preserving original order.
+    from collections import defaultdict
+    counts: dict = defaultdict(int)
+    keep_indices = []
+    for i, aid in enumerate(asset_ids):
+        if counts[aid] < motions_per_shape:
+            keep_indices.append(i)
+            counts[aid] += 1
+
+    total_in = len(asset_ids)
+    total_out = len(keep_indices)
+    log.info(
+        f"Keeping {total_out}/{total_in} motions "
+        f"({len(counts)} shapes × {motions_per_shape})."
+    )
+
+    sliced = _slice_motions_by_indices(data, keep_indices)
+
     tmp = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
     torch.save(sliced, tmp.name)
     tmp.close()
     log.info(f"Slimmed motion file → {tmp.name}")
     return tmp.name
+
+
+def extract_motion_across_shapes(motion_file: str, index: int, max_shapes: int = None):
+    """Extract every body-shape variant of the same clip as `index` into a temp file.
+
+    Uses motion_clip_ids (stable clip identity shared across shapes, see
+    MotionLib.build_clip_id_to_motion_ids()) to find all motions that are the same
+    underlying clip as the one at `index`, across different body shapes -- so you can
+    render e.g. 8 different shapes all performing the same motion side by side.
+
+    Returns (temp_file_path, num_shapes_found). Caller must delete the temp file.
+    """
+    if not str(motion_file).endswith(".pt"):
+        raise ValueError("Multi-shape recording requires a .pt motion file.")
+
+    log.info(f"Loading motion file to find shape-variants of motion index {index} ...")
+    data = torch.load(motion_file, map_location="cpu", weights_only=False)
+
+    clip_ids = data.get("motion_clip_ids")
+    if clip_ids is None:
+        raise RuntimeError(
+            "Motion file has no motion_clip_ids -- cannot match the same clip across "
+            "shapes. Use --num-envs 1 or a motion file with clip identity metadata."
+        )
+
+    num_motions = len(data["motion_num_frames"])
+    if index < 0 or index >= num_motions:
+        raise ValueError(
+            f"--motion-index {index} is out of range: file has {num_motions} motions "
+            f"(valid range 0..{num_motions - 1})"
+        )
+
+    target_clip_id = clip_ids[index]
+    keep_indices = [i for i, cid in enumerate(clip_ids) if cid == target_clip_id]
+    if max_shapes is not None:
+        keep_indices = keep_indices[:max_shapes]
+
+    log.info(
+        f"Motion {index} is clip_id={target_clip_id!r}: found {len(keep_indices)} "
+        f"shape-variant(s)" + (f", keeping {max_shapes}" if max_shapes else "")
+    )
+
+    sliced = _slice_motions_by_indices(data, keep_indices)
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
+    torch.save(sliced, tmp.name)
+    tmp.close()
+    log.info(f"Extracted {len(keep_indices)} shape-variant(s) → {tmp.name}")
+    return tmp.name, len(keep_indices)
 
 
 def parse_gender_beta_filter(gender_beta_args):
@@ -513,6 +588,19 @@ def main():
                 motion_file, args.motion_index
             )
             motion_lib_config.motion_file = tmp_motion_file
+        elif args.same_motion:
+            # Multi-env, same clip: render --motion-index's clip across up to num_envs
+            # different body shapes, matched via motion_clip_ids.
+            tmp_motion_file, num_found = extract_motion_across_shapes(
+                motion_file, args.motion_index, max_shapes=args.num_envs
+            )
+            motion_lib_config.motion_file = tmp_motion_file
+            if num_found < args.num_envs:
+                log.warning(
+                    f"Only {num_found} shape-variant(s) found for motion "
+                    f"{args.motion_index} (requested --num-envs {args.num_envs}); "
+                    "some envs will round-robin repeated shapes."
+                )
         else:
             # Multi-env: slim to 1 motion per shape so we don't load the full 3+ GB file.
             # Round-robin assigns each env a different body shape from the slimmed set.
@@ -520,7 +608,8 @@ def main():
             motion_lib_config.motion_file = tmp_motion_file
             log.info(
                 f"num_envs={args.num_envs} > 1: slimmed motion file loaded "
-                f"(--motion-index {args.motion_index} ignored for multi-env recording)."
+                f"(--motion-index {args.motion_index} ignored for multi-env recording; "
+                "pass --same-motion to render this clip across multiple shapes instead)."
             )
 
     # Auto-detect video length from the motion file if not explicitly set.

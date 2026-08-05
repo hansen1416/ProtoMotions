@@ -441,7 +441,25 @@ nohup python -u protomotions/train_agent.py \
   --wandb-entity yugoamaryl \
   --wandb-group hhi_wide_150motion_128shape_amp > /tmp/train_150motion_amp.log 2>&1 &
 
+# Explore
+
+nohup python -u protomotions/train_agent.py     --robot-name smpl_mor     --simulator isaacgym     --experiment-path examples/experiments/mimic/mlp_wide_discover.py     --experiment-name hhi_wide_150motion_128shape_discover     --motion-file /workspace/motion_cache/small150_128shape.pt     --num-envs 4096     --batch-size 16384     --ngpu 1     --use-wandb     --wandb-project hhi-protomotions     --wandb-entity yugoamaryl     --wandb-group hhi_wide_150motion_128shape_discover > /tmp/train_150motion_discover.log 2>&1 &
+
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor \
+  --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide_discover_softterm.py \
+  --experiment-name hhi_wide_150motion_128shape_discover_softterm \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --num-envs 4096 \
+  --batch-size 16384 \
+  --ngpu 1 \
+  --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_150motion_128shape_discover_softterm > /tmp/train_150motion_discover_softterm.log 2>&1 &
+
 ----
+
+
 
 python tools/analyze_shape_failure_correlation.py --results-dir /workspace/ProtoMotions/results/hhi_wide_150motion_128shape_seggain --motion-file /workspace/motion_cache/small150_128shape.pt --output /workspace/ProtoMotions/results/hhi_wide_150motion_128shape_seggain/failure_correlation_analysis.txt
 
