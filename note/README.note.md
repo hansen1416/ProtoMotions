@@ -4951,3 +4951,61 @@ competing explanations:
   policy actually tried rather than an assumption about optimal control.
 
 Not yet started — queued for follow-up research.
+
+================================================================================
+
+## 52. Actuator Saturation Ruled Out — IsaacGym Replay of `discover`'s Checkpoint
+(2026-08-06)
+
+**How we got there:** §51's first diagnostic (offline inverse dynamics via MuJoCo's
+`mj_inverse` on the raw reference trajectory, `tools/check_reference_torque_feasibility.py`)
+was attempted and abandoned — the `smpl_mor` MJCFs have `self_collisions=True` and adjacent
+limb capsules (hip/knee/ankle) genuinely overlap by 1-4cm in ordinary poses (chunky collision
+proxies vs. the real SMPL mesh), so demanding `mj_inverse` hit an exact zero-acceleration
+target at that geometrically-inconsistent contact produced physically-meaningless torque
+spikes (6700 N·m on a hip joint during an essentially-static pose; confirmed by disabling
+contacts, which dropped it to 0.76 N·m). Not clip-specific — showed up on "easy" control
+clips too.
+
+Second attempt: replay the real trained policy via the CPU MuJoCo backend (`tools/
+check_replay_torque_saturation.py`, `--simulator mujoco`). Needed several fixes since MuJoCo
+has no native per-env morphology support (`morphology_obs`, `env_id_to_asset_name`,
+`env_id_beta`, `env_physics_features` all had to be shimmed in from `MotionLib`'s own
+per-motion betas/gender — verified correct via the repo's own `PROTOMOTIONS_DEBUG`
+consistency check), and MuJoCo's default implicit-PD mode never updates its applied-torque
+cache at all (fixed by forcing `use_implicit_pd=False`). Even after both fixes, replayed
+episodes showed a violent, unexplained physics blow-up in the first ~150 steps (joint angles
+reaching ~95 radians, root velocity in the hundreds of m/s) before settling — contaminating
+the saturation signal. Root cause not isolated; abandoned per direct instruction to stop
+using MuJoCo and use IsaacGym (the actual training simulator) instead.
+
+**What actually worked:** `tools/check_replay_torque_saturation.py` rewritten for IsaacGym.
+Since IsaacGym natively supports per-env body shapes (`morphology_asset_ids` constructor arg,
+`isaacgym/simulator.py:124-137` — pins env *i* to an exact requested `asset_id`) and natively
+tracks real applied DOF torque via PhysX's force sensor tensor
+(`isaacgym/simulator.py:1672-1673`), no shims were needed at all — a large simplification
+over the MuJoCo attempt. All 30 treatment (highest fail-event count from `discover`'s own
+`failed_motions/` logs) + 10 control (zero-fail-event clips) motion_ids were pinned one-per-
+env and run in parallel in a single 40-env batch (needed a GPU/RunPod; the checkpoint and
+`resolved_configs_inference.pt` were already on the pod from the original training run).
+
+**Result:** clean, no physics instability. Max applied-torque-to-effort-limit ratio across
+all 40 episodes topped out at **0.46** — every episode stayed under 50% of available torque
+the entire time. 5 of the 30 treatment clips did breach the `gt_error > 0.5` threshold during
+this deterministic (`mean_action`) replay (motion_ids 18635, 11928, 18697, 11654, 11807); even
+restricted to just the steps *after* that breach, saturation was still exactly 0.000 in every
+one. The two-proportion z-test came back `nan` only because there was zero saturation in both
+groups — no variance to test, which is itself the answer.
+
+**Conclusion: actuator saturation (hypothesis 1) is ruled out.** The trained policy has ample
+torque headroom even while actively failing to track the reference. The `discover` plateau is
+an RL optimization/precision problem (hypothesis 2), not a hardware/physics ceiling. Side note:
+only 5/30 "historically hard" clips reproduced failure in this single deterministic replay —
+expected, since the training-time failures came from one stochastic attempt per clip per
+epoch, not a guarantee that clip fails every time; worth a larger replay sample if a more
+robust failure set is needed later.
+
+**Next:** since H1 is ruled out, the open question is which H2-targeted lever to try first —
+reward-gradient sharpening near the eval threshold, PPO/entropy/LR schedule tuning, or
+architecture capacity (see `discover_pilot_status.md` open questions / [[architecture_research]]).
+Not yet decided.

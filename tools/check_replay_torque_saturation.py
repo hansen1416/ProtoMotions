@@ -194,6 +194,15 @@ def analyze_episode(
     frac_sat_failure_window = (
         float(saturating[first_breach:].mean()) if first_breach is not None else float("nan")
     )
+    # Near-miss residual error: what gt_error typically looks like right before the policy
+    # first crosses the failure threshold. Used to calibrate reward-gradient-sharpening
+    # coefficients (note.md §53 / discover_pilot_status.md) -- see if the "close but not
+    # exact" near-misses sit well below threshold or right up against it.
+    pre_breach_gt_error = (
+        float(gt_error[max(0, first_breach - 5):first_breach].mean())
+        if first_breach is not None and first_breach > 0
+        else float("nan")
+    )
 
     return {
         "episode_len": torque.shape[0],
@@ -201,6 +210,7 @@ def analyze_episode(
         "frac_sat_overall": frac_sat_overall,
         "frac_sat_failure_window": frac_sat_failure_window,
         "max_ratio": float(ratio.max()),
+        "pre_breach_gt_error": pre_breach_gt_error,
     }
 
 
@@ -331,7 +341,8 @@ def _run(args) -> None:
             f"first_breach={str(stats['first_breach_step']):<6} "
             f"sat_overall={stats['frac_sat_overall']:.3f} "
             f"sat_failure_window={stats['frac_sat_failure_window']:.3f} "
-            f"max_ratio={stats['max_ratio']:.2f}"
+            f"max_ratio={stats['max_ratio']:.2f} "
+            f"pre_breach_gt_error={stats['pre_breach_gt_error']:.3f}"
         )
 
     treatment_results = [r for r in results if r["label"] == "treatment"]
@@ -360,6 +371,23 @@ def _run(args) -> None:
             "saturation rate + significant z => supports actuator-saturation hypothesis "
             "(H1). Low/similar rates => supports RL-precision-plateau hypothesis (H2)."
         )
+
+    pre_breach_values = [
+        r["pre_breach_gt_error"] for r in treatment_results if not np.isnan(r["pre_breach_gt_error"])
+    ]
+    print("\n=== Near-miss residual error (gt_error in the 5 steps before first breach) ===")
+    if pre_breach_values:
+        arr = np.array(pre_breach_values)
+        print(
+            f"n={len(arr)}  median={np.median(arr):.3f}  mean={arr.mean():.3f}  "
+            f"min={arr.min():.3f}  max={arr.max():.3f}"
+        )
+        print(
+            "Use the median above as e_target to calibrate reward-gradient sharpening: "
+            "gt_coef_new = -3 / (2 * e_target**2)."
+        )
+    else:
+        print("No treatment episodes breached the threshold in this run -- nothing to report.")
 
 
 if __name__ == "__main__":
