@@ -92,7 +92,7 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
     --progress
 
 
-rclone copy r2:proto-data/ckpt/hhi_wide_150motion_128shape_massgain.zip ./results \
+rclone copy r2:proto-data/ckpt/hhi_wide_150motion_128shape_discover.zip ./results \
     --transfers=1 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \

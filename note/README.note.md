@@ -4901,4 +4901,53 @@ Everything else — architecture, optimizers, RSI, evaluator, `mass_scaled_gains
 
 Commit: `32abcd781fb30c65b751f0c10ccadc16fa786fcc`.
 
-Not yet launched on the pod.
+Launched, plateaued at 75-78% `eval/success_rate` (best lever in the 150-clip lineage by a wide
+margin — massgain/seggain/soft-track/AMP all plateau lower at matched epochs), then killed by the
+user once the rolling mean confirmed the plateau. Fall rate ≈0 throughout; 100% of failures are
+`gt_error > 0.5` threshold breaches, not falls. User's own review of the failed-clip videos: "most
+of them looks fine... just a bit off, can not catch the target motion exactly, but overall looks
+better than expected" — near-misses, not garbage. A follow-up run of
+`tools/analyze_shape_failure_correlation.py` against discover's real 55-epoch failure history
+found shape extremity still irrelevant (r=0.003) and only a weak, not-statistically-solid overlap
+(12/30 = 40% vs. 32.3% chance, z≈0.9) between discover's hardest clips and the old known
+crawl/kneel/squat/backward hard-clip cluster — notably weaker than seggain's confirmed-significant
+50-53% overlap (§48). Full detail: memory `discover_pilot_status.md`.
+
+================================================================================
+
+## 51. Physical Feasibility vs. RL Precision — Two Competing Hypotheses for the Discover Plateau
+(2026-08-06)
+
+**Why:** §50's result reframes the open question. `discover` already removed every jerk/effort/
+smoothness penalty (`action_smoothness_factory`, `pow_rew_factory`, `contact_match_rew_factory`)
+and gave the policy a wide termination margin (`fall_term_factory` only) — i.e. the policy was
+completely free to be as jerky as it wanted, with nothing but the fall check stopping it. It still
+plateaued at 75-78%, with near-zero fall rate and failures described as "close but not exact," not
+flailing or falling. If jerk-avoidance were what was preventing tight tracking, removing that
+constraint should have closed the gap much further than it did. So "smooth vs. jerky" does not
+look like the axis the remaining failure lives on — which narrows the open question to two
+competing explanations:
+
+1. **Actuator saturation (hardware/physics ceiling, not an RL problem).** The PD gains/effort
+   limits genuinely cannot produce the torques needed for certain contact-rich phases (crawl/
+   kneel/get-up-style clips), independent of what the reward rewards or the termination allows.
+   No RL policy could close the gap under this hypothesis without changing the actuation model
+   (gains, effort limits) or the reference itself (physics-corrected distillation, Hard Motion
+   Solutions Survey item 4).
+2. **RL precision plateau.** The policy is physically capable of tracking tightly enough, but
+   optimization isn't converging to the tight solution — a general precision/optimization problem
+   (reward-gradient sharpening near the eval threshold, PPO/entropy/LR schedule, architecture
+   capacity) rather than a physical ceiling.
+
+**Proposed cheap diagnostics (not yet run):**
+- Offline inverse dynamics on the raw mocap reference for the hard clips, against each SMPL
+  shape's actual mass/inertia, checked against the robot's `control_info` effort limits from the
+  MJCF. No GPU/policy needed — pure kinematics/dynamics computation on data already available
+  locally (`data_cache/small150_128shape.pt`). Real effort-limit violations during the failure
+  phases → supports hypothesis 1. Torques stay within limits → supports hypothesis 2.
+- If a usable `discover` checkpoint still exists: replay it on the failing clips and log actual
+  applied torque/effort. If effort is pegged at the limit during the miss, that's more direct
+  evidence for hypothesis 1 than the idealized inverse-dynamics check, since it's what the trained
+  policy actually tried rather than an assumption about optimal control.
+
+Not yet started — queued for follow-up research.

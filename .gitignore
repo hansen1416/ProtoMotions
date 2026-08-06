@@ -18,6 +18,7 @@ data/amass/*.pkl
 !.claude/commands/
 .cursor/
 renders/
+data_cache/
 
 isaacgym/
 r2
