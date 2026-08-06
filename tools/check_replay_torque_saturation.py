@@ -41,6 +41,10 @@ All ~60 treatment+control motion_ids are pinned one-per-env and run in ONE batch
 simulator instance (num_envs = number of motion_ids), stepped in parallel -- much cheaper
 than one simulator rebuild per motion/shape group (the approach the MuJoCo version needed).
 
+IMPORTANT: IsaacGym must be imported before torch (protomotions/utils/simulator_imports.py)
+-- this holds even transitively, so argument parsing and the isaacgym import happen at
+module level BEFORE any other project import, mirroring inference_agent.py's structure.
+
 Usage (on a RunPod GPU instance):
     python tools/check_replay_torque_saturation.py \\
         --checkpoint results/hhi_wide_150motion_128shape_discover/last.ckpt \\
@@ -52,20 +56,66 @@ Usage (on a RunPod GPU instance):
 
 from __future__ import annotations
 
-import argparse
-import contextlib
-import sys
-from pathlib import Path
-from typing import Dict
-
-import numpy as np
-import torch
-
-from protomotions.components.pose_lib import extract_body_masses
-from protomotions.envs.terminations.tracking import mean_body_pos_error
-from tools.analyze_shape_failure_correlation import read_failed_motion_events
+import argparse  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 ASSET_ROOT_DEFAULT = "protomotions/data/assets/mjcf/smpl_mor"
+
+
+def create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=Path("results/hhi_wide_150motion_128shape_discover/last.ckpt"),
+    )
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=Path("results/hhi_wide_150motion_128shape_discover"),
+    )
+    parser.add_argument("--motion-file", type=Path, required=True)
+    parser.add_argument("--asset-root", type=Path, default=Path(ASSET_ROOT_DEFAULT))
+    parser.add_argument("--top-n", type=int, default=30)
+    parser.add_argument("--max-eval-steps", type=int, default=300)
+    parser.add_argument("--output", type=Path, default=None)
+    return parser
+
+
+# Parse arguments first (argparse is safe, doesn't import torch) -- mirrors
+# inference_agent.py's module-level ordering exactly.
+_parser = create_parser()
+_args = _parser.parse_args()
+
+# IsaacGym must be imported before torch, including transitively -- so this happens before
+# any project import below (pose_lib, tracking, analyze_shape_failure_correlation, etc. all
+# import torch transitively).
+from protomotions.utils.simulator_imports import import_simulator_before_torch  # noqa: E402
+
+import_simulator_before_torch("isaacgym")
+
+# Now safe to import everything else including torch.
+import contextlib  # noqa: E402
+import sys  # noqa: E402
+from typing import Dict  # noqa: E402
+
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
+from lightning.fabric import Fabric  # noqa: E402
+
+from protomotions.agents.base_agent.agent import BaseAgent  # noqa: E402
+from protomotions.components.pose_lib import extract_body_masses  # noqa: E402
+from protomotions.envs.base_env.env import BaseEnv  # noqa: E402
+from protomotions.envs.terminations.tracking import mean_body_pos_error  # noqa: E402
+from protomotions.utils.component_builder import (  # noqa: E402
+    build_all_components,
+    build_motion_lib_from_config,
+)
+from protomotions.utils.hydra_replacement import get_class  # noqa: E402
+from protomotions.utils.inference_utils import apply_backward_compatibility_fixes  # noqa: E402
+from tools.analyze_shape_failure_correlation import read_failed_motion_events  # noqa: E402
 
 
 class _Tee:
@@ -155,26 +205,7 @@ def analyze_episode(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument(
-        "--checkpoint",
-        type=Path,
-        default=Path("results/hhi_wide_150motion_128shape_discover/last.ckpt"),
-    )
-    parser.add_argument(
-        "--results-dir",
-        type=Path,
-        default=Path("results/hhi_wide_150motion_128shape_discover"),
-    )
-    parser.add_argument("--motion-file", type=Path, required=True)
-    parser.add_argument("--asset-root", type=Path, default=Path(ASSET_ROOT_DEFAULT))
-    parser.add_argument("--top-n", type=int, default=30)
-    parser.add_argument("--max-eval-steps", type=int, default=300)
-    parser.add_argument("--output", type=Path, default=None)
-    args = parser.parse_args()
-
+    args = _args
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with open(args.output, "w") as f:
@@ -186,15 +217,6 @@ def main():
 
 
 def _run(args) -> None:
-    # IsaacGym must be imported before torch (protomotions/utils/simulator_imports.py).
-    import isaacgym  # noqa: F401
-    from lightning.fabric import Fabric
-    from protomotions.utils.component_builder import build_all_components
-    from protomotions.envs.base_env.env import BaseEnv
-    from protomotions.agents.base_agent.agent import BaseAgent
-    from protomotions.utils.hydra_replacement import get_class
-    from protomotions.utils.inference_utils import apply_backward_compatibility_fixes
-
     print(f"Loading resolved configs from {args.checkpoint.parent} ...")
     resolved_configs = torch.load(
         args.checkpoint.parent / "resolved_configs_inference.pt",
@@ -218,8 +240,6 @@ def _run(args) -> None:
 
     # First pass: load just the motion lib (CPU-only, cheap) to pick treatment/control ids
     # and figure out per-env asset_ids before building the (expensive) GPU simulator.
-    from protomotions.utils.component_builder import build_motion_lib_from_config
-
     motion_lib_probe = build_motion_lib_from_config(motion_lib_config, "cpu")
     failed_dir = args.results_dir / "failed_motions"
     treatment, control = build_treatment_and_control_sets(motion_lib_probe, failed_dir, args.top_n)
