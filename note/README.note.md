@@ -5009,3 +5009,32 @@ robust failure set is needed later.
 reward-gradient sharpening near the eval threshold, PPO/entropy/LR schedule tuning, or
 architecture capacity (see `discover_pilot_status.md` open questions / [[architecture_research]]).
 Not yet decided.
+
+================================================================================
+
+## 53. H2 Levers, Attempt 1 (failed) and Attempt 2 (launched) (2026-08-06)
+
+**Attempt 1 — reward-gradient sharpening (`mlp_wide_discover_sharpen.py`, `gt_coef` -25.0 → -9.0,
+run `lc1spuzt`): failed.** Chosen via a derived formula for where `gt_rew`'s exponential reward
+has its steepest gradient, calibrated against an empirically-measured near-miss residual
+(0.408m median, via a real-policy IsaacGym replay). Result vs. `discover` at matched steps:
+tracked closely to ~step 4400, then declined steadily — 0.668 vs. `discover`'s 0.779 rolling
+success rate by step 8399, not just flat but actively worse. Likely cause: a plain coefficient
+change reshapes the *entire* reward curve, not just the local gradient — weakening `gt_coef`
+also made the reward more forgiving at every error magnitude, reducing overall precision
+pressure. User stopped the run. Lesson: don't touch tracking-reward coefficients again for this
+problem.
+
+**Attempt 2 — PPO exploration lever (`mlp_wide_discover_explore.py`, `learnable_std=True`,
+`entropy_coef` left at default 0.005, from scratch — not a warm start): launched (run
+`1m1udujx`, group `hhi_wide_150motion_128shape_discover_explore`), not yet evaluated.**
+`discover`'s action std was fixed the whole run (`entropy_coef` a no-op whenever
+`learnable_std=False`), so there was never any entropy-driven exploration; `discover`'s own
+`actor/clip_frac` history (mean 0.244, no spikes, never triggers the 0.6 skip threshold) matches
+this project's own "flat + no spikes = exploration problem" heuristic from the MoE/wide-20946
+lineage, pointing at this lever over adaptive-LR/clip-tightening. Same lever failed once before
+elsewhere in this project as a mid-training warm-start (`mlp_wide_explore.py` — sharp
+`grad_norm`/`std_mean` spike, jerk roughly doubled); this attempt trains from scratch instead to
+avoid that specific non-stationarity shock. Watch `actor/std_mean`/`actor/grad_norm_before_clip`
+in the first ~500-1000 epochs for the same spike signature before trusting `eval/success_rate`
+alone.

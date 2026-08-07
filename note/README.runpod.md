@@ -469,11 +469,20 @@ nohup python -u protomotions/train_agent.py \
 nohup python -u protomotions/train_agent.py \
   --robot-name smpl_mor --simulator isaacgym \
   --experiment-path examples/experiments/mimic/mlp_wide_discover_explore.py \
-  --experiment-name hhi_wide_150motion_128shape_discover_sharpen \
+  --experiment-name hhi_wide_150motion_128shape_discover_explore \
   --motion-file /workspace/motion_cache/small150_128shape.pt \
   --num-envs 4096 --batch-size 16384 --ngpu 1 \
   --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
-  --wandb-group hhi_wide_150motion_128shape_discover_sharpen > /tmp/hhi_wide_150motion_128shape_discover_sharpen.log 2>&1 &
+  --wandb-group hhi_wide_150motion_128shape_discover_explore > /tmp/hhi_wide_150motion_128shape_discover_explore.log 2>&1 &
+
+nohup python -u protomotions/train_agent.py \
+    --robot-name smpl_mor --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_wide_discover_historical.py \
+    --experiment-name hhi_wide_150motion_128shape_discover_historical \
+    --motion-file /workspace/motion_cache/small150_128shape.pt \
+    --num-envs 4096 --batch-size 16384 --ngpu 1 \
+    --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+    --wandb-group hhi_wide_150motion_128shape_discover_historical > /tmp/hhi_wide_150motion_128shape_discover_historical.log 2>&1 &
 ----
 
 
