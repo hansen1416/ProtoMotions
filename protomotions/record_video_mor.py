@@ -423,11 +423,23 @@ def extract_motion_across_shapes(
 
     sliced = _slice_motions_by_indices(data, keep_indices)
 
+    # Asset ids of the kept motions, in the exact order they end up in the sliced
+    # file -- the caller needs this to pin the simulator's env->asset assignment
+    # (Mode A / requested_morphology_asset_ids) so env i is actually given the body
+    # shape that motion i in the sliced file was retargeted for. Without this, the
+    # simulator's default round-robin assignment (over ALL loaded assets, not just
+    # the ones in this sliced file) can assign an env a shape with no matching
+    # motion in the file, raising "No compatible motions found for asset_id=...".
+    asset_ids_all = data.get("motion_asset_ids")
+    matched_asset_ids = (
+        [asset_ids_all[i] for i in keep_indices] if asset_ids_all is not None else None
+    )
+
     tmp = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
     torch.save(sliced, tmp.name)
     tmp.close()
     log.info(f"Extracted {len(keep_indices)} shape-variant(s) → {tmp.name}")
-    return tmp.name, len(keep_indices)
+    return tmp.name, matched_asset_ids
 
 
 def parse_gender_beta_filter(gender_beta_args):
@@ -640,6 +652,7 @@ def main():
     # assign env 0 a shape that has no motion in the single-motion file.
     tmp_motion_file = None
     extracted_asset_id = None
+    pinned_env_asset_ids = None  # Mode A: explicit env -> asset_id assignment (see below)
     if motion_file is not None:
         if args.num_envs == 1:
             tmp_motion_file, extracted_asset_id = extract_motion_by_index(
@@ -655,7 +668,7 @@ def main():
                 target_asset_ids = [
                     a.strip() for a in args.target_asset_ids.split(",") if a.strip()
                 ]
-            tmp_motion_file, num_found = extract_motion_across_shapes(
+            tmp_motion_file, matched_asset_ids = extract_motion_across_shapes(
                 motion_file,
                 args.motion_index,
                 max_shapes=args.num_envs,
@@ -663,12 +676,23 @@ def main():
             )
             motion_lib_config.motion_file = tmp_motion_file
             expected = len(target_asset_ids) if target_asset_ids else args.num_envs
+            num_found = len(matched_asset_ids) if matched_asset_ids else 0
             if num_found < expected:
                 log.warning(
                     f"Only {num_found} shape-variant(s) found for motion "
                     f"{args.motion_index} (requested {expected}); "
                     "some envs will round-robin repeated shapes."
                 )
+            # Pin env i -> matched_asset_ids[i] (Mode A) so the simulator's per-env
+            # morphology assignment always matches what the sliced motion file
+            # actually contains, regardless of load/round-robin order over the full
+            # 128-asset population. Only pad to num_envs if we came up short.
+            if matched_asset_ids:
+                pinned_env_asset_ids = list(matched_asset_ids)
+                while len(pinned_env_asset_ids) < args.num_envs:
+                    pinned_env_asset_ids.append(
+                        matched_asset_ids[len(pinned_env_asset_ids) % len(matched_asset_ids)]
+                    )
         else:
             # Multi-env: slim to 1 motion per shape so we don't load the full 3+ GB file.
             # Round-robin assigns each env a different body shape from the slimmed set.
@@ -752,6 +776,14 @@ def main():
     save_dir_for_weights = (
         getattr(env_config, "save_dir", None) if hasattr(env_config, "save_dir") else None
     )
+    simulator_extra_params = {}
+    if pinned_env_asset_ids is not None:
+        # Mode A explicit env->asset assignment (protomotions/simulator/isaacgym/
+        # simulator.py's requested_morphology_asset_ids) so env i gets exactly the
+        # body shape that motion i in the sliced --same-motion file was made for.
+        simulator_extra_params["morphology_asset_ids"] = pinned_env_asset_ids
+        log.info(f"Pinning env->asset assignment (Mode A): {pinned_env_asset_ids}")
+
     components = build_all_components(
         terrain_config=terrain_config,
         scene_lib_config=scene_lib_config,
@@ -760,6 +792,7 @@ def main():
         robot_config=robot_config,
         device=fabric.device,
         save_dir=save_dir_for_weights,
+        **simulator_extra_params,
     )
 
     terrain = components["terrain"]
