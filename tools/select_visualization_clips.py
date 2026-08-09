@@ -44,6 +44,12 @@ different checkpoints/experiments that share the same --motion-file (e.g. compar
 several ablation runs) automatically renders the exact same 16 body shapes in every
 video -- no shared state needs to be passed between invocations.
 
+Each command also gets --compact-spawn-spacing (default 2.0m), which lays the humanoids
+out in a tight grid (see protomotions/envs/base_env/env.py's compact_spawn_spacing logic)
+instead of record_video_mor.py's default wider spawn layout. Without it, the fixed camera
+(_setup_fixed_camera) has to zoom out far enough to fit every actor in frame, which makes
+each one tiny -- --spawn-spacing controls this directly if 2.0 is still too tight/loose.
+
 Usage (run on the pod, where results/<experiment>/failed_motions/ and the motion .pt
 file live -- CPU only, no GPU/simulator needed for this selection step):
 
@@ -51,7 +57,7 @@ file live -- CPU only, no GPU/simulator needed for this selection step):
         --results-dir results/hhi_wide_150motion_128shape_discover \\
         --motion-file /workspace/motion_cache/small150_128shape.pt \\
         --checkpoint results/hhi_wide_150motion_128shape_discover/last.ckpt \\
-        --num-failed 10 --num-success 10 --num-shapes 16 \\
+        --num-failed 4 --num-success 4 --num-shapes 16 --spawn-spacing 2.0 \\
         --script-output results/hhi_wide_150motion_128shape_discover/render_visualize.sh
 
 Then, still on the pod (this part needs the GPU/IsaacGym):
@@ -105,13 +111,24 @@ def main():
     parser.add_argument("--results-dir", type=Path, required=True)
     parser.add_argument("--motion-file", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--num-failed", type=int, default=10)
-    parser.add_argument("--num-success", type=int, default=10)
+    parser.add_argument("--num-failed", type=int, default=4)
+    parser.add_argument("--num-success", type=int, default=4)
     parser.add_argument(
         "--num-shapes",
         type=int,
         default=16,
         help="Number of body shapes rendered side-by-side in each video.",
+    )
+    parser.add_argument(
+        "--spawn-spacing",
+        type=float,
+        default=2.0,
+        help=(
+            "Compact grid spacing (metres) between humanoids, passed to "
+            "record_video_mor.py's --compact-spawn-spacing. Without this, envs use "
+            "the default (much wider) spawn layout, which pushes the fixed camera "
+            "back far enough to fit everyone in frame and makes each actor tiny."
+        ),
     )
     parser.add_argument(
         "--video-output-dir",
@@ -182,7 +199,8 @@ def main():
             f'python protomotions/record_video_mor.py --checkpoint "{args.checkpoint}" '
             f'--simulator isaacgym --motion-file "{args.motion_file}" '
             f'--motion-index {rep_mid} --num-envs {len(canonical_shapes)} --same-motion '
-            f'--target-asset-ids "{target_asset_ids_str}" --output "{out}"'
+            f'--target-asset-ids "{target_asset_ids_str}" '
+            f'--compact-spawn-spacing {args.spawn_spacing} --output "{out}"'
         )
 
     lines.append("")
@@ -196,7 +214,8 @@ def main():
             f'python protomotions/record_video_mor.py --checkpoint "{args.checkpoint}" '
             f'--simulator isaacgym --motion-file "{args.motion_file}" '
             f'--motion-index {rep_mid} --num-envs {len(canonical_shapes)} --same-motion '
-            f'--target-asset-ids "{target_asset_ids_str}" --output "{out}"'
+            f'--target-asset-ids "{target_asset_ids_str}" '
+            f'--compact-spawn-spacing {args.spawn_spacing} --output "{out}"'
         )
 
     script_output.parent.mkdir(parents=True, exist_ok=True)

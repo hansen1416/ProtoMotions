@@ -92,8 +92,8 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
     --progress
 
 
-rclone copy r2:proto-data/ckpt/hhi_wide_150motion_128shape_discover_lookahead.zip ./results \
-    --transfers=1 \
+rclone copy r2:proto-data/videos/hhi_wide_150motion_128shape_discover_lookahead/ /home/hlz/Downloads/0809 \
+    --transfers=2 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress
