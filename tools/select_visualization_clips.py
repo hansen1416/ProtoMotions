@@ -31,9 +31,18 @@ read_failed_motion_events()/build_clip_id_to_motion_ids() approach -- this scrip
 that reasoning but selects concrete --motion-index values for record_video_mor.py instead
 of just printing a ranked table.
 
-For the failed bucket, the representative shape rendered is the one that was *actually
-observed* failing most often for that clip (not an arbitrary shape). For the success
-bucket, since the clip essentially never failed regardless of shape, shape 0 is rendered.
+For the failed bucket, the representative clip is identified via the shape that was
+*actually observed* failing most often for that clip (not an arbitrary shape). For the
+success bucket, since the clip essentially never failed regardless of shape, any shape
+variant of it can be used to identify the clip.
+
+Each emitted video renders the SAME set of --num-shapes body shapes (default 16),
+selected once, deterministically, from the motion file itself (every 128/--num-shapes'th
+asset id in sorted order) and passed to record_video_mor.py via --target-asset-ids. This
+is deterministic given the same --motion-file, so running this script separately against
+different checkpoints/experiments that share the same --motion-file (e.g. comparing
+several ablation runs) automatically renders the exact same 16 body shapes in every
+video -- no shared state needs to be passed between invocations.
 
 Usage (run on the pod, where results/<experiment>/failed_motions/ and the motion .pt
 file live -- CPU only, no GPU/simulator needed for this selection step):
@@ -42,7 +51,7 @@ file live -- CPU only, no GPU/simulator needed for this selection step):
         --results-dir results/hhi_wide_150motion_128shape_discover \\
         --motion-file /workspace/motion_cache/small150_128shape.pt \\
         --checkpoint results/hhi_wide_150motion_128shape_discover/last.ckpt \\
-        --num-failed 20 --num-success 20 \\
+        --num-failed 10 --num-success 10 --num-shapes 16 \\
         --script-output results/hhi_wide_150motion_128shape_discover/render_visualize.sh
 
 Then, still on the pod (this part needs the GPU/IsaacGym):
@@ -76,6 +85,19 @@ def read_failed_motion_events(failed_motions_dir: Path) -> tuple[Counter, int]:
     return counts, n_epochs
 
 
+def select_canonical_shapes(motion_lib, num_shapes: int) -> list:
+    """Deterministically pick `num_shapes` asset ids, evenly strided over the sorted,
+    unique asset ids present in `motion_lib`. Deterministic given the same motion
+    file, so separate invocations of this script against the same --motion-file (e.g.
+    different checkpoints/experiments) always pick the exact same shapes."""
+    asset_id_to_motion_ids = motion_lib.build_asset_id_to_motion_ids()
+    all_asset_ids = sorted(asset_id_to_motion_ids.keys())
+    if num_shapes >= len(all_asset_ids):
+        return all_asset_ids
+    stride = len(all_asset_ids) / num_shapes
+    return [all_asset_ids[int(i * stride)] for i in range(num_shapes)]
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -83,8 +105,14 @@ def main():
     parser.add_argument("--results-dir", type=Path, required=True)
     parser.add_argument("--motion-file", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--num-failed", type=int, default=20)
-    parser.add_argument("--num-success", type=int, default=20)
+    parser.add_argument("--num-failed", type=int, default=10)
+    parser.add_argument("--num-success", type=int, default=10)
+    parser.add_argument(
+        "--num-shapes",
+        type=int,
+        default=16,
+        help="Number of body shapes rendered side-by-side in each video.",
+    )
     parser.add_argument(
         "--video-output-dir",
         type=Path,
@@ -112,6 +140,13 @@ def main():
     )
     if not motion_lib.has_clip_identity_metadata():
         raise SystemExit("MotionLib has no motion_clip_ids -- can't group by clip.")
+
+    canonical_shapes = select_canonical_shapes(motion_lib, args.num_shapes)
+    target_asset_ids_str = ",".join(canonical_shapes)
+    print(
+        f"Canonical {len(canonical_shapes)} body shapes for every video "
+        f"(deterministic from {args.motion_file}):\n  {canonical_shapes}\n"
+    )
 
     fail_counts, n_epochs = read_failed_motion_events(failed_dir)
     print(f"Read {n_epochs} eval epochs, {len(fail_counts)} unique failed motion ids.\n")
@@ -146,7 +181,8 @@ def main():
         lines.append(
             f'python protomotions/record_video_mor.py --checkpoint "{args.checkpoint}" '
             f'--simulator isaacgym --motion-file "{args.motion_file}" '
-            f'--motion-index {rep_mid} --output "{out}"'
+            f'--motion-index {rep_mid} --num-envs {len(canonical_shapes)} --same-motion '
+            f'--target-asset-ids "{target_asset_ids_str}" --output "{out}"'
         )
 
     lines.append("")
@@ -159,7 +195,8 @@ def main():
         lines.append(
             f'python protomotions/record_video_mor.py --checkpoint "{args.checkpoint}" '
             f'--simulator isaacgym --motion-file "{args.motion_file}" '
-            f'--motion-index {rep_mid} --output "{out}"'
+            f'--motion-index {rep_mid} --num-envs {len(canonical_shapes)} --same-motion '
+            f'--target-asset-ids "{target_asset_ids_str}" --output "{out}"'
         )
 
     script_output.parent.mkdir(parents=True, exist_ok=True)

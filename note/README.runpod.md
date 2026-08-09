@@ -36,12 +36,11 @@ rclone copy r2:proto-data/hhi_stage1_merged6/ /workspace/hhi_stage1_merged6/ \
     --multi-thread-chunk-size=128M \
     --progress
 
-python tools/build_small_multishape_subset.py \
-    --num-clips 150 \
-    --output /workspace/motion_cache/small150_128shape.pt
-
 pip install -e . && wandb login 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 && python tools/extract_smpl_physics_features.py
 
+python tools/build_small_multishape_subset.py \
+  --num-clips 150 \
+  --output /workspace/motion_cache/small150_128shape.pt
 ------
 
 # neutral and transfer
@@ -492,14 +491,33 @@ nohup python -u protomotions/train_agent.py \
   --num-envs 4096 --batch-size 16384 --ngpu 1 \
   --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
   --wandb-group hhi_wide_150motion_128shape_discover_lookahead > /tmp/hhi_wide_150motion_128shape_discover_lookahead.log 2>&1 & 
+
+
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide_discover_historical_lookahead.py \
+  --experiment-name hhi_wide_150motion_128shape_discover_historical_lookahead \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --num-envs 6144 --batch-size 24576 --ngpu 1 \
+  --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_150motion_128shape_discover_historical_lookahead > /tmp/hhi_wide_150motion_128shape_discover_historical_lookahead.log 2>&1 &
 ----
 
 
 
 python tools/analyze_shape_failure_correlation.py --results-dir /workspace/ProtoMotions/results/hhi_wide_150motion_128shape_seggain --motion-file /workspace/motion_cache/small150_128shape.pt --output /workspace/ProtoMotions/results/hhi_wide_150motion_128shape_seggain/failure_correlation_analysis.txt
 
+python tools/select_visualization_clips.py \
+  --results-dir results/hhi_wide_150motion_128shape_discover_lookahead \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --checkpoint results/hhi_wide_150motion_128shape_discover_lookahead/last.ckpt \
+  --script-output results/hhi_wide_150motion_128shape_discover_lookahead/render_visualize.sh
 
-
+python tools/select_visualization_clips.py \
+  --results-dir results/hhi_wide_150motion_128shape_discover_historical_lookahead \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --checkpoint results/hhi_wide_150motion_128shape_discover_historical_lookahead/last.ckpt \
+  --script-output results/hhi_wide_150motion_128shape_discover_historical_lookahead/render_visualize.sh
 
 -----
 

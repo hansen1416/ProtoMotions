@@ -40,6 +40,17 @@ Example
         --simulator isaacgym \\
         --motion-index 3 --num-envs 8 --same-motion \\
         --output output/videos/discover_motion3_8shapes.mp4
+
+    # Same clip across a specific, fixed set of body shapes (e.g. to keep the same
+    # 16 shapes consistent across many videos/checkpoints) -- overrides the default
+    # "first --num-envs shapes found in file order" behaviour of --same-motion:
+    python protomotions/record_video_mor.py \\
+        --checkpoint results/hhi_wide_150motion_128shape_discover/last.ckpt \\
+        --motion-file /workspace/motion_cache/small150_128shape.pt \\
+        --simulator isaacgym \\
+        --motion-index 3 --num-envs 16 --same-motion \\
+        --target-asset-ids "male_0e26b88d,female_0e26b88d,male_1a2b3c4d,..." \\
+        --output output/videos/discover_motion3_16shapes.mp4
 """
 
 
@@ -98,6 +109,19 @@ def create_parser():
             "With --num-envs > 1, render the SAME clip as --motion-index across up to "
             "--num-envs different body shapes (matched via motion_clip_ids), instead of "
             "the default behaviour of an arbitrary motion per shape."
+        ),
+    )
+    parser.add_argument(
+        "--target-asset-ids",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of asset ids (e.g. 'male_0e26b88d,female_1a2b3c4d') "
+            "to use with --same-motion, in the given order, instead of the default "
+            "'first --num-envs shapes found in file order'. Use this to keep the exact "
+            "same set of body shapes consistent across multiple videos/checkpoints. "
+            "A clip missing one of the requested asset ids logs a warning and that slot "
+            "is dropped (fewer envs than requested)."
         ),
     )
     parser.add_argument("--scenes-file", type=str, default=None)
@@ -323,13 +347,21 @@ def slim_motion_file(motion_file: str, motions_per_shape: int = 1):
     return tmp.name
 
 
-def extract_motion_across_shapes(motion_file: str, index: int, max_shapes: int = None):
-    """Extract every body-shape variant of the same clip as `index` into a temp file.
+def extract_motion_across_shapes(
+    motion_file: str, index: int, max_shapes: int = None, target_asset_ids: list = None
+):
+    """Extract body-shape variant(s) of the same clip as `index` into a temp file.
 
     Uses motion_clip_ids (stable clip identity shared across shapes, see
     MotionLib.build_clip_id_to_motion_ids()) to find all motions that are the same
     underlying clip as the one at `index`, across different body shapes -- so you can
     render e.g. 8 different shapes all performing the same motion side by side.
+
+    If `target_asset_ids` is given, selects exactly those asset ids (by
+    motion_asset_ids), in that order, instead of "first max_shapes found in file
+    order" -- use this to keep the same set of body shapes consistent across many
+    videos/checkpoints rendered from separate invocations of this script. Asset ids
+    requested but not present for this clip are skipped with a warning.
 
     Returns (temp_file_path, num_shapes_found). Caller must delete the temp file.
     """
@@ -354,14 +386,40 @@ def extract_motion_across_shapes(motion_file: str, index: int, max_shapes: int =
         )
 
     target_clip_id = clip_ids[index]
-    keep_indices = [i for i, cid in enumerate(clip_ids) if cid == target_clip_id]
-    if max_shapes is not None:
-        keep_indices = keep_indices[:max_shapes]
+    clip_indices = [i for i, cid in enumerate(clip_ids) if cid == target_clip_id]
 
-    log.info(
-        f"Motion {index} is clip_id={target_clip_id!r}: found {len(keep_indices)} "
-        f"shape-variant(s)" + (f", keeping {max_shapes}" if max_shapes else "")
-    )
+    if target_asset_ids:
+        asset_ids = data.get("motion_asset_ids")
+        if asset_ids is None:
+            raise RuntimeError(
+                "Motion file has no motion_asset_ids -- cannot select by "
+                "--target-asset-ids. Omit --target-asset-ids to use file order."
+            )
+        asset_id_to_clip_index = {asset_ids[i]: i for i in clip_indices}
+        keep_indices = []
+        missing = []
+        for aid in target_asset_ids:
+            if aid in asset_id_to_clip_index:
+                keep_indices.append(asset_id_to_clip_index[aid])
+            else:
+                missing.append(aid)
+        if missing:
+            log.warning(
+                f"Clip {target_clip_id!r} has no motion for {len(missing)} requested "
+                f"asset id(s): {missing} -- those slots are dropped."
+            )
+        log.info(
+            f"Motion {index} is clip_id={target_clip_id!r}: matched "
+            f"{len(keep_indices)}/{len(target_asset_ids)} requested target asset ids."
+        )
+    else:
+        keep_indices = clip_indices
+        if max_shapes is not None:
+            keep_indices = keep_indices[:max_shapes]
+        log.info(
+            f"Motion {index} is clip_id={target_clip_id!r}: found {len(keep_indices)} "
+            f"shape-variant(s)" + (f", keeping {max_shapes}" if max_shapes else "")
+        )
 
     sliced = _slice_motions_by_indices(data, keep_indices)
 
@@ -590,15 +648,25 @@ def main():
             motion_lib_config.motion_file = tmp_motion_file
         elif args.same_motion:
             # Multi-env, same clip: render --motion-index's clip across up to num_envs
-            # different body shapes, matched via motion_clip_ids.
+            # different body shapes, matched via motion_clip_ids (or via the exact,
+            # ordered --target-asset-ids list if one was given).
+            target_asset_ids = None
+            if args.target_asset_ids:
+                target_asset_ids = [
+                    a.strip() for a in args.target_asset_ids.split(",") if a.strip()
+                ]
             tmp_motion_file, num_found = extract_motion_across_shapes(
-                motion_file, args.motion_index, max_shapes=args.num_envs
+                motion_file,
+                args.motion_index,
+                max_shapes=args.num_envs,
+                target_asset_ids=target_asset_ids,
             )
             motion_lib_config.motion_file = tmp_motion_file
-            if num_found < args.num_envs:
+            expected = len(target_asset_ids) if target_asset_ids else args.num_envs
+            if num_found < expected:
                 log.warning(
                     f"Only {num_found} shape-variant(s) found for motion "
-                    f"{args.motion_index} (requested --num-envs {args.num_envs}); "
+                    f"{args.motion_index} (requested {expected}); "
                     "some envs will round-robin repeated shapes."
                 )
         else:

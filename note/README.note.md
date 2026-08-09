@@ -5038,3 +5038,146 @@ elsewhere in this project as a mid-training warm-start (`mlp_wide_explore.py` �
 avoid that specific non-stationarity shock. Watch `actor/std_mean`/`actor/grad_norm_before_clip`
 in the first ~500-1000 epochs for the same spike signature before trusting `eval/success_rate`
 alone.
+
+================================================================================
+
+## 54. H2 Lever 2 Killed, Temporal-Context Lever Result, Failure-Cluster Characterization,
+    Forward-Lookahead Lever Launched (2026-08-08)
+
+**Attempt 2 (`discover_explore`, `learnable_std=True`) — killed by user, run `1m1udujx`.**
+Health diagnostics at kill-time (~step 2668) were clean: `actor/std_mean` grew smoothly
+0.055→0.063, `grad_norm_before_clip` stayed in a normal band (3.5-8.8, never near the 50.0 clip
+value), clipping never triggered. `eval/success_rate` was statistically tied with `discover` at
+matched steps. Recommended continuing; user killed it anyway ("I think it will not out
+perform"). No conclusive verdict — treat as abandoned, not as a negative result with evidence
+behind it.
+
+### Temporal-context lever result — `discover_historical` (`mlp_wide_discover_historical.py`,
+    run `yzk4ql8e`)
+
+Dilated backward window of past body-state frames (`historical_max_coords_obs`,
+`HISTORY_STEPS=[1,2,3,4,8,16,32]`, reusing `amp/mlp.py`'s schedule), everything else
+byte-identical to `discover`. Early read (through step ~2200) looked concerning — consistently
+behind `discover` at every matched step, gap widening from -0.03 to -0.16. With more data (to
+step 6999, run still `running`), the picture reversed: the deficit peaked at step 3199 (-0.17)
+then closed steadily, flipping positive from ~step 4900 onward (e.g. +0.04 at step 5199, +0.03 at
+step 6999) — consistent with the much wider input simply needing more updates to become useful,
+not with temporal context being harmful.
+
+**Success rate: in par with `discover`, not better.** Last 2000 steps (5199→7199) bounce in a
+0.69-0.78 band, statistically indistinguishable from `discover`'s own 0.71-0.79 band over the
+same steps — both look like they're sitting on the same plateau every lever on this dataset has
+hit (massgain/seggain/sharpen/discover all ~mid-70s).
+
+**Jerk/smoothness: clear, substantial, repeatable win.** At matched steps 5199-7199, `historical`
+runs at ~40-55% of `discover`'s `eval/normalized_jerk_mean` and ~65% of its
+`eval/action_delta_mean_deg`, consistently across every matched point (e.g. step 6999: jerk 2082
+vs. 5057; action delta 0.78° vs. 1.46°). Real effect of giving the policy real temporal context,
+just not an accuracy effect.
+
+**Interpretation:** frame-stacking retired the "does this break training" risk (stable throughout
+despite ~2x+ wider input) and fixed smoothness, but didn't move the accuracy ceiling. Read
+together with `sharpen` (reward-magnitude) and `explore` (exploration) also landing in the same
+band, this pushed toward asking what's actually different about the persistent ~22-25% failures,
+rather than trying a 4th isolated lever blind.
+
+### Failure-cluster characterization — turning/dynamic-motion profile, not the old static-balance
+    cluster
+
+Re-ran the same failure-characterization method as §17 (join failed-motion logs against
+`/home/hlz/repos/hhi/data-processing/motion_id_text.json` text descriptions), applied to
+`discover`'s 55-epoch failure log (`results/hhi_wide_150motion_128shape_discover/failed_motions/`,
+2565 failure events, 2164 unique motion ids) instead of `hhi_20946_neutral`'s. Cross-referenced
+top-75 hardest clips against `results/hhi_20946_neutral/persistent_failures.txt` (the old
+crawl/kneel/squat/single-leg-balance cluster from §17).
+
+**Result: a different, previously-uncharacterized failure profile dominates.** Reading actual
+clip descriptions for the ~60% of `discover`'s hard clips *not* in the old cluster (already flagged
+as an open question in memory `discover_pilot_status.md`):
+- **Turning/heading-change locomotion (~20% of top-75)**: "turns around and runs forward,"
+  "walked right then walked back left," "zig-zagging," "turns slowly in a full clockwise circle."
+- **Dynamic transitions (~13%)**: cartwheel, "quick walk to a jog," jump-and-land, several kicks,
+  crouch-and-leap.
+- **Simple-looking, mostly-stationary arm gestures (~12%)**: clapping, waving, "moving hands in
+  and out" — notably lower per-shape fail rates (0.10-0.20 vs. 0.3-0.4+ for top clips), i.e.
+  borderline rather than universally hard.
+
+**Quantitative confirmation via kinematic features, not just eyeballing text.** Pulled per-clip
+kinematic features straight from `MotionLib` tensors (root/limb angular velocity, DOF velocity;
+clip duration was uninformative — all 150 clips fixed at 200 frames/6.63s by construction) and
+correlated against per-shape failure rate across all 150 clips, same Pearson-r test used for the
+shape-extremity check:
+
+| feature | Pearson r vs. failure rate |
+|---|---|
+| mean root angular velocity | +0.303 |
+| mean DOF velocity | +0.271 |
+| peak root angular velocity | +0.233 |
+| peak DOF velocity | +0.220 |
+| peak limb angular velocity | +0.200 |
+
+3-30x stronger than shape extremity's r≈0.003-0.09 across every prior check (still ruled out —
+confirmed yet again). Moderate (~9% variance explained on its own) but real and directionally
+consistent across every feature: "busier"/more-rotational motions are harder, independent of body
+shape — quantitatively backing the turning/dynamic-motion category found in the text read.
+Checked whether the "simple gesture" subset's borderline difficulty was shape-specific
+(interaction effect) — per user, this was already checked and is clearly not shape-related,
+consistent with every other shape check in this project.
+
+### Forward-lookahead lever launched — `discover_lookahead`
+
+Checked how much lookahead `discover`'s policy actually gets: `MimicControlConfig.future_steps`
+defaults to `1` and `discover` never overrides it, so the target-pose observation contains only
+the single immediately-next reference frame (33ms ahead) — no real anticipation. Plausible direct
+mechanism for the turning/dynamic-motion failure category just characterized: the policy gets
+almost no warning before a heading change or kick begins.
+
+Not a new mechanism — `examples/experiments/mimic/mlp_bm_l2c2.py` already uses
+`MimicControlConfig(future_steps=[1, 2, 4, 8])` in production; `mimic_control.py` already handles
+list-valued `future_steps` and already clamps future queries past clip end
+(`torch.minimum(future_times, motion_lengths)`). New file
+`examples/experiments/mimic/mlp_wide_discover_lookahead.py`: exact copy of `discover`, only
+change is `FUTURE_STEPS=[1,2,4,8]` (reusing `mlp_bm_l2c2.py`'s validated schedule) passed to the
+`mimic` control component. `mimic_target_poses_max_coords_factory`'s call is unchanged — it
+already resolves to "all available future steps," so the observation widens with zero `in_keys`
+changes needed (`nn.LazyLinear` infers the new width). Launched (experiment name
+`hhi_wide_150motion_128shape_discover_lookahead`), result not yet known.
+
+**Also launched, deliberately deviating from the "isolate one variable" convention**:
+`examples/experiments/mimic/mlp_wide_discover_historical_lookahead.py` — combines
+`_historical.py`'s backward window with `_lookahead.py`'s forward window on top of the same
+`discover` baseline. Launched before `lookahead` alone has a result, at the user's request, so if
+this run beats `discover` the improvement can't be cleanly attributed to lookahead vs.
+historical's already-observed smoothness effect carrying over — a third data point, not a
+replacement for evaluating `lookahead` on its own (experiment name
+`hhi_wide_150motion_128shape_discover_historical_lookahead`).
+
+### If both lookahead runs come back flat — candidate next moves, discussed not yet built
+
+Reasoned through what a null result on both would mean: combined with `sharpen` (reward
+magnitude, failed) and giving the policy more information in *either* time direction not moving
+the needle, that would argue the bottleneck isn't missing information but a genuine
+execution/timing-precision limit. Ranked candidates for that case, cheapest/most-diagnostic
+first:
+
+1. **PD controller bandwidth check (new, not yet run)** — H1's torque-saturation replay
+   (`tools/check_replay_torque_saturation.py`, §52) checked torque *magnitude* headroom, not
+   *response-rate* headroom. A policy could have ample torque margin and still be rate-limited by
+   PD gains not tuned for fast heading reversals. Cheap: re-analyze the existing replay logs for
+   torque rate-of-change near turning-clip failure windows.
+2. **Per-body rotation-error breakdown (deferred from earlier, still cheap, still not run)** —
+   check whether root/heading rotation error is diluted by limb error inside `gr_rew`'s
+   all-body average. If so, a narrow dedicated root-heading term is well-justified (additive, not
+   a global coefficient reshape — doesn't repeat `sharpen`'s mistake). If root error isn't
+   disproportionate, this idea is moot.
+3. **Curve-shape / time-warp-tolerant reward (parked idea, §23)** — re-motivated by a
+   both-directions-of-information-don't-help result: reframes the problem as "target reachable,
+   but reward demands an infeasible-on-schedule exact-time correspondence" rather than "policy
+   lacks information." Bigger lift, real reward-hacking risk (flagged in §23), only worth it if
+   #1/#2 don't explain enough.
+4. **Architecture, different in kind (not just more capacity)** — deprioritized; capacity-matched
+   wide already caught up to MoE-stable on every metric (`architecture_research.md`), so "more of
+   the same" isn't evidenced. A structurally different split (e.g. dedicated heading/root control
+   vs. limb-pose control) would only be worth it after 1-3 are exhausted.
+
+Not committed to any of these yet — waiting on `lookahead`/`historical_lookahead` results first.
