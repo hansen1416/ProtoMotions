@@ -501,6 +501,15 @@ nohup python -u protomotions/train_agent.py \
   --num-envs 6144 --batch-size 24576 --ngpu 1 \
   --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
   --wandb-group hhi_wide_150motion_128shape_discover_historical_lookahead > /tmp/hhi_wide_150motion_128shape_discover_historical_lookahead.log 2>&1 &
+
+nohup python -u protomotions/train_agent.py \
+  --robot-name smpl_mor --simulator isaacgym \
+  --experiment-path examples/experiments/mimic/mlp_wide_discover_window_match.py \
+  --experiment-name hhi_wide_150motion_128shape_discover_window_match \
+  --motion-file /workspace/motion_cache/small150_128shape.pt \
+  --num-envs 6144 --batch-size 24576 --ngpu 1 \
+  --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+  --wandb-group hhi_wide_150motion_128shape_discover_window_match > /tmp/hhi_wide_150motion_128shape_discover_window_match.log 2>&1 &
 ----
 
 

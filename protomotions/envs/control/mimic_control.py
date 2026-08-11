@@ -279,11 +279,15 @@ class MimicControl(ControlComponent):
 
             # Diagnostics: is the window absorbing small noise (offsets near 0) or
             # systematically pinned at the boundary (window too small / mechanism
-            # being exploited)? Logged only when the window is active.
-            self.env.extras["mimic/window_offset_steps"] = (best_idx - back).float()
-            self.env.extras["mimic/window_at_bound"] = (
-                (best_idx == 0) | (best_idx == window_size - 1)
-            ).float()
+            # being exploited)? Logged only when the window is active. `env.extras`
+            # only exists from `step()` onward (reset there each call) -- populate_context
+            # also runs once during env construction, before any step(), when it doesn't
+            # exist yet -- skip logging in that case, there's nothing to log to.
+            if hasattr(self.env, "extras"):
+                self.env.extras["mimic/window_offset_steps"] = (best_idx - back).float()
+                self.env.extras["mimic/window_at_bound"] = (
+                    (best_idx == 0) | (best_idx == window_size - 1)
+                ).float()
 
         # Populate the mimic view
         ctx.mimic = MimicContext(
