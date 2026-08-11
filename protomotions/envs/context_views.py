@@ -270,6 +270,14 @@ class MimicContext:
     # Reference state (nested – needs NestedField so class-level path proxy works)
     ref_state: "RobotState" = NestedField(RobotStateView)
 
+    # Reference state used specifically for REWARD computation. Identical object to
+    # `ref_state` when no phase-tolerant window is configured (the default for every
+    # existing experiment). When MimicControlConfig.window_back_steps/window_fwd_steps
+    # are set, this is the best local-time match within that window, used ONLY by
+    # reward factories -- `ref_state` itself is unchanged and remains what
+    # termination/evaluator factories read.
+    reward_ref_state: "RobotState" = NestedField(RobotStateView)
+
     # Future state attributes (stored)
     future_pos: Tensor = FieldPath()
     future_rot: Tensor = FieldPath()
@@ -306,6 +314,7 @@ class MimicContext:
         future_dof_vel: Tensor,
         anchor_idx: int,
         ref_lr: Tensor,
+        reward_ref_state: Optional["RobotState"] = None,
     ):
         """Initialize MimicContext with precomputed derived values.
 
@@ -319,9 +328,14 @@ class MimicContext:
             future_dof_vel: Future DOF velocities [num_envs, future_steps, num_dofs].
             anchor_idx: Index of anchor body for computing anchor-relative values.
             ref_lr: Reference DOF in local rotation format for DOF tracking rewards.
+            reward_ref_state: Reference state used by reward factories. Defaults to
+                `ref_state` when not provided (i.e. no phase-tolerant window configured).
         """
         # Store direct values
         self.ref_state = ref_state
+        self.reward_ref_state = (
+            reward_ref_state if reward_ref_state is not None else ref_state
+        )
         self.future_pos = future_pos
         self.future_rot = future_rot
         self.future_vel = future_vel

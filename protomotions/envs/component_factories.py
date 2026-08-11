@@ -481,7 +481,7 @@ def gt_rew_factory(
         compute_func=compute_gt_rew,
         dynamic_vars={
             "current_rigid_body_pos": EnvContext.current.rigid_body_pos,
-            "ref_rigid_body_pos": EnvContext.mimic.ref_state.rigid_body_pos,
+            "ref_rigid_body_pos": EnvContext.mimic.reward_ref_state.rigid_body_pos,
         },
         static_params={
             "weight": weight,
@@ -506,7 +506,7 @@ def gr_rew_factory(weight: float = 0.3, coefficient: float = -5.0) -> MdpCompone
         compute_func=compute_gr_rew,
         dynamic_vars={
             "current_rigid_body_rot": EnvContext.current.rigid_body_rot,
-            "ref_rigid_body_rot": EnvContext.mimic.ref_state.rigid_body_rot,
+            "ref_rigid_body_rot": EnvContext.mimic.reward_ref_state.rigid_body_rot,
         },
         static_params={"weight": weight, "coefficient": coefficient},
     )
@@ -528,7 +528,7 @@ def gv_rew_factory(weight: float = 0.1, coefficient: float = -0.5) -> MdpCompone
         compute_func=compute_gv_rew,
         dynamic_vars={
             "current_rigid_body_vel": EnvContext.current.rigid_body_vel,
-            "ref_rigid_body_vel": EnvContext.mimic.ref_state.rigid_body_vel,
+            "ref_rigid_body_vel": EnvContext.mimic.reward_ref_state.rigid_body_vel,
         },
         static_params={"weight": weight, "coefficient": coefficient},
     )
@@ -550,7 +550,7 @@ def gav_rew_factory(weight: float = 0.1, coefficient: float = -0.1) -> MdpCompon
         compute_func=compute_gav_rew,
         dynamic_vars={
             "current_rigid_body_ang_vel": EnvContext.current.rigid_body_ang_vel,
-            "ref_rigid_body_ang_vel": EnvContext.mimic.ref_state.rigid_body_ang_vel,
+            "ref_rigid_body_ang_vel": EnvContext.mimic.reward_ref_state.rigid_body_ang_vel,
         },
         static_params={"weight": weight, "coefficient": coefficient},
     )
@@ -572,7 +572,7 @@ def rh_rew_factory(weight: float = 0.2, coefficient: float = -100.0) -> MdpCompo
         compute_func=compute_rh_rew,
         dynamic_vars={
             "current_root_height": EnvContext.current.root_height,
-            "ref_rigid_body_pos": EnvContext.mimic.ref_state.rigid_body_pos,
+            "ref_rigid_body_pos": EnvContext.mimic.reward_ref_state.rigid_body_pos,
         },
         static_params={"weight": weight, "coefficient": coefficient},
     )

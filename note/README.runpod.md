@@ -508,17 +508,12 @@ nohup python -u protomotions/train_agent.py \
 python tools/analyze_shape_failure_correlation.py --results-dir /workspace/ProtoMotions/results/hhi_wide_150motion_128shape_seggain --motion-file /workspace/motion_cache/small150_128shape.pt --output /workspace/ProtoMotions/results/hhi_wide_150motion_128shape_seggain/failure_correlation_analysis.txt
 
 python tools/select_visualization_clips.py \
-  --results-dir results/hhi_wide_150motion_128shape_discover_lookahead \
-  --motion-file /workspace/motion_cache/small150_128shape.pt \
-  --checkpoint results/hhi_wide_150motion_128shape_discover_lookahead/last.ckpt \
-  --script-output results/hhi_wide_150motion_128shape_discover_lookahead/render_visualize.sh
-
-python tools/select_visualization_clips.py \
   --results-dir results/hhi_wide_150motion_128shape_discover_historical_lookahead \
   --motion-file /workspace/motion_cache/small150_128shape.pt \
-  --checkpoint results/hhi_wide_150motion_128shape_discover_historical_lookahead/last.ckpt \
+  --checkpoint results/hhi_wide_150motion_128shape_discover_historical_lookahead/score_based.ckpt \
   --script-output results/hhi_wide_150motion_128shape_discover_historical_lookahead/render_visualize.sh
 
+bash results/hhi_wide_150motion_128shape_discover_historical_lookahead/render_visualize.sh
 -----
 
 
@@ -659,3 +654,5 @@ sudo apt-get install -y nvidia-container-toolkit
 
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
+
+codex resume 019ff1f9-8219-7931-a78c-8625ce2d843e

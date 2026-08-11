@@ -36,6 +36,10 @@ from protomotions.simulator.base_simulator.config import (
     VisualizationMarkerConfig,
     MarkerState,
 )
+from protomotions.simulator.base_simulator.simulator_state import (
+    RobotState,
+    StateConversion,
+)
 
 if TYPE_CHECKING:
     from protomotions.envs.base_env.env import BaseEnv
@@ -50,11 +54,21 @@ class MimicControlConfig(ControlComponentConfig):
         future_steps: Future reference poses to provide in context. If int N,
             provides N consecutive steps (1 to N). If list, provides specific step
             indices (e.g., [1, 3, 5, 9, 15] for non-uniform sampling).
+        window_back_steps: Steps backward (in units of env_dt) the REWARD-computation
+            window may search for a phase-tolerant match. 0 (default) = no window;
+            reward uses the exact nominal frame, identical to prior behavior.
+            Termination and evaluator components always use the exact nominal frame
+            regardless of this setting -- only reward factories that bind to
+            `EnvContext.mimic.reward_ref_state` are affected.
+        window_fwd_steps: Steps forward (in units of env_dt) the REWARD-computation
+            window may search. 0 (default) = no forward search.
     """
     _target_: str = "protomotions.envs.control.mimic_control.MimicControl"
-    
+
     bootstrap_on_episode_end: bool = True
     future_steps: Union[int, List[int]] = 1
+    window_back_steps: int = 0
+    window_fwd_steps: int = 0
 
 
 class MimicControl(ControlComponent):
@@ -188,10 +202,93 @@ class MimicControl(ControlComponent):
         
         hinge_axes_map = self.env.robot_config.kinematic_info.hinge_axes_map
         ref_lr = dof_to_local(ref_state.dof_pos, hinge_axes_map, True)
-        
+
+        # Reward-computation reference: exact nominal frame by default, or a
+        # phase-tolerant best local match within [-window_back_steps, +window_fwd_steps]
+        # when configured. Termination/evaluator components always read `ref_state`
+        # above, unaffected by this -- only reward factories bound to
+        # `reward_ref_state` see the windowed match.
+        back = self.config.window_back_steps
+        fwd = self.config.window_fwd_steps
+        if back == 0 and fwd == 0:
+            reward_ref_state = ref_state
+        else:
+            window_step_indices = list(range(-back, fwd + 1))
+            window_size = len(window_step_indices)
+
+            window_offsets = dt * torch.tensor(
+                window_step_indices, device=device, dtype=torch.float32
+            )
+            candidate_times = motion_times.unsqueeze(-1) + window_offsets  # [envs, W]
+            candidate_times = torch.clamp(candidate_times, min=0.0)
+            candidate_times = torch.minimum(
+                candidate_times, motion_lengths.unsqueeze(-1)
+            )
+
+            flat_motion_ids_w = motion_ids.unsqueeze(-1).expand(
+                num_envs, window_size
+            ).reshape(-1)
+            flat_candidate_times = candidate_times.reshape(-1)
+
+            candidate_state = self.env.motion_lib.get_motion_state(
+                flat_motion_ids_w, flat_candidate_times
+            )
+
+            candidate_pos = candidate_state.rigid_body_pos.view(
+                num_envs, window_size, num_bodies, 3
+            ).clone()
+            candidate_pos += offset.unsqueeze(1)  # same terrain-correction offset as future_pos
+            candidate_rot = candidate_state.rigid_body_rot.view(
+                num_envs, window_size, num_bodies, 4
+            )
+            candidate_vel = candidate_state.rigid_body_vel.view(
+                num_envs, window_size, num_bodies, 3
+            )
+            candidate_ang_vel = candidate_state.rigid_body_ang_vel.view(
+                num_envs, window_size, num_bodies, 3
+            )
+            candidate_dof_pos = candidate_state.dof_pos.view(
+                num_envs, window_size, num_dofs
+            )
+            candidate_dof_vel = candidate_state.dof_vel.view(
+                num_envs, window_size, num_dofs
+            )
+
+            # Best local match = lowest whole-pose mean body-position error, the same
+            # metric shape backing gt_error_factory/eval success criteria -- keeps
+            # "which frame counts as matched" consistent with what the eval yardstick
+            # measures.
+            current_pos = ctx.current.rigid_body_pos  # [envs, num_bodies, 3]
+            per_candidate_err = (
+                (candidate_pos - current_pos.unsqueeze(1)).pow(2).sum(-1).sqrt().mean(-1)
+            )  # [envs, W]
+            best_idx = per_candidate_err.argmin(dim=1)  # [envs]
+
+            env_arange = torch.arange(num_envs, device=device)
+            reward_ref_state = RobotState.from_dict(
+                {
+                    "rigid_body_pos": candidate_pos[env_arange, best_idx],
+                    "rigid_body_rot": candidate_rot[env_arange, best_idx],
+                    "rigid_body_vel": candidate_vel[env_arange, best_idx],
+                    "rigid_body_ang_vel": candidate_ang_vel[env_arange, best_idx],
+                    "dof_pos": candidate_dof_pos[env_arange, best_idx],
+                    "dof_vel": candidate_dof_vel[env_arange, best_idx],
+                },
+                state_conversion=StateConversion.COMMON,
+            )
+
+            # Diagnostics: is the window absorbing small noise (offsets near 0) or
+            # systematically pinned at the boundary (window too small / mechanism
+            # being exploited)? Logged only when the window is active.
+            self.env.extras["mimic/window_offset_steps"] = (best_idx - back).float()
+            self.env.extras["mimic/window_at_bound"] = (
+                (best_idx == 0) | (best_idx == window_size - 1)
+            ).float()
+
         # Populate the mimic view
         ctx.mimic = MimicContext(
             ref_state=ref_state,
+            reward_ref_state=reward_ref_state,
             future_pos=future_pos,
             future_rot=future_rot,
             future_vel=future_vel,
