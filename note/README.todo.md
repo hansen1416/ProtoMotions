@@ -156,3 +156,11 @@ against the 1024×128 pilot dataset if needed for ablation comparison against St
   accumulates more meters of error for identical skill, making it more likely to hit the 0.5m termination and less likely to
   pass the 0.3m/0.5m success test — pure geometry bias, not policy quality. This alone predicts exactly the signature you'd
   expect if shape were the bottleneck: large/tall shapes systematically failing more, independent of skill.
+
+
+------
+
+1. find the overlapped failed motions from all 150motions trainings, build a small, difficult dataset
+2. exam training process from official portomotions closely, they can imitate those difficult motions
+3. try everything to imitate these difficult motions.
+4. if even with bigger NN, carefully desgined training process, we still can't fit on the difficult motions, build converging evidence that they are not reproducible under our simulator's physical assumptions

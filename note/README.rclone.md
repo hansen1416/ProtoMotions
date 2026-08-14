@@ -91,14 +91,13 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
     --multi-thread-chunk-size=128M \
     --progress
 
-
-rclone copy r2:proto-data/videos/150motion_discover_historical_lookahead/ /home/hlz/Downloads/0809 \
+rclone copy r2:proto-data/ckpt/hhi_wide_150motion_128shape_discover_explore.zip ./results/ \
     --transfers=2 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress
 
-rclone copy ./tmp r2:proto-data/videos/150motion_discover_historical_lookahead/ \
+rclone copy ./tmp r2:proto-data/ckpt/ \
     --transfers=1 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
@@ -123,4 +122,7 @@ rsync -avz -e "ssh -i ~/.ssh/id_ed25519" \
     /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/diff_key_joint_errors.py \
     jx5oigi3zbipsh-64411958@ssh.runpod.io:/workspace/ProtoMotions/results/hhi_moe_20946_2shape/
 
+
+
+claude --resume 6babb982-763f-498c-80f1-70f8913dfa54
     

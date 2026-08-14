@@ -5181,3 +5181,130 @@ first:
    vs. limb-pose control) would only be worth it after 1-3 are exhausted.
 
 Not committed to any of these yet — waiting on `lookahead`/`historical_lookahead` results first.
+
+## 55. `discover_window_match` Null Result — Revised Plan for the Hard-Clip Tail (2026-08-14)
+
+`discover_window_match` (bounded local-window DTW-style reward matching, §54 area — phase-tolerant
+best-match reward against a `[-4, +1]` step window instead of frame-exact `motion_times`) did not
+outperform `discover`. That rules out a third independent hypothesis for the ~75-80% plateau:
+actuator saturation (§52, torque-replay), information availability (`historical`/`lookahead`/
+`historical_lookahead`), and now phase misalignment. Revised plan for the remaining hard-clip tail:
+
+1. **Freeze a stricter hard-clip set.** Extend `tools/analyse_failed_clip_overlap.py`'s run list
+   beyond its current `hhi_1024_motion`/`hhi_1024_transfer`/`hhi_phy_1024_transfer` scope to include
+   the full `discover` lineage (`discover`, `_sharpen`, `_explore`, `_historical`, `_lookahead`,
+   `_historical_lookahead`, `_window_match`) and take the intersection over all seven. Freeze this
+   as a fixed file so every subsequent experiment reports against the same yardstick rather than a
+   shifting one.
+2. **Isolate HHI-stack confound before trying more levers.** `feature/hhi` vs. `origin/main` diff
+   shows `mlp.py` (core experiment definition) differs by only 8 lines — nearly all HHI-specific
+   complexity lives in the agent/evaluator/curriculum layer (`film_mlp.py`, `moe_mlp.py`,
+   `hhi_fault_evaluator.py`, `global_clip_pool_rebuild.py`), not the base imitation reward/PPO loop.
+   Sharper test than "read their code": take the frozen hard-clip set's neutral/near-neutral-beta
+   versions and run vanilla upstream `mlp.py` (single shape, no curriculum, no MoE/FiLM) on just
+   that small set. If upstream also fails → difficulty is in the clips/simulator, supports item 4.
+   If upstream succeeds → the multi-shape curriculum/architecture stack is itself degrading
+   hard-clip performance; next levers should target that stack, not more reward/observation tweaks.
+   This gates item 3 rather than running in parallel with it.
+3. **If item 2 implicates the HHI stack (or is inconclusive), resume queued single-variable
+   levers** against the frozen hard-clip set only (cheap iteration): PD bandwidth/rate-of-change
+   check (re-analyze existing torque-replay logs, not a new run), per-body rotation-error breakdown
+   (root/heading error diluted by limb-average in `gr_rew`?), then curve-shape/time-warp-tolerant
+   reward (§23, heavier, reward-hacking risk) only if the cheaper two don't explain enough.
+4. **Converging-evidence bar for "not reproducible under this simulator's assumptions."** Requires
+   the conjunction, not any single failed attempt: actuator saturation ruled out + information
+   availability ruled out (both directions) + phase alignment ruled out + PD-bandwidth and
+   root-heading-dilution checked + confirmed not an HHI-stack artifact (item 2). That combination is
+   what makes a negative result defensible rather than "ran out of ideas."
+
+## 56. Tooling for §55 Item 1: Freezing the Hard-Clip Tail (2026-08-14)
+
+Two scripts implement §55 item 1 (freeze a stricter hard-clip set as the intersection of
+persistent failures across the whole `discover` lever lineage). Documented here for later
+inclusion in the thesis implementation chapter, alongside the rest of the failure-diagnosis
+tooling (`check_replay_torque_saturation.py`, `analyze_shape_failure_correlation.py`).
+
+### Why intersection, and why at the clip level rather than the (clip, shape) level
+
+A single run's own `persistent_failures.txt`/`failed_motions/` log answers "what does this one
+policy still fail on," which is exactly the wrong question for isolating a lever-independent hard
+tail: a clip that only `discover` itself fails on could just as easily be `discover`'s own
+weakness (fixed by the next lever), not evidence the clip is intrinsically hard. Requiring
+persistence across every independent lever in the lineage — reward-coefficient reshaping
+(`sharpen`), PPO exploration (`explore`), backward and forward observation context (`historical`,
+`lookahead`, `historical_lookahead`), and phase-tolerant reward matching (`window_match`) — is a
+much stronger claim: a clip in the intersection resisted every distinct mechanism tried so far,
+which is the operational definition of "hard" this stage of the plan needs.
+
+Grouping by clip identity rather than by the specific (clip, shape) motion id follows directly
+from the near-zero shape-extremity correlation already established
+(`tools/analyze_shape_failure_correlation.py`, §46-ish material: Pearson r≈0.003 between a shape's
+beta L2-norm and its failure count) — shape essentially doesn't predict failure, so collapsing
+128 shape variants of a clip into "did any variant fail this epoch" discards a dimension that
+isn't carrying the signal, and keeps the resulting hard set small enough to be a fast-iteration
+dataset rather than a second copy of the full corpus.
+
+### `tools/find_persistent_hard_clips.py`
+
+For each run in a given list, reads every `results/<run>/failed_motions/failed_motions_epoch_*_
+rank_*.txt` file. Motion ids inside are already global (`MimicEvaluator._save_failed_motions`
+maps local eval-subset indices to global ids before writing), so — unlike the older
+`tools/analyse_failed_clip_overlap.py`, written for a different, 4-GPU-sharded 1024-clip dataset
+with a clip-major per-rank id layout — no rank-offset arithmetic is needed for this single-rank,
+150-clip/128-shape corpus. A `MotionLib` instance loaded from the same `.pt` file every lineage
+run trained on provides `build_clip_id_to_motion_ids()`, inverted once into a `motion_id ->
+clip_id` lookup, so each epoch's failed motion ids collapse to a set of failed clip ids.
+
+Per run, a clip counts as "persistent" if it failed in at least a configurable fraction
+(default 50%) of the last `window_epochs` (default 10) evaluation epochs — the same
+window/threshold shape `analyse_failed_clip_overlap.py` used for the older dataset, kept as the
+established convention rather than re-derived. The frozen hard-clip set is the intersection of
+the persistent sets across every run supplied. Runs whose `failed_motions/` directory isn't
+present (e.g. lever variants not yet synced from the pod) are skipped with a warning rather than
+failing the whole computation, so the script can be run incrementally as more runs are synced.
+Output: a markdown report (per-run persistent-clip counts + the final intersection) and a
+`.clip_ids.txt` sidecar — one clip id per line — meant to feed directly into the second script.
+
+Local smoke test (2-run intersection, `discover` ∩ `discover_sharpen`, the only two lineage runs
+synced locally as of this writing) produced 34 clips and completed without error, confirming the
+motion-id-to-clip-id mapping and window/threshold logic before running the full 7-way
+intersection on the pod, where every lineage run's `failed_motions/` directory actually lives.
+
+### `tools/build_small_multishape_subset.py` — added `--clip-ids-file` mode
+
+This script already existed, built for a different purpose: `small150_128shape.pt` itself (the
+corpus the entire `discover` lineage trains on) was produced by it, sampling clips
+difficulty-stratified — evenly spaced across `valid_ids_sorted_by_difficulty.txt` — so the subset
+spans the full easy-to-hard range in the same proportion as the full ~20,946-clip corpus, rather
+than being an easy slice. That sampling mode, and the R2 download/concatenation pipeline behind
+it (`rclone`-fetch each selected clip's per-clip file from `r2:proto-data/hhi_stage2_per_clip/`,
+concatenate via `GlobalClipPool._concat_clip_dicts`), stay unchanged.
+
+Added a second, mutually-exclusive selection mode: `--clip-ids-file` reads a fixed clip id list
+(one per line — exactly `find_persistent_hard_clips.py`'s sidecar format) instead of sampling by
+difficulty rank at all. Downstream of clip selection, both modes share the identical
+download/concatenate/save path — the only change is what determines the list of `selected`
+clip ids, so the two selection strategies (representative easy-to-hard spread vs. a specific
+known-hard tail) can't drift apart in how the resulting `.pt` file is actually assembled.
+
+### Pod command sequence (not yet run — needs rclone + R2 credentials, `note/README.rclone.md`)
+
+```bash
+python tools/find_persistent_hard_clips.py \
+    --motion-file /workspace/motion_cache/small150_128shape.pt \
+    --runs hhi_wide_150motion_128shape_discover \
+           hhi_wide_150motion_128shape_discover_sharpen \
+           hhi_wide_150motion_128shape_discover_explore \
+           hhi_wide_150motion_128shape_discover_historical \
+           hhi_wide_150motion_128shape_discover_lookahead \
+           hhi_wide_150motion_128shape_discover_historical_lookahead \
+           hhi_wide_150motion_128shape_discover_window_match \
+    --output results/analysis/hard_clips_discover_lineage.md
+
+python tools/build_small_multishape_subset.py \
+    --clip-ids-file results/analysis/hard_clips_discover_lineage.clip_ids.txt \
+    --output /workspace/motion_cache/hard_clips_discover_lineage.pt
+```
+
+Actual frozen-set size and content not yet known — the 34-clip local smoke-test number is a
+2-run partial intersection, not the real 7-run answer.

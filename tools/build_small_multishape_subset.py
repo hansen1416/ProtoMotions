@@ -27,16 +27,30 @@ confound -- so `mlp_wide.py` (unmodified, same architecture as the from-scratch 
 iterated on quickly and the "can this architecture clear 95%+ once GPU-hours-per-clip is no longer
 scarce" question gets a fast, clean answer.
 
-Clips are NOT chosen randomly or as "the easiest N" -- they're stratified evenly across
-data/preprocessing/valid_ids_sorted_by_difficulty.txt (the same file GlobalClipPoolConfig uses to
-seed its priority scoreboard) so the subset spans the full easy->hard range in the same proportion
-as the full dataset, and a result on it says something about the real bottleneck rather than about
-an easy slice.
+Two selection modes:
+
+1. Difficulty-stratified (default, `--num-clips`): clips are NOT chosen randomly or as "the
+   easiest N" -- they're stratified evenly across
+   data/preprocessing/valid_ids_sorted_by_difficulty.txt (the same file GlobalClipPoolConfig uses
+   to seed its priority scoreboard) so the subset spans the full easy->hard range in the same
+   proportion as the full dataset, and a result on it says something about the real bottleneck
+   rather than about an easy slice. This is how small150_128shape.pt itself was built.
+
+2. Fixed clip-id list (`--clip-ids-file`): builds a subset out of an explicit, pre-selected list
+   of clip_ids instead of sampling -- e.g. the frozen hard-clip intersection produced by
+   tools/find_persistent_hard_clips.py (note/README.note.md §55 item 1). Use this to materialize
+   a small, difficulty-frozen dataset for fast iteration against a specific known-hard tail,
+   rather than a representative easy->hard spread.
 
 Usage (run on the pod -- needs rclone + R2 credentials, see note/README.rclone.md):
     python tools/build_small_multishape_subset.py \\
         --num-clips 150 \\
         --output /workspace/motion_cache/small150_128shape.pt
+
+    # or, from a frozen hard-clip list:
+    python tools/build_small_multishape_subset.py \\
+        --clip-ids-file results/analysis/hard_clips_discover_lineage.clip_ids.txt \\
+        --output /workspace/motion_cache/hard_clips_discover_lineage.pt
 
 Then train with the existing (unmodified) mlp_wide.py:
     python protomotions/train_agent.py \\
@@ -131,11 +145,23 @@ def download_clips(r2_source: str, remote_names: List[str], cache_dir: Path) -> 
         Path(list_path).unlink(missing_ok=True)
 
 
+def load_fixed_clip_ids(clip_ids_file: str) -> List[str]:
+    """One clip_id per line (e.g. the sidecar written by tools/find_persistent_hard_clips.py)."""
+    with open(clip_ids_file, "r") as f:
+        return [line.strip() for line in f if line.strip()]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--num-clips", type=int, default=150)
     parser.add_argument(
         "--difficulty-file", default="data/preprocessing/valid_ids_sorted_by_difficulty.txt"
+    )
+    parser.add_argument(
+        "--clip-ids-file",
+        default=None,
+        help="If given, use this fixed clip_id list instead of difficulty-stratified sampling "
+        "(--num-clips/--difficulty-file are ignored). One clip_id per line.",
     )
     parser.add_argument("--r2-source", default="r2:proto-data/hhi_stage2_per_clip/")
     parser.add_argument("--manifest-name", default="clip_manifest.jsonl")
@@ -146,11 +172,15 @@ def main():
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    sorted_clip_ids = load_difficulty_sorted_clip_ids(args.difficulty_file)
-    print(f"Loaded {len(sorted_clip_ids)} difficulty-sorted clip_ids from {args.difficulty_file}")
+    if args.clip_ids_file is not None:
+        selected = load_fixed_clip_ids(args.clip_ids_file)
+        print(f"Loaded {len(selected)} fixed clip_ids from {args.clip_ids_file}")
+    else:
+        sorted_clip_ids = load_difficulty_sorted_clip_ids(args.difficulty_file)
+        print(f"Loaded {len(sorted_clip_ids)} difficulty-sorted clip_ids from {args.difficulty_file}")
 
-    selected = stratified_sample(sorted_clip_ids, args.num_clips)
-    print(f"Selected {len(selected)} clips, stratified evenly across the difficulty range")
+        selected = stratified_sample(sorted_clip_ids, args.num_clips)
+        print(f"Selected {len(selected)} clips, stratified evenly across the difficulty range")
 
     clip_id_to_remote_name = download_manifest(args.r2_source, args.manifest_name, cache_dir)
     missing_from_manifest = [cid for cid in selected if cid not in clip_id_to_remote_name]
