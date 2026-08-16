@@ -5354,3 +5354,45 @@ over all 24 bodies) dilutes precision on clips where the task content lives in a
 rotation-error-breakdown lever, now looking like a likely root cause rather than a minor check.
 Next step (not yet built): a per-frame tracking-error replay diagnostic for these two clips to
 confirm error concentrates in the task-relevant joints before redesigning around this.
+
+## 59. Worst-K Reward Variant: Early Results Negative, Runs Stopped (2026-08-16)
+
+Tested the §58 dilution hypothesis directly: `mlp_wide_discover_worstk.py` blends the uniform
+24-body mean error with the mean error of the `worst_k=4` worst-tracked bodies
+(`worst_k_alpha=0.5`) in `gt_rew`/`gr_rew` only (`mean_squared_error_exp`/`rotation_error_exp` in
+`protomotions/envs/rewards/base.py`). Launched two runs in parallel: same 150-clip/128-shape
+corpus as the rest of the lineage (`hhi_wide_150motion_128shape_discover_worstk`), and — per user
+request, combining this with the §57 hard-13 set rather than isolating it — the 13-clip hard set
+(`hhi_wide_13clip_128shape_discover_worstk`).
+
+Pulled real numbers via the wandb API (`api.wandb.ai`, local `~/.netrc` creds) rather than
+guessing from the dashboard:
+
+| step | baseline `discover` (150-clip) | worst-k (150-clip) |
+|---|---|---|
+| 200 | 32.0% | 28.0% |
+| 400 | 30.0% | 36.0% |
+| 600 | 36.0% | 35.3% |
+| 800 | **43.3%** | **33.3%** |
+
+Baseline went on to climb steadily to a ~77% plateau by step 10800. Worst-k was already
+noticeably behind baseline's trajectory at step 800, not noise. The hard-13 + worst-k run
+(7.7% → 15.4% → 7.7% over steps 200-600) is uninterpretable on its own: only 13 clips means each
+swing is 1 clip (7.7 points), and there is no plain-`discover`-on-hard-13 baseline (Part A of the
+§56 plan was never actually launched) to separate "worst-k hurt" from "this dataset is just hard
+from scratch" — two untested variables combined into one run, exactly what the original plan's
+"isolate variables first" note was meant to avoid.
+
+User stopped both runs after ~800-900 steps given the early lag. Read: this doesn't cleanly kill
+the §58 dilution hypothesis, because a negative result here is consistent with two different
+causes that the aggregate metric can't distinguish — (1) the hypothesis is wrong, precision on
+worst-tracked bodies isn't actually the bottleneck, or (2) `alpha=0.5` is too harsh for cold-start
+bootstrapping, and/or `torch.topk`'s per-step reselection of "worst" bodies makes the reward
+target less stationary (no body-identity continuity across steps) than the uniform-mean version,
+which is harder for PPO's value function to fit independent of whether the underlying gradient
+direction is right. Neither retried at a lower `alpha` nor isolated from the hard-13 dataset
+change before stopping, so which of the two explanations is correct is still open. Code
+(`worst_k`/`worst_k_alpha` params on `mean_squared_error_exp`/`rotation_error_exp`,
+`gt_rew_factory`/`gr_rew_factory`, `mimic_tracking_rewards_factory`, and the new
+`mlp_wide_discover_worstk.py` experiment file) is left in place, unused, in case a lower-alpha
+retry is worth revisiting later.
