@@ -13,15 +13,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Freeze the hard-clip tail for the `discover` lever lineage: intersect the persistently-failing
-clips across every lever tried on the 150motion/128shape corpus (see note/README.note.md §55).
+Freeze the hard-clip tail for the `discover` lever lineage: find the persistently-failing clips
+shared across every lever tried on the 150motion/128shape corpus (see note/README.note.md §55).
 
 Each of `discover`, `_sharpen`, `_explore`, `_historical`, `_lookahead`, `_historical_lookahead`,
 `_window_match` ruled out one independent hypothesis for the ~75-80% plateau (reward shaping,
 PPO exploration, backward/forward observation context, phase alignment) without moving it. A
-clip only belongs in the frozen hard set if it persistently failed under EVERY one of them --
-that is a much stricter bar than any single run's own failure list, and it's the set the next
-round of levers (see plan item 3) should be scored against so iteration is fast and comparable.
+clip belongs in the frozen hard set if it persistently failed under at least `--min-runs` of
+them (default: all runs, i.e. strict AND) -- a much stricter bar than any single run's own
+failure list, and the set the next round of levers (see plan item 3) should be scored against so
+iteration is fast and comparable.
+
+Strict AND over many independently-noisy runs compounds false negatives: a genuinely hard clip
+can miss one run's persistence bar by ordinary training variance and get dropped from a full-AND
+intersection even though it's structurally hard. Running the 7-lever full-AND for real produced
+only 13/150 clips (8.7%) -- a plausible base rate on its own (it matches the ~8.7% "fails all
+epochs" rate independently found on the much larger 20,946-clip neutral corpus, a reassuring
+cross-check), but still worth checking whether the strictness itself is discarding real signal.
+The report this script writes always includes a size-vs-vote-threshold table (full-AND down to
+bare majority) so that tradeoff is visible before committing to one set size via `--min-runs`.
 
 Motion ids in failed_motions/ logs are already global (MimicEvaluator._save_failed_motions maps
 local eval-subset indices to global ids before writing -- see mimic_evaluator.py:230-239/261-263),
@@ -48,11 +58,12 @@ variants live on the pod only):
         --output results/analysis/hard_clips_discover_lineage.md
 
 Writes two files:
-  --output                              human-readable per-run + intersection report
-  <output>.clip_ids.txt (sidecar)       the frozen clip_id list, one per line -- feed this
-                                         straight into tools/build_small_multishape_subset.py's
-                                         --clip-ids-file to materialize the actual small
-                                         hard-motion dataset.
+  --output                              human-readable per-run + vote-threshold-table + frozen-
+                                         set report
+  <output>.clip_ids.txt (sidecar)       the frozen clip_id list (at --min-runs), one per line --
+                                         feed this straight into
+                                         tools/build_small_multishape_subset.py's --clip-ids-file
+                                         to materialize the actual small hard-motion dataset.
 """
 
 from __future__ import annotations
@@ -128,7 +139,18 @@ def main():
         type=float,
         default=0.5,
         help="Per-run 'persistent' bar: fraction of the last --window-epochs eval epochs a clip "
-        "must fail in. The final frozen set additionally requires this in EVERY run listed.",
+        "must fail in.",
+    )
+    parser.add_argument(
+        "--min-runs",
+        type=int,
+        default=None,
+        help="Clip must be per-run-persistent in at least this many of the runs listed to enter "
+        "the frozen set (default: all runs, i.e. strict intersection). A strict AND over many "
+        "independently-noisy runs compounds false negatives -- a genuinely hard clip can miss "
+        "the persistence bar in any one run by ordinary training variance and get dropped. "
+        "Lowering this trades strictness for recall/size; the report always shows counts at "
+        "every threshold from majority to full-AND so this can be picked after seeing the table.",
     )
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
@@ -174,7 +196,19 @@ def main():
     if not per_run_persistent:
         raise SystemExit("No runs with failed_motions/ data found -- nothing to intersect.")
 
-    intersection = set.intersection(*per_run_persistent.values())
+    n_runs = len(per_run_persistent)
+    min_runs = args.min_runs if args.min_runs is not None else n_runs
+    if not (1 <= min_runs <= n_runs):
+        raise SystemExit(f"--min-runs must be in [1, {n_runs}], got {min_runs}")
+
+    # Vote count per clip across the runs actually present, then threshold at every level from
+    # majority to full-AND so the report shows the size/strictness tradeoff, not just one point.
+    vote_count: Dict[str, int] = defaultdict(int)
+    for persistent in per_run_persistent.values():
+        for clip_id in persistent:
+            vote_count[clip_id] += 1
+
+    frozen_set = {clip_id for clip_id, votes in vote_count.items() if votes >= min_runs}
 
     lines = []
     lines.append("# Frozen Hard-Clip Set — `discover` Lever Lineage")
@@ -184,9 +218,26 @@ def main():
         f">= {args.threshold_fraction:.0%} of those epochs."
     )
     lines.append(
-        f"A clip is in the frozen set only if it is persistent in ALL {len(per_run_persistent)} "
-        "run(s) below."
+        f"A clip is in the frozen set if it is persistent in >= {min_runs} of "
+        f"{n_runs} run(s) below (--min-runs={min_runs})."
     )
+    lines.append("")
+    lines.append("## Size vs. strictness (vote-count threshold)")
+    lines.append("")
+    lines.append(
+        "A strict AND over many independently-noisy runs compounds false negatives -- a "
+        "genuinely hard clip can miss one run's persistence bar by ordinary training variance "
+        "and get dropped. This table shows how the frozen-set size grows as the vote threshold "
+        "relaxes from full-AND (strictest, highest-confidence) to bare majority (most inclusive)."
+    )
+    lines.append("")
+    lines.append("| Min runs required | Clips |")
+    lines.append("|---|---|")
+    majority = n_runs // 2 + 1
+    for k in range(n_runs, majority - 1, -1):
+        count = sum(1 for v in vote_count.values() if v >= k)
+        marker = "  <- selected" if k == min_runs else ""
+        lines.append(f"| {k}/{n_runs} | {count}{marker} |")
     lines.append("")
     lines.append("## Per-run summary")
     lines.append("")
@@ -200,16 +251,16 @@ def main():
                 f"| {run} | {per_run_latest_epoch[run]} | {len(per_run_persistent[run])} |"
             )
     lines.append("")
-    lines.append(f"## Frozen intersection: {len(intersection)} clips")
+    lines.append(f"## Frozen set (>= {min_runs}/{n_runs}): {len(frozen_set)} clips")
     lines.append("")
     if missing_runs:
         lines.append(
-            "**Note:** the above is a partial intersection over the runs actually present -- "
-            f"{len(missing_runs)} run(s) were missing. Re-run with all runs synced before "
-            "treating this as final."
+            f"**Note:** {len(missing_runs)} run(s) were missing and excluded from voting "
+            "entirely (not counted as either a pass or a fail) -- re-run with all runs synced "
+            "before treating this as final."
         )
         lines.append("")
-    for clip_id in sorted(intersection):
+    for clip_id in sorted(frozen_set):
         lines.append(f"- {clip_id}")
     lines.append("")
 
@@ -221,7 +272,7 @@ def main():
     print(f"\n-> Report written to {out_path}")
 
     sidecar_path = out_path.with_suffix("").with_suffix(".clip_ids.txt")
-    sidecar_path.write_text("\n".join(sorted(intersection)) + ("\n" if intersection else ""))
+    sidecar_path.write_text("\n".join(sorted(frozen_set)) + ("\n" if frozen_set else ""))
     print(f"-> Frozen clip_id list written to {sidecar_path}")
 
 

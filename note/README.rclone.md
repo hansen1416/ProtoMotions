@@ -122,7 +122,13 @@ rsync -avz -e "ssh -i ~/.ssh/id_ed25519" \
     /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/diff_key_joint_errors.py \
     jx5oigi3zbipsh-64411958@ssh.runpod.io:/workspace/ProtoMotions/results/hhi_moe_20946_2shape/
 
-
+python protomotions/record_video_mor.py \
+    --checkpoint results/hhi_wide_150motion_128shape_discover/last.ckpt \
+    --simulator isaacgym \
+    --motion-file /workspace/motion_cache/small150_128shape.pt \
+    --motion-index 16000 --num-envs 8 --same-motion \
+    --compact-spawn-spacing 2.0 \
+    --output results/hhi_wide_150motion_128shape_discover/visualize_videos/M002028_policy_8shapes.mp4
 
 claude --resume 6babb982-763f-498c-80f1-70f8913dfa54
     

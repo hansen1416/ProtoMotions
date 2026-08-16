@@ -5303,8 +5303,54 @@ python tools/find_persistent_hard_clips.py \
 
 python tools/build_small_multishape_subset.py \
     --clip-ids-file results/analysis/hard_clips_discover_lineage.clip_ids.txt \
-    --output /workspace/motion_cache/hard_clips_discover_lineage.pt
+    --output /workspace/small_motion_cache/hard_clips_discover_lineage.pt
 ```
 
 Actual frozen-set size and content not yet known — the 34-clip local smoke-test number is a
 2-run partial intersection, not the real 7-run answer.
+
+## 57. Full 7-Run Intersection: 13 Clips — Added Majority-Vote Threshold (2026-08-14)
+
+Ran `find_persistent_hard_clips.py` on the pod with all 7 lineage runs synced. Result: 13/150
+clips (8.7%) — `003689, 010471, 010504, 014351, 014400, M000919, M002028, M003197, M003804,
+M007634, M008156, M009489, M011241`.
+
+Two observations, weighed against each other:
+
+1. **Plausible as a real base rate.** 8.7% matches, almost exactly, the independently-derived
+   "fails all epochs" rate already found on the much larger 20,946-clip neutral corpus
+   (`failed_motions_20946_neutral.md`) — a different scale, different lever set, same fraction.
+   Reassuring cross-check that the intersection isn't an artifact of over-filtering.
+2. **Strict-AND-over-7-runs risk.** Requiring persistence in every one of 7 independently-noisy
+   runs compounds false negatives — a clip that's genuinely hard can miss the persistence bar in
+   any single run through ordinary training variance and get dropped from a full intersection
+   even though it should count. 13 clips may therefore undercount the true structurally-hard
+   tail.
+
+Extended `find_persistent_hard_clips.py` with a `--min-runs` threshold (default: all runs, i.e.
+the original strict-AND behavior) and made the report always print a size-vs-vote-count table
+(full-AND down to bare majority) so the strictness/size tradeoff is visible before picking a
+working set, rather than only ever seeing the single strictest number. Also switched
+`build_small_multishape_subset.py`'s new `--clip-ids-file` mode consumer accordingly (no change
+needed there — it just reads whatever clip_id list the sidecar contains).
+
+Decision: keep the 13-clip full-AND set as the high-confidence "gold" tail for the plan item 4
+converging-evidence writeup (it's a strong claim precisely because it's strict). For the actual
+step 3 fast-iteration training/eval set, re-run with `--min-runs` at 6/7 and 5/7 (numbers not
+yet pulled from the vote table) to get a larger, less noise-sensitive working set before building
+the motion `.pt` file.
+
+## 58. Visual Check: None of the 13 Hard Clips Fall (2026-08-14)
+
+Rendered `discover`'s policy on all 13 frozen hard clips across all 128 body shapes
+(`record_video_mor.py --num-envs 128 --same-motion`). None fall — every rollout stays upright and
+physically plausible. So the failure mode is pure tracking-error (position/rotation/velocity vs.
+reference exceeding the eval threshold), not balance loss, which undercuts the §54 control-lag/
+fast-transition framing as the sole explanation: `M002028` ("claps six times") and `M000919` ("one
+step forward") have essentially no dynamics to be too slow for, yet persistently fail the same way.
+Leading hypothesis, not yet verified: whole-body-averaged reward (`gt_rew`/`gr_rew`/etc., averaged
+over all 24 bodies) dilutes precision on clips where the task content lives in a small joint subset
+(hands for clapping, one leg for stepping) — same mechanism as the already-queued per-body
+rotation-error-breakdown lever, now looking like a likely root cause rather than a minor check.
+Next step (not yet built): a per-frame tracking-error replay diagnostic for these two clips to
+confirm error concentrates in the task-relevant joints before redesigning around this.
