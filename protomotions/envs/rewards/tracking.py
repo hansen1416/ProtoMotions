@@ -59,6 +59,8 @@ def compute_gt_rew(
     current_rigid_body_pos: Tensor,
     ref_rigid_body_pos: Tensor,
     coefficient: float = -100.0,
+    worst_k: Optional[int] = None,
+    worst_k_alpha: float = 0.0,
 ) -> Tensor:
     """Position tracking reward (exponential MSE).
 
@@ -66,6 +68,9 @@ def compute_gt_rew(
         current_rigid_body_pos: Current body positions [num_envs, num_bodies, 3].
         ref_rigid_body_pos: Reference body positions [num_envs, num_bodies, 3].
         coefficient: Exponential coefficient for error.
+        worst_k: If set (with worst_k_alpha > 0), blend the whole-body mean error with the
+            mean error of the worst_k worst-tracked bodies. See `mean_squared_error_exp`.
+        worst_k_alpha: Blend weight for the worst-k term (0.0 = unchanged behavior).
 
     Returns:
         Reward tensor [num_envs].
@@ -74,6 +79,8 @@ def compute_gt_rew(
         current_rigid_body_pos,
         ref_rigid_body_pos,
         coefficient,
+        worst_k=worst_k,
+        worst_k_alpha=worst_k_alpha,
     )
 
 
@@ -81,14 +88,19 @@ def compute_gr_rew(
     current_rigid_body_rot: Tensor,
     ref_rigid_body_rot: Tensor,
     coefficient: float = -5.0,
+    worst_k: Optional[int] = None,
+    worst_k_alpha: float = 0.0,
 ) -> Tensor:
     """Rotation tracking reward (exponential quaternion error).
-    
+
     Args:
         current_rigid_body_rot: Current body rotations [num_envs, num_bodies, 4] (w-last).
         ref_rigid_body_rot: Reference body rotations [num_envs, num_bodies, 4] (w-last).
         coefficient: Exponential coefficient for error.
-    
+        worst_k: If set (with worst_k_alpha > 0), blend the whole-body mean error with the
+            mean error of the worst_k worst-tracked bodies. See `rotation_error_exp`.
+        worst_k_alpha: Blend weight for the worst-k term (0.0 = unchanged behavior).
+
     Returns:
         Reward tensor [num_envs].
     """
@@ -96,6 +108,8 @@ def compute_gr_rew(
         current_rigid_body_rot,
         ref_rigid_body_rot,
         coefficient,
+        worst_k=worst_k,
+        worst_k_alpha=worst_k_alpha,
     )
 
 

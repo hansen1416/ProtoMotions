@@ -45,6 +45,8 @@ def mean_squared_error_exp(
     coefficient: float,
     indices: Optional[Tensor] = None,
     mean_before_exp: bool = True,
+    worst_k: Optional[int] = None,
+    worst_k_alpha: float = 0.0,
 ) -> Tensor:
     """Mean squared error with exponential transformation.
 
@@ -57,6 +59,12 @@ def mean_squared_error_exp(
         coefficient: Exponential coefficient (typically negative)
         indices: Optional body indices to subset
         mean_before_exp: If True, mean before exp (more stable)
+        worst_k: If set (with worst_k_alpha > 0), blend the whole-body mean error with the
+            mean error of the worst_k worst-tracked bodies, so a few badly-tracked bodies
+            aren't diluted by many well-tracked ones. No-op unless both worst_k and
+            worst_k_alpha are set. Requires body-dimensioned input (dim == 3).
+        worst_k_alpha: Blend weight for the worst-k term: 0.0 = pure mean (default,
+            unchanged behavior), 1.0 = pure worst-k mean.
 
     Returns:
         Reward [num_envs] in range (0, 1] for negative coefficient
@@ -69,6 +77,11 @@ def mean_squared_error_exp(
 
     if diff_sq.dim() == 3:
         per_body = diff_sq.mean(dim=-1)
+        if worst_k is not None and worst_k_alpha > 0.0:
+            topk_err = per_body.topk(worst_k, dim=-1).values.mean(dim=-1)
+            mean_err = per_body.mean(dim=-1)
+            blended = (1 - worst_k_alpha) * mean_err + worst_k_alpha * topk_err
+            return blended.mul(coefficient).exp()
         if mean_before_exp:
             return per_body.mean(dim=-1).mul(coefficient).exp()
         else:
@@ -85,6 +98,8 @@ def rotation_error_exp(
     coefficient: float,
     indices: Optional[Tensor] = None,
     mean_before_exp: bool = True,
+    worst_k: Optional[int] = None,
+    worst_k_alpha: float = 0.0,
 ) -> Tensor:
     """Quaternion rotation error with exponential transformation.
 
@@ -97,6 +112,12 @@ def rotation_error_exp(
         coefficient: Exponential coefficient (typically negative)
         indices: Optional body indices to subset
         mean_before_exp: If True, mean before exp (more stable)
+        worst_k: If set (with worst_k_alpha > 0), blend the whole-body mean error with the
+            mean error of the worst_k worst-tracked bodies, so a few badly-tracked bodies
+            aren't diluted by many well-tracked ones. No-op unless both worst_k and
+            worst_k_alpha are set.
+        worst_k_alpha: Blend weight for the worst-k term: 0.0 = pure mean (default,
+            unchanged behavior), 1.0 = pure worst-k mean.
 
     Returns:
         Reward [num_envs] in range (0, 1] for negative coefficient
@@ -106,6 +127,12 @@ def rotation_error_exp(
         ref_q = ref_q[:, indices]
 
     angle_diff_sq = quat_angle_diff_norm(q, ref_q, w_last=True)
+
+    if worst_k is not None and worst_k_alpha > 0.0:
+        topk_err = angle_diff_sq.topk(worst_k, dim=-1).values.mean(dim=-1)
+        mean_err = angle_diff_sq.mean(dim=-1)
+        blended = (1 - worst_k_alpha) * mean_err + worst_k_alpha * topk_err
+        return blended.mul(coefficient).exp()
 
     if mean_before_exp:
         return angle_diff_sq.mean(dim=-1).mul(coefficient).exp()

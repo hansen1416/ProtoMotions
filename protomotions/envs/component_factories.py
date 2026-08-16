@@ -465,12 +465,19 @@ def action_smoothness_factory(weight: float = -0.02) -> MdpComponent:
 def gt_rew_factory(
     weight: float = 0.5,
     coefficient: float = -100.0,
+    worst_k: Optional[int] = None,
+    worst_k_alpha: float = 0.0,
 ) -> MdpComponent:
     """Factory for position tracking reward.
 
     Args:
         weight: Reward weight.
         coefficient: Exponential coefficient for error.
+        worst_k: If set (with worst_k_alpha > 0), blend the whole-body mean error with the
+            mean error of the worst_k worst-tracked bodies, so a few badly-tracked bodies
+            (e.g. hands during a clap) aren't diluted by many well-tracked ones. No-op by
+            default.
+        worst_k_alpha: Blend weight for the worst-k term (0.0 = unchanged behavior).
 
     Returns:
         MdpComponent configured for position tracking.
@@ -486,16 +493,26 @@ def gt_rew_factory(
         static_params={
             "weight": weight,
             "coefficient": coefficient,
+            "worst_k": worst_k,
+            "worst_k_alpha": worst_k_alpha,
         },
     )
 
 
-def gr_rew_factory(weight: float = 0.3, coefficient: float = -5.0) -> MdpComponent:
+def gr_rew_factory(
+    weight: float = 0.3,
+    coefficient: float = -5.0,
+    worst_k: Optional[int] = None,
+    worst_k_alpha: float = 0.0,
+) -> MdpComponent:
     """Factory for rotation tracking reward.
 
     Args:
         weight: Reward weight.
         coefficient: Exponential coefficient for error.
+        worst_k: If set (with worst_k_alpha > 0), blend the whole-body mean error with the
+            mean error of the worst_k worst-tracked bodies. No-op by default.
+        worst_k_alpha: Blend weight for the worst-k term (0.0 = unchanged behavior).
 
     Returns:
         MdpComponent configured for rotation tracking.
@@ -508,7 +525,12 @@ def gr_rew_factory(weight: float = 0.3, coefficient: float = -5.0) -> MdpCompone
             "current_rigid_body_rot": EnvContext.current.rigid_body_rot,
             "ref_rigid_body_rot": EnvContext.mimic.reward_ref_state.rigid_body_rot,
         },
-        static_params={"weight": weight, "coefficient": coefficient},
+        static_params={
+            "weight": weight,
+            "coefficient": coefficient,
+            "worst_k": worst_k,
+            "worst_k_alpha": worst_k_alpha,
+        },
     )
 
 
@@ -589,6 +611,10 @@ def mimic_tracking_rewards_factory(
     gv_coef: float = -0.5,
     gav_coef: float = -0.1,
     rh_coef: float = -100.0,
+    gt_worst_k: Optional[int] = None,
+    gt_worst_k_alpha: float = 0.0,
+    gr_worst_k: Optional[int] = None,
+    gr_worst_k_alpha: float = 0.0,
 ) -> Dict[str, MdpComponent]:
     """Factory for standard mimic tracking reward bundle.
 
@@ -605,13 +631,27 @@ def mimic_tracking_rewards_factory(
         gv_coef: Velocity coefficient.
         gav_coef: Angular velocity coefficient.
         rh_coef: Root height coefficient.
+        gt_worst_k: Optional worst-k body count for the position reward (see `gt_rew_factory`).
+        gt_worst_k_alpha: Blend weight for gt's worst-k term (0.0 = unchanged behavior).
+        gr_worst_k: Optional worst-k body count for the rotation reward (see `gr_rew_factory`).
+        gr_worst_k_alpha: Blend weight for gr's worst-k term (0.0 = unchanged behavior).
 
     Returns:
         Dict of MdpComponent instances for tracking rewards.
     """
     return {
-        "gt_rew": gt_rew_factory(weight=gt_weight, coefficient=gt_coef),
-        "gr_rew": gr_rew_factory(weight=gr_weight, coefficient=gr_coef),
+        "gt_rew": gt_rew_factory(
+            weight=gt_weight,
+            coefficient=gt_coef,
+            worst_k=gt_worst_k,
+            worst_k_alpha=gt_worst_k_alpha,
+        ),
+        "gr_rew": gr_rew_factory(
+            weight=gr_weight,
+            coefficient=gr_coef,
+            worst_k=gr_worst_k,
+            worst_k_alpha=gr_worst_k_alpha,
+        ),
         "gv_rew": gv_rew_factory(weight=gv_weight, coefficient=gv_coef),
         "gav_rew": gav_rew_factory(weight=gav_weight, coefficient=gav_coef),
         "rh_rew": rh_rew_factory(weight=rh_weight, coefficient=rh_coef),
