@@ -540,12 +540,12 @@ nohup python -u protomotions/train_agent.py \
 
 nohup python -u protomotions/train_agent.py \
 --robot-name smpl_mor --simulator isaacgym \
---experiment-path examples/experiments/mimic/mlp_wide_discover_worstk.py \
---experiment-name hhi_wide_13clip_128shape_discover_worstk \
+--experiment-path examples/experiments/mimic/mlp_wide_discover_historical_lookahead.py \
+--experiment-name hhi_wide_13clip_128shape_discover_historical_lookahead \
 --motion-file /workspace/small_motion_cache/hard_clips_discover_lineage.pt \
 --num-envs 6144 --batch-size 24576 --ngpu 1 \
 --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
---wandb-group hhi_wide_13clip_128shape_discover_worstk > /tmp/hhi_wide_13clip_128shape_discover_worstk.log 2>&1 &
+--wandb-group hhi_wide_13clip_128shape_discover_historical_lookahead > /tmp/hhi_wide_13clip_128shape_discover_historical_lookahead.log 2>&1 &
 ----
 
 
