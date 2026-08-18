@@ -5396,3 +5396,56 @@ change before stopping, so which of the two explanations is correct is still ope
 `gt_rew_factory`/`gr_rew_factory`, `mimic_tracking_rewards_factory`, and the new
 `mlp_wide_discover_worstk.py` experiment file) is left in place, unused, in case a lower-alpha
 retry is worth revisiting later.
+
+## 60. Self-Attention Temporal Encoder — Null Result, Same Instability as Flat-Concat (2026-08-18)
+
+Motivated by `hhi_wide_13clip_128shape_discover_historical_lookahead` (wandb `81j2d8e2`) looking
+"highly unstable" on the hard-13 set (per user judgment from months of experience reading these
+curves, not a metric threshold) despite a high peak (92.3% at step 5000). Hypothesis: flat-
+concatenating dilated history/lookahead frames into one wide MLP forces the network to learn
+temporal structure implicitly from position-in-the-concat-vector; a proper sequence encoder might
+fit it more cleanly and train more stably. True recurrence (LSTM/GRU) was explicitly shelved —
+PPO's rollout buffer here globally shuffles across env *and* time with no sequence-preserving
+minibatch path or hidden-state storage, so recurrence would need new infrastructure. Self-
+attention needed none: `protomotions/agents/common/transformer.py`'s `Transformer`/
+`TransformerConfig` is already used exactly this way (memoryless, per-step token encoder) in
+MaskedMimic's VAE prior encoder, and both temporal observations already flatten from a
+`[batch, steps, dim]` layout (`humanoid_historical.py`, `target_poses.py`), so recovering per-frame
+tokens needed zero env-side changes.
+
+Built `examples/experiments/mimic/mlp_wide_discover_attention.py`: same `env_config()` as
+`_historical_lookahead` (`HISTORY_STEPS=[1,2,3,4,8,16,32]`, `FUTURE_STEPS=[1,2,4,8]`, same reward/
+termination/motion-manager), but the actor/critic trunk becomes reshape → per-frame token MLPs
+(`current_state_token`, `history_token`, `future_token`, `TOKEN_SIZE=256`) → `TransformerConfig`
+(`num_heads=4`, `ff_size=1024`, `num_layers=2`) → unchanged-width final head
+(`WIDE_UNITS=2896 x 6` actor, `1024 x 4` critic). Verified with dummy-tensor forward passes before
+launch (correct output shapes, `current_state_token` listed first for CLS-style pooling). Actual
+parameter count came out to ~83%/~76% of the flat-concat baseline (compressed 256-dim `attn_out`
+shrinks the final head's first layer) — flagged to the user, who judged that acceptable for a
+13-clip task rather than padding for exact parity.
+
+Launched as `hhi_wide_13clip_128shape_discover_attention` (wandb `03xgigtt`). Checked via the
+wandb API at epoch 7834:
+
+| step range | mean success | max success |
+|---|---|---|
+| 0–2000 | 40.8% | 76.9% |
+| 2000–4000 | 71.5% | 84.6% |
+| 4000–6000 | 73.1% | 84.6% |
+| 6000–8000 | 75.2% | 92.3% |
+
+Climbed to ~step 2000, then flat for ~5800 further steps: mean success stuck in a noisy 70-75%
+band, individual evals swinging as much as 61.5% -> 92.3% -> 69.2% between consecutive samples.
+The 92.3% peak at step 7599 is a single noisy point, not a new plateau -- neighbors are 61.5% and
+69.2%. This is the same "high peak, no net gain past early plateau, heavy oscillation" shape as
+the flat-concat `_historical_lookahead` run it was meant to fix. User called it: no reason to
+continue, stopped.
+
+Read: self-attention did not fix the instability, which is a real negative result for the
+architecture hypothesis specifically. Since the *flat-concat* and *attention* trunks show the same
+oscillation pattern on the same 13-clip/128-shape dataset, the more likely explanation going
+forward is that the noise is intrinsic to the eval itself (13 clips means one flipped clip moves
+the metric 7.7 points) and/or to PPO variance on this small, low-diversity dataset -- not a
+consequence of how the trunk consumes temporal context. Worth weighing before trying further
+architecture changes on this specific hard-13 set: a fix here may need to target eval variance or
+data scale, not model structure. Code (`mlp_wide_discover_attention.py`) is left in place, unused.
