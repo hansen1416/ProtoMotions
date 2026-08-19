@@ -5449,3 +5449,123 @@ the metric 7.7 points) and/or to PPO variance on this small, low-diversity datas
 consequence of how the trunk consumes temporal context. Worth weighing before trying further
 architecture changes on this specific hard-13 set: a fix here may need to target eval variance or
 data scale, not model structure. Code (`mlp_wide_discover_attention.py`) is left in place, unused.
+
+## 61. Self-Attention Confirmed on the 150-Clip Corpus — Physics-Feature Morphology Retest Launched
+(2026-08-18)
+
+The same `mlp_wide_discover_attention.py` architecture was also run on the full 150-clip corpus
+(`hhi_wide_150motion_discover_attention`, wandb `p6b2la4h`). Checked against the rest of the
+7-run `discover` lineage at matched step count (~4800-5000 steps): eval/success_rate 84.7% and
+still climbing vs. baseline `discover`'s 72% (already sliding back down from its 78.7% peak by
+then), and actor/critic loss curves are the smoothest of the whole lineage (~25-30% lower
+step-to-step noise than the next-best run, `discover_window_match`).
+
+Read together with §60: since the *same* architecture is clearly stable and better on the
+150-clip corpus, the hard-13 instability in §60 is very likely a small/noisy-dataset artifact (13
+clips, PPO variance) rather than self-attention itself being a bad fit. Net: attention is
+confirmed as a real win and promoted to the default trunk for the 150-clip corpus going forward.
+
+Launched a follow-up on top of this confirmed architecture: `mlp_wide_discover_attention_physics.py`
+swaps `morphology_obs` (raw betas, 11-dim) for `physics_obs` (z-scored physics features, 15-dim --
+mass, limb lengths, torso/head height, hip/shoulder width, leg length, total height), everything
+else unchanged. This revisits the old `hhi_phy_1024_transfer` vs `hhi_1024_transfer` comparison
+(`README.prelim-report.md` §5), which was inconclusive on aggregate metrics but showed a large gap
+in a small visual smoke test (5/8 vs 0/8, `README.eval-plan.md`) that was never followed up with a
+wider ablation or the current architecture. `physics_obs_factory`/`physics_features.pt` already
+existed and needed no changes; confirmed the feature file covers all 128 shapes in the current
+corpus before launch. Running as `hhi_wide_150motion_discover_attention_physics`, isolating
+morphology-representation as the only variable against the `p6b2la4h` betas run.
+
+## 62. `mlp_wide_discover_attention.py` Training-Process Review — Positional-Encoding Gap Found
+(2026-08-19)
+
+**Why:** before committing to a full 20,946-clip/128-shape run with the self-attention
+architecture (planned next, as a base model to later fine-tune toward the persistent-failure
+cluster), did a full line-by-line review of `mlp_wide_discover_attention.py`'s training process:
+observation shapes, reward calculation, model architecture, and the PPO update mechanics.
+
+**Observations (robot: `smpl_mor`, 24 bodies, 69 DOFs):**
+
+| key | per-frame dim | frames | flat shape |
+|---|---|---|---|
+| `max_coords_obs` | 358 | 1 (current) | `[B, 358]` |
+| `historical_max_coords_obs` | 358 | 7 (`HISTORY_STEPS=[1,2,3,4,8,16,32]`) | `[B, 2506]` |
+| `mimic_target_poses` | 576 | 4 (`FUTURE_STEPS=[1,2,4,8]`) | `[B, 2304]` |
+| `previous_actions` | 69 | 1 | `[B, 69]` |
+| `morphology_obs` | 11 | -- | `[B, 11]` |
+
+358-dim per-frame = root_height(1) + body_pos_minus_root(23x3=69) + body_rot_tan_norm(24x6=144) +
+body_vel(24x3=72) + body_ang_vel(24x3=72). 576-dim future-frame = absolute target pos(72) +
+pos-relative-to-current(72) + absolute target rot(144) + rot-relative-to-current(144) +
+target-relative vel(72) + target-relative ang-vel(72) -- deliberately redundant (both an
+absolute-from-root and a delta-from-current encoding of the same target).
+
+**Architecture (`build_attention_trunk()`, called once for actor, once for critic, no weight
+sharing between them):**
+1. Three per-frame token encoders (2-layer x 256-unit MLPs, `TOKEN_SIZE=256`) -- `current_state_token`
+   `[B,1,256]`, `history_token` `[B,7,256]`, `future_token` `[B,4,256]`. Reshape happens before the
+   MLP forward and `MLPWithConcat` collapses leading dims before the linear layers, so each encoder
+   is genuinely shared-weight across its frames (the same 358->256 net processes the 1-step-back
+   and the 32-step-back frame identically), and `RunningMeanStd` normalization is likewise pooled
+   across all frames in a group (one running mean/std per group, not per-offset).
+2. Self-attention over the resulting 12-token sequence (`current_state_token` first, 4 heads,
+   `ff_size=1024`, 2 layers, `output_activation=relu`). Output is `output[:,0,:]` -- pools via the
+   `current_state_token` acting as a CLS token. `attn_out` is `[B,256]`.
+3. Final head: `[attn_out(256), previous_actions(69), morphology_obs(11)]` concat -> 6x2896 MLP
+   (actor) / 4x1024 MLP (critic) -- same width/depth as the flat-concat baseline, but because the
+   first layer now reads a compressed 256-dim vector instead of the baseline's ~4500-dim raw
+   concat, actual param count comes out to ~83%/76% of baseline (confirmed by direct forward-pass
+   test in the prior session that built this file).
+
+**Reward** -- `mimic_tracking_rewards_factory`, five `weight * exp(coefficient * error)` terms
+summed: gt (pos, w=0.5, coef=-25), gr (rot, w=0.3, coef=-5), gv (vel, w=0.1, coef=-0.5), gav
+(ang-vel, w=0.2, coef=-0.1), rh (root height, w=0.2, coef=-100). No action_smoothness/pow_rew/
+contact_match_rew (stripped for this stage to isolate the attention lever). Scored against
+`EnvContext.mimic.reward_ref_state` -- the **current single-timestep** reference, not the dilated
+future window used for the `mimic_target_poses` observation. The model sees 4 lookahead frames as
+context but is only ever rewarded for next-frame tracking.
+
+**Termination** -- fall-only (`termination_height=0.15`), no tracking-error termination. An
+episode drifting far from the reference runs to `max_episode_length=1000` regardless. The 0.5
+`gt_error` threshold only affects the evaluator's success/failure labeling and curriculum
+sampling-weight update, never cuts an episode short -- explains why `env/termination/fall_mean`
+sits near 0 while `eval/gt_error/failure_rate` sits at 16-27%.
+
+**PPO update** -- standard clipped surrogate, `num_steps=32`, `gamma=0.99`, GAE `tau=0.95`,
+`e_clip=0.2`, `num_mini_epochs=1` (one gradient pass per rollout). Separate actor/critic optimizers
+(Adam, lr `2e-5`/`1e-4`), `clip_critic_loss=True`, `gradient_clip_val=50.0` both, EMA advantage
+normalization. Action std is fixed (`actor_logstd=-2.9`, `learnable_std=False`, not overridden
+here) -- `entropy_coef=0.005` is present in the loss but has no gradient target, effectively inert.
+Stability guard: `actor_clip_frac_threshold=0.6` -- if clip fraction exceeds 0.6 in any minibatch,
+the actor update is skipped for every remaining minibatch that epoch (critic still updates);
+watch `actor/update_skipped` for this on the full run.
+
+**Findings worth flagging before the full-scale launch:**
+
+1. **No positional encoding in the transformer -- the headline finding.**
+   `Transformer.forward()` (`protomotions/agents/common/transformer.py`) concatenates tokens and
+   feeds them straight into `nn.TransformerEncoder` with no positional term added anywhere. The
+   class docstring/attributes mention `sequence_pos_encoder`/`PositionalEncoding`, but grepping the
+   whole codebase, it's never actually constructed or used -- dead documentation, not dead code.
+   Consequence: within the 7-token history group and the 4-token future group, self-attention is
+   permutation-*equivariant* -- no explicit signal distinguishes "1 step back" from "32 steps
+   back," or "1 step ahead" from "8 steps ahead." The three token *types* are distinguishable
+   (different encoder weights), but ordering *within* each group is only recoverable, if at all,
+   from how raw pose content happens to correlate with temporal distance. Given the whole point of
+   the dilation schedules is irregular spacing, this looks like a real gap -- worth adding a
+   learned or sinusoidal positional embedding per slot before trusting the architecture's temporal
+   reasoning on the full-scale run.
+2. **Bundled `mass_scaled_gains`.** `configure_robot_and_simulator()` here doesn't touch it, so it
+   inherits `smpl_mor`'s current default (`True`) -- same bundling caveat already flagged for the
+   full-scale-run-vs-`hl2g9b0m` comparison (this session's discussion): differs from that
+   reference point in history/lookahead obs, attention, *and* mass-scaled gains simultaneously.
+3. **Reward/obs mismatch is intentional** (4 lookahead frames as context, single-frame reward) but
+   worth separating as a hypothesis if the full run doesn't improve on `hl2g9b0m`: could be
+   attention not helping, or lookahead-as-context not being exploited without a reward signal
+   tied to it.
+4. Capacity is not actually matched to the flat-concat baseline (83%/76%, see architecture section
+   above) -- already self-documented in the file, repeated here since it affects how any full-scale
+   comparison should be read.
+
+Not yet acted on -- positional encoding fix is a candidate change to make before the full-scale
+launch, not yet implemented.

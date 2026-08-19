@@ -555,6 +555,15 @@ nohup python -u protomotions/train_agent.py \
 --num-envs 4096 --batch-size 16384 --ngpu 1 \
 --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
 --wandb-group hhi_wide_150motion_discover_attention > /tmp/hhi_wide_150motion_discover_attention.log 2>&1 &
+
+nohup python -u protomotions/train_agent.py \
+--robot-name smpl_mor --simulator isaacgym \
+--experiment-path examples/experiments/mimic/mlp_wide_discover_attention_physics.py \
+--experiment-name hhi_wide_150motion_discover_attention_physics \
+--motion-file /workspace/motion_cache/small150_128shape.pt \
+--num-envs 4096 --batch-size 16384 --ngpu 1 \
+--use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+--wandb-group hhi_wide_150motion_discover_attention_physics > /tmp/hhi_wide_150motion_discover_attention_physics.log 2>&1 &
 ----
 
 
