@@ -564,6 +564,28 @@ nohup python -u protomotions/train_agent.py \
 --num-envs 4096 --batch-size 16384 --ngpu 1 \
 --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
 --wandb-group hhi_wide_150motion_discover_attention_physics > /tmp/hhi_wide_150motion_discover_attention_physics.log 2>&1 &
+
+nohup python -u protomotions/train_agent.py \
+--robot-name smpl_mor --simulator isaacgym \
+--experiment-path examples/experiments/mimic/mlp_wide_discover_attention_bigger.py \
+--experiment-name hhi_wide_150motion_discover_attention_bigger \
+--motion-file /workspace/motion_cache/small150_128shape.pt \
+--num-envs 4096 --batch-size 16384 --ngpu 1 \
+--use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+--wandb-group hhi_wide_150motion_discover_attention_bigger > /tmp/hhi_wide_150motion_discover_attention_bigger.log 2>&1 &
+
+nohup python -u protomotions/train_agent.py \
+--robot-name smpl_mor --simulator isaacgym \
+--experiment-path examples/experiments/mimic/mlp_wide_stage2_discover_attention.py \
+--experiment-name hhi_wide_stage2_discover_attention \
+--global-clip-pool-source r2:proto-data/hhi_stage2_per_clip/ \
+--global-clip-pool-cache-dir /workspace/motion_cache \
+--global-clip-pool-size 256 --global-clip-pool-rebuild-every 256 \
+--global-clip-pool-eval-holdout-size 128 --global-clip-pool-weight-floor 0.05 \
+--global-clip-pool-random-fraction 0.2 \
+--num-envs 2048 --batch-size 8192 --ngpu 6 \
+--use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+--wandb-group hhi_wide_stage2_discover_attention > /tmp/hhi_wide_stage2_discover_attention.log 2>&1 &
 ----
 
 
