@@ -570,7 +570,7 @@ nohup python -u protomotions/train_agent.py \
 --experiment-path examples/experiments/mimic/mlp_wide_discover_attention_bigger.py \
 --experiment-name hhi_wide_150motion_discover_attention_bigger \
 --motion-file /workspace/motion_cache/small150_128shape.pt \
---num-envs 4096 --batch-size 16384 --ngpu 1 \
+--num-envs 2048 --batch-size 8192 --ngpu 1 \
 --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
 --wandb-group hhi_wide_150motion_discover_attention_bigger > /tmp/hhi_wide_150motion_discover_attention_bigger.log 2>&1 &
 

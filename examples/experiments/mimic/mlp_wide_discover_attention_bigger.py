@@ -69,6 +69,19 @@ top of a corpus that's already ~11.5x more motion instances. If it OOMs, reduce 
 first (optimization-step memory), then `--num-envs` if the OOM happens during rollout collection
 instead -- same independent-pools distinction as the Stage-2 full-scale OOM earlier in this
 project.
+
+**Verified parameter counts** (real `smpl_mor` robot config -- 69 DOFs, 24 bodies -- and real
+observation dims, actual `ModuleContainer` instantiated and forward-passed on CPU, not estimated):
+
+    | stage  | base (mlp_wide_discover_attention.py) | bigger (this file) | ratio |
+    |--------|----------------------------------------|---------------------|-------|
+    | actor  | 45.4M params                            | 95.2M params        | 2.09x |
+    | critic | 5.8M params                             | 12.3M params        | 2.12x |
+    | total  | 51.2M params                            | 107.5M params       | 2.10x |
+
+The critic's slightly higher ratio is because its final head stays fixed at 1024x4 in both
+versions, so a larger share of its total params sits in the attention stage (which ~4x'd) than
+the actor's, where the 2x'd final head is the larger share and dilutes the ratio.
 """
 from protomotions.robot_configs.base import RobotConfig
 from protomotions.simulator.base_simulator.config import SimulatorConfig

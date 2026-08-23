@@ -5569,3 +5569,183 @@ watch `actor/update_skipped` for this on the full run.
 
 Not yet acted on -- positional encoding fix is a candidate change to make before the full-scale
 launch, not yet implemented.
+
+## 63. Full 150-Clip-Lineage Failure Overlap Analysis -- Reference-Motion-Quality Hypothesis and
+Two Data-Pipeline Proposals (2026-08-22)
+
+**Context.** `hhi_wide_150motion_discover_attention_bigger` (a 2.1x-parameter-count scale-up of
+the confirmed-good attention architecture from §61, launched to test whether more capacity could
+push the attention trunk to 95%+ on the 150-clip corpus) plateaued at 74-80% -- no better than, and
+by the end slightly worse than, the flat-concat `discover` baseline's 75-78% ceiling despite ~2.1x
+the parameters. Falls stayed negligible throughout (~0.01-0.02%), so this is a genuine accuracy
+ceiling, not an instability/collapse failure. Stopped by user call. This closes out capacity
+scaling and self-attention-widening as levers on this corpus -- see §61-62 for the architecture's
+confirmed win over flat-concat at matched capacity; going bigger past that point doesn't help.
+
+**Downloaded the remaining 150-clip-corpus checkpoints from `r2:proto-data/ckpt/`** (11 zips, ~20GB,
+into `results/`) to get every run in the lineage onto local disk for offline analysis: `amp`,
+`discover_sharpen`, `discover_explore`, `discover_historical`, `discover_lookahead`,
+`discover_historical_lookahead`, `discover_window_match`, `discover_relaxed_rh`,
+`discover_attention`, `discover_attention_physics`, `discover_attention_bigger` -- joining the 3
+already local (`discover`, `seggain`, `softtrack`) for **14 total runs** covering every lever
+tried on this corpus (architecture, reward shaping, temporal features, morphology conditioning).
+
+**Cross-run failed-clip overlap analysis** (`tools/analyse_failed_clip_overlap_150.py`, output
+`results/analysis/T_failed_clip_overlap_150.md`): for each run, a clip counts as a "persistent
+failure" if it's in the failed-motions log for >=5 of that run's last 10 eval checkpoints (controls
+for eval noise; runs stopped at very different epoch counts -- 2600 to 11000 -- so this compares
+each run's own converged/plateaued regime, not a fixed global step). Then tallied, per clip, how
+many of the 14 runs it's persistent in:
+
+| category | count | % of 150 |
+|---|---|---|
+| persistent in ALL 14 runs | 7 | 4.7% |
+| persistent in 13/14 runs | 8 | 5.3% |
+| persistent in >=half the runs | 39 | 26.0% |
+| never a persistent failure in ANY run | 51 | 34.0% |
+
+**Universal hard class (n=7, fails regardless of architecture/reward/temporal-feature lever):**
+`M000919, M007634, 003689, 010504, M008156, 010471, M003197`. Only 4.7% of the corpus is truly
+lever-invariant -- most of the aggregate ~20-25% failure rate is lever-sensitive (34% of clips
+never persist as a failure anywhere), a materially tighter and more defensible "intrinsic
+difficulty" claim than treating the whole 20% as one uniform phenomenon. 4 of the 7 overlap with
+named clips in the old `hhi_1024_motion` crawl/kneel/squat/backward persistent-failure cluster
+(`results/hhi_1024_motion/persistent_failures.txt`, referenced in §47-48) -- same hard motion
+content recurring across dataset scale and every architecture tried, not an artifact of this
+particular corpus or lever.
+
+**Visual + quantitative diagnostic of the 7 universal-hard clips.** Pre-rendered failure videos
+already existed for all 7 in `results/hhi_wide_150motion_128shape_discover/visualize_videos/`
+(from the routine per-eval video dump, no re-render needed) and were sent to the user for review.
+User's read: the *reference* motion itself looks unstable in several of these, oscillating/moving
+back-and-forth rather than being a clean target. Checked this quantitatively rather than trusting
+the visual impression alone -- pulled `gts` (global body position) and `dps` (local joint angle)
+trajectories for each of the 7 clips out of `data_cache/small150_128shape.pt` and compared root
+heading-reversal rate, end-effector (hands/feet) positional jitter, and DOF-angle jitter (all via
+a moving-average low-pass smoothing-residual proxy) against the other 143 clips in the corpus.
+Result splits the 7 into three distinct groups, not one uniform "bad data" story:
+
+- **Group A -- genuinely noisy reference (top-quartile jitter on every metric):** `010471`,
+  `M007634`, `010504` (and `003689` borderline). Rank in the top 5-25% of the whole 150-clip corpus
+  for root-reversal rate, end-effector jitter, *and* DOF-angle jitter simultaneously -- consistent
+  with real generative-model artifact in the reference, not intended motion content.
+- **Group B -- literal in-place back-and-forth, not noise:** `M000919`, `M008156`. Tiny net
+  horizontal displacement (0.07-0.11 m/s mean) but frequent heading reversal (1.2-1.5/s) --
+  low-amplitude oscillatory *content*, not high-frequency jitter (both rank near the bottom of the
+  corpus, 104th/123rd of 150, on the smoothing-residual noise proxy). A low-pass filter would flatten
+  the intended motion here, not remove an artifact.
+- **Group C -- no elevated jitter by any metric:** `M003197` (and largely `003689`/`M008156`).
+  Clean at the data level on every measure checked. The visual instability for these is more likely
+  the *simulated* character oscillating/losing balance while tracking, not a reference-data flaw.
+
+**Read:** the "fix the target motion" framing is right for ~3-4 of the 7 clips (Group A) but wrong
+for the rest -- there's no single data-quality fix that explains the universal-hard class. This
+matters for how far a data-pipeline change (see below) can be expected to move the needle: even a
+perfect fix for Group A only touches half the universal-hard set, and the aggregate ~20% failure
+rate is dominated by lever-sensitive clips anyway (34% never persist), so a reference-motion-quality
+fix should be read as one contributor among several, not a silver bullet for the plateau.
+
+**Root cause, confirmed against the actual data pipeline** (`note/README.data-pipeline-chronological.md`
+Phase 3-11): HUMOS is a *diffusion model* that regenerates the SMPL pose sequence theta(t) itself
+per body shape (conditioned on the clip's 3D features + beta), not a kinematic retarget of one
+fixed pose sequence onto different bone lengths. This is why Group A's artifact looks like
+generative-sampling noise rather than mocap noise -- it's sampled per-shape, not filtered per-shape.
+
+**Two data-pipeline proposals discussed (user-proposed), not yet implemented:**
+
+1. **Canonical AMASS + per-shape FK, dropping HUMOS entirely.** Use the single pre-HUMOS AMASS
+   pose sequence (`pose_data/` under the HUMOS repo, Phase 3 output, one theta(t) per clip) for
+   every one of the 128 shapes, retargeted via forward kinematics onto each shape's own skeleton,
+   instead of HUMOS's per-shape diffusion resample. **Confirmed technically feasible with existing
+   tooling, not hypothetical**: `tools/convert_amass_to_motionlib_with_morphology.py` (the same
+   converter used for HUMOS output in Phase 11) is generic -- it does FK from any AMASS-style pose
+   sequence + a beta onto the target morphology's MJCF skeleton, doesn't care whether the pose
+   sequence came from HUMOS or straight from `pose_data/`. Building this needs a small new script
+   to fan one canonical clip out across 128 beta-tagged NPZs (in place of HUMOS's diffusion
+   sampling step, Phase 8-10), then the existing Phase 11 converter runs unchanged. No new HUMOS
+   GPU inference required -- FK is cheap relative to diffusion sampling.
+
+   Tradeoff: this removes 100% of Group-A-style generative noise by construction (deterministic FK
+   vs. diffusion sampling), but reintroduces the exact problem HUMOS was built to solve --
+   identical joint-angle trajectories aren't equally achievable across a 64-beta range (short/tall,
+   thin/obese): self-penetration for heavy bodies, CoM/balance mismatch for very different mass
+   distributions, foot sliding under different leg lengths beyond what the existing frame-0
+   grounding correction (Phase 12) fixes. Expectation: this likely *relocates* failures from
+   "specific noisy clips" to "extreme-beta shapes across many clips" rather than eliminating them --
+   a real, different, testable claim, not an obvious net win.
+
+   This is where the user's "also change how we measure the generated motion and target motions"
+   clause matters -- flagged as the actual crux, not a footnote. Two sub-variants:
+   - **1a (cheap):** keep the existing frame-exact `mimic_tracking_rewards_factory` unchanged,
+     just swap the reference source. Fastest to test, isolate-one-variable clean, but doesn't
+     address bodies that literally can't hit the reference joint angle without falling.
+   - **1b (bigger change):** de-weight/replace frame-exact position tracking with a shape-invariant
+     realism measure -- this is what the AMP discriminator reward is *for* (judges "does this look
+     human-plausible" rather than "does this match frame X"). Checked whether the existing
+     `hhi_wide_150motion_128shape_amp` run (from this same 14-run lineage) already tests this: it
+     does **not** -- its `experiment_config.py` keeps `mimic_tracking_rewards_factory` at full
+     weight (`gt_weight=0.5`) and the tracking-error termination unchanged, and adds the
+     discriminator purely as an *additional* signal against the same HUMOS target
+     (`task_reward_w`/`discriminator_reward_w` both nonzero, no swap of reference source). It
+     solves a different problem (transition naturalness / early termination on implausible states),
+     not measurement-invariance. A genuine 1b test would need `task_reward_w` pulled down and the
+     reference swapped to canonical AMASS -- a new ablation, no existing data speaks to it.
+
+2. **Hybrid -- HUMOS + AMASS canonical as two blended reference sources.** Add the canonical-FK-
+   retargeted variant as an *extra* motion-library entry alongside the existing HUMOS one for the
+   same clips (same reward, same everything -- pure reference-diversity ablation, no reward
+   redesign needed at all). Tests whether forcing the network to succeed against both a clean
+   deterministic target and a noisy generative one regularizes against overfitting to either
+   source's artifacts. Cheaper and lower-risk than 1b since it requires no reward-function change.
+
+**Recommended next action (agreed, not yet started):** build canonical-FK-retargeted data for the
+current 150-clip/128-shape corpus only (cheap -- FK, no diffusion GPU cost) and run it through the
+*exact* `mlp_wide_discover.py` config unchanged (variant 1a) as a pure single-variable swap: same
+reward, same everything, only the reference-motion source changes. This is the cheapest and most
+diagnostic experiment available -- it directly separates "was it HUMOS generation noise" from "is
+exact-pose-tracking across shape extremes inherently infeasible for some (clip, shape) pairs,"
+which is the open question underlying both proposals. Depending on the result (failures shrink vs.
+relocate to extreme-beta shapes), the follow-up is either 1b (relaxed/shape-invariant measurement)
+or option 2 (hybrid blending) -- to be chosen based on which failure pattern is actually observed,
+not decided in advance.
+
+## 64. Variant 1a Result -- One Universal-Hard Clip Fixed, Two Confirmed as Raw-Mocap Noise
+(2026-08-23)
+
+**Built and ran variant 1a.** `tools/build_canonical_amass_retarget.py` retargets the single
+pre-HUMOS AMASS pose sequence per clip (`pose_data/`, via the humos repo's own `swap_left_right`/
+`take_out_z_rotation`) onto all 128 shapes via FK, producing `data_cache/150_128shape_canonical.pt`
+(19,200 motions, 30fps). Trained unchanged `mlp_wide_discover.py` against it
+(`hhi_wide_150motion_128shape_discover_canonical`, wandb `a30jpfe5`). Aggregate `eval/success_rate`
+is roughly matched to the HUMOS-based `discover` baseline through epoch ~5200 (no clear aggregate
+win), but the clip-level failure-overlap analysis (`tools/analyse_failed_clip_overlap_150.py`, now
+15 runs) shows a real, specific effect: the universal-hard class shrank from 7 to 6 clips. `010504`
+is the only one of the 7 that dropped out, and it's the sole run (of 15) where it isn't persistent --
+resolved cleanly by epoch 3400 and clean through 5200, vs. baseline where it fails 1/128 shapes at
+literally every eval checkpoint through epoch 11000 without ever resolving.
+
+**Ran the jitter diagnostic (root heading-reversal, end-effector positional jitter, DOF-angle
+jitter -- moving-average smoothing-residual vs. 150-clip corpus percentile) directly on the
+canonical/raw-AMASS data for the 3 clips previously flagged Group A (genuinely noisy reference):**
+
+| clip | ee-jitter pctl: HUMOS | ee-jitter pctl: canonical (raw AMASS) |
+|---|---|---|
+| `010471` | 92.7% | **98.7%** |
+| `M007634` | 63.3% | **98.0%** |
+| `010504` (fixed) | 90.7% | **72.7%** |
+
+`010471` and `M007634` are in the top 2% of the *entire corpus* for end-effector jitter even in the
+raw, pre-HUMOS AMASS capture -- confirming this is real mocap/marker noise from the original
+recording, not a HUMOS diffusion artifact, so no reference-source swap can fix it.
+`M007634`'s jitter percentile actually went *up* HUMOS-to-canonical, suggesting HUMOS's diffusion
+regeneration was incidentally smoothing this clip's noisy capture. `010504`'s jitter went down
+(plus it had a separate HUMOS-pipeline duration-padding bug -- 200-frame padded vs. the true
+160-frame/5.333s HumanML3D annotation -- also fixed by the canonical swap), consistent with it
+being a genuine HUMOS-introduced artifact rather than raw-capture noise.
+
+**Read:** the universal-hard class has (at least) two distinct failure mechanisms requiring
+different fixes -- HUMOS-generation artifacts (fixable by this swap, 1/7 confirmed so far) vs.
+genuine raw-mocap noise (not fixable by any reference-source swap; would need explicit filtering of
+the raw AMASS capture, or excluding/deprioritizing those specific clips). `discover_canonical` is
+still training (epoch 5200) -- aggregate success-rate conclusion and whether more Group A clips
+resolve with further training are still open.
