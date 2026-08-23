@@ -136,3 +136,4 @@ rclone copy r2:proto-data/hard_clips_discover_lineage/ /workspace/small_motion_c
 
 claude --resume 6babb982-763f-498c-80f1-70f8913dfa54
     
+rclone copy /workspace/motion_cache/150_128shape_canonical/150_128shape_canonical_offset.pt r2:proto-data/150_128shape_canonical/ --progress --s3-no-check-bucket

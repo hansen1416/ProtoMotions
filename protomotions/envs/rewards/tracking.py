@@ -44,6 +44,7 @@ from typing import Optional
 
 from protomotions.utils.rotations import (
     quat_angle_diff_norm,
+    calc_heading,
     calc_heading_quat_inv,
     quat_rotate,
     quat_mul,
@@ -180,6 +181,96 @@ def compute_rh_rew(
         ref_root_height,
         coefficient,
     )
+
+
+# =============================================================================
+# Shape-Invariant (DOF-Space) Tracking Reward Kernels
+#
+# gt/gr/gv/gav above compare world-space rigid_body_pos/rot/vel/ang_vel, which is
+# shape-dependent: the same joint-angle trajectory lands a taller body's hand at a different
+# absolute position than a shorter body's. dof_pos/dof_vel are local joint angles/velocities --
+# exactly shape-invariant, since they depend only on kinematic pose, not bone length. See
+# note/README.note.md Section 65.
+# =============================================================================
+
+
+def compute_dp_rew(
+    current_dof_pos: Tensor,
+    ref_dof_pos: Tensor,
+    coefficient: float = -40.0,
+) -> Tensor:
+    """DOF-angle (joint position) tracking reward (exponential MSE).
+
+    Shape-invariant counterpart to compute_gt_rew/compute_gr_rew: compares local joint angles
+    instead of world-space body position/rotation, so the target is identical across body
+    shapes for the same intended motion.
+
+    Args:
+        current_dof_pos: Current joint angles [num_envs, num_dofs] (radians).
+        ref_dof_pos: Reference joint angles [num_envs, num_dofs] (radians).
+        coefficient: Exponential coefficient for error.
+
+    Returns:
+        Reward tensor [num_envs].
+    """
+    return mean_squared_error_exp(
+        current_dof_pos,
+        ref_dof_pos,
+        coefficient,
+    )
+
+
+def compute_dv_rew(
+    current_dof_vel: Tensor,
+    ref_dof_vel: Tensor,
+    coefficient: float = -0.5,
+) -> Tensor:
+    """DOF-angle velocity tracking reward (exponential MSE).
+
+    Shape-invariant counterpart to compute_gv_rew/compute_gav_rew: compares local joint
+    angular velocities instead of world-space body velocities.
+
+    Args:
+        current_dof_vel: Current joint velocities [num_envs, num_dofs] (rad/s).
+        ref_dof_vel: Reference joint velocities [num_envs, num_dofs] (rad/s).
+        coefficient: Exponential coefficient for error.
+
+    Returns:
+        Reward tensor [num_envs].
+    """
+    return mean_squared_error_exp(
+        current_dof_vel,
+        ref_dof_vel,
+        coefficient,
+    )
+
+
+def compute_heading_rew(
+    current_root_rot: Tensor,
+    ref_rigid_body_rot: Tensor,
+    coefficient: float = -10.0,
+) -> Tensor:
+    """Root heading (yaw-only) tracking reward (exponential MSE).
+
+    Near-shape-invariant world-frame grounding: compares root yaw only (not root world
+    position), via calc_heading. A pelvis turn means about the same thing regardless of body
+    proportions, unlike absolute root position.
+
+    Args:
+        current_root_rot: Current root orientation quaternion [num_envs, 4] (w-last).
+        ref_rigid_body_rot: Reference body rotations [num_envs, num_bodies, 4] (w-last).
+        coefficient: Exponential coefficient for error.
+
+    Returns:
+        Reward tensor [num_envs].
+    """
+    ref_root_rot = ref_rigid_body_rot[:, 0, :]
+    current_heading = calc_heading(current_root_rot, w_last=True)
+    ref_heading = calc_heading(ref_root_rot, w_last=True)
+    heading_diff = torch.atan2(
+        torch.sin(current_heading - ref_heading), torch.cos(current_heading - ref_heading)
+    )
+    return torch.exp(coefficient * heading_diff.pow(2))
 
 
 # =============================================================================

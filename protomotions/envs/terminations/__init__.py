@@ -50,6 +50,7 @@ from protomotions.envs.terminations.tracking import (
     motion_clip_done,
     # Value functions (for evaluation metrics)
     mean_body_pos_error,
+    mean_dof_pos_error,
     max_body_pos_error,
     mean_body_rot_error,
     anchor_pos_error_value,
@@ -87,6 +88,7 @@ __all__ = [
     "motion_clip_done",
     # Value functions
     "mean_body_pos_error",
+    "mean_dof_pos_error",
     "max_body_pos_error",
     "mean_body_rot_error",
     "anchor_pos_error_value",

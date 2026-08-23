@@ -600,6 +600,121 @@ def rh_rew_factory(weight: float = 0.2, coefficient: float = -100.0) -> MdpCompo
     )
 
 
+def dp_rew_factory(weight: float = 0.5, coefficient: float = -40.0) -> MdpComponent:
+    """Factory for DOF-angle (joint position) tracking reward.
+
+    Shape-invariant counterpart to gt_rew_factory/gr_rew_factory -- see
+    note/README.note.md Section 65.
+
+    Args:
+        weight: Reward weight.
+        coefficient: Exponential coefficient for error.
+
+    Returns:
+        MdpComponent configured for DOF-angle tracking.
+    """
+    from protomotions.envs.rewards import compute_dp_rew
+
+    return MdpComponent(
+        compute_func=compute_dp_rew,
+        dynamic_vars={
+            "current_dof_pos": EnvContext.current.dof_pos,
+            "ref_dof_pos": EnvContext.mimic.reward_ref_state.dof_pos,
+        },
+        static_params={"weight": weight, "coefficient": coefficient},
+    )
+
+
+def dv_rew_factory(weight: float = 0.1, coefficient: float = -0.5) -> MdpComponent:
+    """Factory for DOF-angle velocity tracking reward.
+
+    Shape-invariant counterpart to gv_rew_factory/gav_rew_factory -- see
+    note/README.note.md Section 65.
+
+    Args:
+        weight: Reward weight.
+        coefficient: Exponential coefficient for error.
+
+    Returns:
+        MdpComponent configured for DOF-angle velocity tracking.
+    """
+    from protomotions.envs.rewards import compute_dv_rew
+
+    return MdpComponent(
+        compute_func=compute_dv_rew,
+        dynamic_vars={
+            "current_dof_vel": EnvContext.current.dof_vel,
+            "ref_dof_vel": EnvContext.mimic.reward_ref_state.dof_vel,
+        },
+        static_params={"weight": weight, "coefficient": coefficient},
+    )
+
+
+def heading_rew_factory(weight: float = 0.1, coefficient: float = -10.0) -> MdpComponent:
+    """Factory for root heading (yaw-only) tracking reward.
+
+    Near-shape-invariant world-frame grounding -- see note/README.note.md Section 65.
+
+    Args:
+        weight: Reward weight.
+        coefficient: Exponential coefficient for error.
+
+    Returns:
+        MdpComponent configured for root heading tracking.
+    """
+    from protomotions.envs.rewards import compute_heading_rew
+
+    return MdpComponent(
+        compute_func=compute_heading_rew,
+        dynamic_vars={
+            "current_root_rot": EnvContext.current.root_rot,
+            "ref_rigid_body_rot": EnvContext.mimic.reward_ref_state.rigid_body_rot,
+        },
+        static_params={"weight": weight, "coefficient": coefficient},
+    )
+
+
+def mimic_dof_tracking_rewards_factory(
+    dp_weight: float = 0.5,
+    dv_weight: float = 0.1,
+    contact_weight: float = -0.1,
+    heading_weight: float = 0.1,
+    rh_weight: float = 0.2,
+    dp_coef: float = -40.0,
+    dv_coef: float = -0.5,
+    heading_coef: float = -10.0,
+    rh_coef: float = -100.0,
+) -> Dict[str, MdpComponent]:
+    """Factory for shape-invariant (DOF-space) mimic tracking reward bundle.
+
+    Replaces mimic_tracking_rewards_factory's world-space gt/gr/gv/gav terms with DOF-angle
+    position/velocity tracking (exactly shape-invariant) plus contact-timing matching
+    (already implemented, shape-invariant) and root-heading tracking (near-invariant
+    world-frame grounding). See note/README.note.md Section 65.
+
+    Args:
+        dp_weight: DOF-angle position tracking weight.
+        dv_weight: DOF-angle velocity tracking weight.
+        contact_weight: Contact-matching weight (typically negative, it's a penalty).
+        heading_weight: Root heading tracking weight.
+        rh_weight: Root height tracking weight.
+        dp_coef: DOF-angle position coefficient.
+        dv_coef: DOF-angle velocity coefficient.
+        heading_coef: Root heading coefficient.
+        rh_coef: Root height coefficient.
+
+    Returns:
+        Dict of MdpComponent instances for DOF-space tracking rewards.
+    """
+    return {
+        "dp_rew": dp_rew_factory(weight=dp_weight, coefficient=dp_coef),
+        "dv_rew": dv_rew_factory(weight=dv_weight, coefficient=dv_coef),
+        "contact_match_rew": contact_match_rew_factory(weight=contact_weight),
+        "heading_rew": heading_rew_factory(weight=heading_weight, coefficient=heading_coef),
+        "rh_rew": rh_rew_factory(weight=rh_weight, coefficient=rh_coef),
+    }
+
+
 def mimic_tracking_rewards_factory(
     gt_weight: float = 0.5,
     gr_weight: float = 0.3,
@@ -1149,6 +1264,35 @@ def gt_error_factory(threshold: float = None) -> MdpComponent:
         dynamic_vars={
             "current_rigid_body_pos": EnvContext.current.rigid_body_pos,
             "ref_rigid_body_pos": EnvContext.mimic.ref_state.rigid_body_pos,
+        },
+        static_params=static_params,
+    )
+
+
+def dp_error_factory(threshold: float = None) -> MdpComponent:
+    """Factory for mean DOF-angle (joint position) error metric.
+
+    Shape-invariant counterpart to gt_error_factory -- see note/README.note.md Section 65.
+    threshold=0.35 (~20 deg mean per-joint error) is an empirically-calibrated starting
+    estimate (FK perturbation sweep against the existing 0.5m gt_error threshold on real
+    corpus data), not yet validated against real rollout data.
+
+    Args:
+        threshold: If set, fail when mean error > threshold (radians).
+
+    Returns:
+        MdpComponent configured for mean DOF-angle error evaluation.
+    """
+    from protomotions.envs.terminations import mean_dof_pos_error
+
+    static_params = {}
+    if threshold is not None:
+        static_params["threshold"] = threshold
+    return MdpComponent(
+        compute_func=mean_dof_pos_error,
+        dynamic_vars={
+            "current_dof_pos": EnvContext.current.dof_pos,
+            "ref_dof_pos": EnvContext.mimic.ref_state.dof_pos,
         },
         static_params=static_params,
     )

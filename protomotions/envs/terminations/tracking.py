@@ -101,6 +101,26 @@ def mean_body_rot_error(
     return per_body_err.mean(-1)
 
 
+def mean_dof_pos_error(
+    current_dof_pos: Tensor,
+    ref_dof_pos: Tensor,
+) -> Tensor:
+    """Mean DOF-angle (joint position) error across all DOFs.
+
+    Shape-invariant counterpart to mean_body_pos_error: local joint angles instead of
+    world-space body position, so the metric doesn't conflate policy tracking quality with a
+    reference target that itself differs by body shape. See note/README.note.md Section 65.
+
+    Args:
+        current_dof_pos: Current joint angles [num_envs, num_dofs] (radians).
+        ref_dof_pos: Reference joint angles [num_envs, num_dofs] (radians).
+
+    Returns:
+        Mean absolute joint-angle error per env [num_envs] in radians.
+    """
+    return (ref_dof_pos - current_dof_pos).abs().mean(-1)
+
+
 def anchor_pos_error_value(
     current_anchor_pos: Tensor,
     ref_rigid_body_pos: Tensor,

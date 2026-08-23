@@ -5749,3 +5749,66 @@ genuine raw-mocap noise (not fixable by any reference-source swap; would need ex
 the raw AMASS capture, or excluding/deprioritizing those specific clips). `discover_canonical` is
 still training (epoch 5200) -- aggregate success-rate conclusion and whether more Group A clips
 resolve with further training are still open.
+
+## 65. Root Cause of the Measurement Problem -- DOF-Angle Space Is Shape-Invariant, World-Space
+Isn't (2026-08-23)
+
+**Why:** §63/64 kept treating "which reference motion" as the core question. Reframed: the actual
+flaw is *what space the reward/eval measures in*. Every existing tracking reward (`gt`, `gr`, `gv`,
+`gav`, `rh` in `envs/rewards/tracking.py`) and the eval failure criterion (`gt_error_factory`,
+`envs/component_factories.py:1133`, mean world-space body-position error > 0.5m) compares
+`rigid_body_pos`/`rigid_body_rot` -- **world-space**, which is shape-dependent by construction: the
+same joint-angle sequence lands a taller body's hand at a different absolute position than a
+shorter body's. No reference-source swap fixes a measurement that's shape-dependent at its core.
+
+**Shape-invariant candidates identified, ranked by exactness/readiness:**
+1. **`dof_pos`/`dof_vel` (local joint angles + velocities)** -- exactly shape-invariant (depends
+   only on kinematic pose, not bone length). Verified the 69-dim `dps` layout has no shape-dependent
+   quirks: `motion_lib.py:503` confirms root is excluded by construction (`(num_bodies-1)*3`); root
+   is a MuJoCo `<freejoint>`, entirely separate from `dof_pos`; all 69 dims are `type="hinge"` (no
+   prismatic joints); diffing a female vs. a very-different-shape male MJCF with all numeric values
+   stripped showed byte-identical joint order/axes/hierarchy -- only bone-length `pos` offsets and
+   geom sizes differ per shape. Currently used nowhere as a tracking signal (only in DOF-limit
+   regularization).
+2. **Contact pattern (`rigid_body_contacts`)** -- already computed per reference frame, already has
+   a reward kernel (`compute_contact_match_rew`, `regularization.py:132`, currently dropped in
+   `discover.py`). Discrete, largely shape-invariant (footfall timing is a property of the intended
+   motion, not leg length).
+3. **Root heading (yaw only, not root world position)** -- near-invariant; `calc_heading`/
+   `calc_heading_quat` utilities already exist in `utils/rotations.py`. No existing reward kernel.
+4. Height-normalized reach/CoM -- no existing utility, largely redundant with #1 via FK. Deprioritized.
+
+**Plan (not yet implemented):** new `compute_dp_rew`/`compute_dv_rew` kernels (mirror
+`compute_gt_rew`/`compute_gv_rew`, swap `rigid_body_pos/vel` for `dof_pos/vel` -- both already valid
+`EnvContext` paths, `context_views.py:76-77,106-107`, zero new plumbing), re-add
+`contact_match_rew_factory` (already exists), optional new `compute_heading_rew`. Bundle into a new
+`mimic_dof_tracking_rewards_factory`, replacing `gt`/`gr`/`gv`/`gav`. Eval side: new
+`compute_mean_dof_tracking_error` termination kernel (mirrors `compute_mean_tracking_error`,
+radians not meters), registered as a new `dp_error` evaluation component **alongside** the existing
+`gt_error` (not replacing it) so both failure curves are visible on the same run.
+
+**Consequence for §63/64's data question:** resolved, not deferred. Since `dof_pos` is exactly
+shape-invariant, canonical AMASS alone is already a complete target for all 128 shapes under a
+DOF-space reward -- no HUMOS blending needed for the core tracking signal. HUMOS's per-shape
+resample only mattered because the old reward needed a per-shape *position* target. (HUMOS isn't
+proven to add value elsewhere either -- §64 found it made 2 of 3 confirmed-noisy clips worse, not
+better.) Decision: proceed AMASS-only for this reward redesign; HUMOS is not currently used.
+
+**`dp_error` threshold calibration:** no existing radian threshold to borrow (`gr_error_factory` in
+`discover.py` is unthresholded, logging-only). Calibrated empirically instead of guessing: loaded a
+real skeleton (`extract_kinematic_info` + `fk_batch_mjcf_with_velocities`, pure CPU) and a real
+canonical-corpus motion, perturbed `dof_pos`, measured the resulting `mean_body_pos_error` (the
+same quantity the existing 0.5m threshold checks). Finding: the mapping is non-linear and
+saturates -- independent per-DOF noise never reaches 0.5m mean position error even at +-57
+deg/joint (partial cancellation across the kinematic chain); coherent same-direction bias (the more
+realistic analogue of a policy systematically mistracking) reaches ~0.41-0.43m at 20-23 deg/joint
+and saturates near there (joint-range clipping), still short of 0.5m even at 26 deg/joint. Read: the
+existing 0.5m threshold is looser than it looks -- closer to "fell over / totally wrong pose" than
+"moderately imprecise." **Starting value: `dp_error_factory(threshold=0.35)` (~20 deg mean
+per-joint error)**, grounded in the coherent-bias crossing point -- flagged as a first estimate to
+retune against real rollout data once available, same status the 0.5m default presumably had before
+it was tuned by trial.
+
+**Next step (not yet started):** implement the above -- new reward kernels, `dp_error_factory`,
+new experiment file `mlp_wide_discover_dofreward.py` (clone of `mlp_wide_discover.py`, canonical
+corpus only, both `gt_error`/`dp_error` logged side by side for comparison).
