@@ -600,6 +600,22 @@ nohup python -u protomotions/train_agent.py \
 --wandb-project hhi-protomotions \
 --wandb-entity yugoamaryl \
 --wandb-group hhi_wide_150motion_128shape_discover_attention_dofreward > /tmp/hhi_wide_150motion_128shape_discover_attention_dofreward.log 2>&1 &
+
+1. Build the combined corpus:
+python tools/build_mixed_source_corpus.py \
+--canonical-file /workspace/motion_cache/150_128shape_canonical/150_128shape_canonical_offset.pt \
+--humos-file /workspace/motion_cache/small150_128shape.pt \
+--output /workspace/motion_cache/150_128shape_mixed_source.pt
+
+  2. Launch:
+nohup python -u protomotions/train_agent.py \
+--robot-name smpl_mor --simulator isaacgym \
+--experiment-path examples/experiments/mimic/mlp_wide_discover_attention_source_switched.py \
+--experiment-name hhi_wide_150motion_128shape_discover_attention_source_switched \
+--motion-file /workspace/motion_cache/150_128shape_mixed_source.pt \
+--num-envs 6144 --batch-size 24576 --ngpu 1 \
+--use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+--wandb-group hhi_wide_150motion_128shape_discover_attention_source_switched > /tmp/hhi_wide_150motion_128shape_discover_attention_source_switched.log 2>&1 &
 ----
 
 

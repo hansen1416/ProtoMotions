@@ -91,7 +91,7 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
     --multi-thread-chunk-size=128M \
     --progress
 
-rclone copy r2:proto-data/ckpt/hhi_wide_150motion_128shape_discover_explore.zip ./results/ \
+rclone copy r2:proto-data/150_128shape_canonical/ /workspace/motion_cache/150_128shape_canonical/ \
     --transfers=2 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \

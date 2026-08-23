@@ -51,6 +51,7 @@ Example:
     )
 """
 
+import functools
 from typing import Any, Dict, List, Optional, Union
 
 import torch
@@ -69,19 +70,24 @@ MOTION_SOURCE_CANONICAL = 0  # canonical/AMASS -- shape-invariant DOF-space targ
 MOTION_SOURCE_HUMOS = 1      # HUMOS -- shape-dependent world-space target, jittery
 
 
+def _apply_source_mask(compute_func, active_source_id: int, motion_source_id, **kwargs):
+    """Module-level body for `_source_masked` -- kept top-level (not a closure) so the
+    `functools.partial` wrapping it is picklable (train_agent.py pickles `resolved_configs.pt`,
+    including every reward's compute_func, at every launch; a nested closure isn't picklable).
+    """
+    from protomotions.envs.rewards import mask_reward_by_source
+
+    return mask_reward_by_source(compute_func(**kwargs), motion_source_id, active_source_id)
+
+
 def _source_masked(compute_func, active_source_id: int):
     """Wrap a reward compute_func so its output is zeroed for envs on another source.
 
     The wrapped function takes an extra `motion_source_id` kwarg (bound via
-    `dynamic_vars` by the caller) alongside whatever `compute_func` already expects.
+    `dynamic_vars` by the caller) alongside whatever `compute_func` already expects. Returns a
+    `functools.partial`, not a closure, so it stays picklable.
     """
-    from protomotions.envs.rewards import mask_reward_by_source
-
-    def wrapped(motion_source_id, **kwargs):
-        return mask_reward_by_source(compute_func(**kwargs), motion_source_id, active_source_id)
-
-    wrapped.__name__ = f"{compute_func.__name__}_masked_source{active_source_id}"
-    return wrapped
+    return functools.partial(_apply_source_mask, compute_func, active_source_id)
 
 
 # =============================================================================
