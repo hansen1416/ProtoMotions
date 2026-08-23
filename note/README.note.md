@@ -5872,4 +5872,113 @@ Meant to run against the canonical (AMASS-only, no HUMOS) corpus, frame-0-ground
     --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
     --wandb-group hhi_wide_150motion_128shape_discover_attention_dofreward > /tmp/hhi_wide_150motion_128shape_discover_attention_dofreward.log 2>&1 &
 
+## 67. Source-Switched Reward -- AMASS Teaches Shape-Independent Skill, HUMOS Teaches
+Shape-Dependent Adaptation (2026-08-23)
+
+**The gap §65-66 left open.** `dof_pos`/`dof_vel` are exactly shape-invariant by construction
+(§65) -- the canonical AMASS-only corpus is a complete, clean target for all 128 shapes under
+that reward. But that's also the limitation: since the DOF-angle target is *identical* across
+every shape, training on it alone gives the policy zero reward pressure that correlates with
+`morphology_obs` -- no signal that its behavior should differ because of its own body. HUMOS's
+per-shape diffusion resample is the only data source in this pipeline whose target actually
+differs by shape at all -- jittery/noisy (§64), but the only channel that can carry a
+shape-adaptation signal.
+
+**Core idea (episode-level, not frame-level).** When an episode's reference motion is
+AMASS-canonical, reward the shape-independent skill (the DOF-space bundle from §65-66:
+dp/dv/contact_match/heading). When it's HUMOS, reward the shape-*dependent* part instead --
+world-space position/rotation/height (gt/gr/rh, the part that legitimately differs by body shape
+via FK) -- with loosened tolerance (softer exponential coefficients) than a precision target
+would use, since HUMOS is known to be jittery and demanding exact-frame precision against a
+noisy reference would just teach the policy to chase noise. Smoothing the HUMOS reference itself
+was considered and explicitly rejected -- only the tolerance changes, not the data.
+
+This has to be an episode-level switch, not a per-frame blend: AMASS and HUMOS versions of "the
+same" clip are not time-aligned (HUMOS pads every clip to a fixed 200 frames regardless of true
+duration; per-DOF-angle correlation between the two sources over their nominal overlap is
+~0.07-0.22, effectively uncorrelated -- confirmed earlier this investigation). Whichever source
+an episode draws from has to be the sole coherent target for that whole rollout.
+
+**The plan, in five parts:**
+
+1. **Per-motion source tag.** Add `motion_source_id` (0=AMASS, 1=HUMOS) as a new tensor field,
+   threaded through `MotionLib` → `GlobalClipPool` → `MimicContext` → `mimic_control.py`'s
+   `populate_context`, following the exact pattern `motion_gender_ids` already uses. Ends up
+   bindable via `dynamic_vars` in reward factories, same idiom as `contact_body_ids`.
+2. **Factory-level masking.** New primitive `mask_reward_by_source(reward, motion_source_id,
+   active_source_id)` in `rewards/base.py` -- zeroes a reward for envs not on that source.
+   Applied by wrapping compute funcs at the factory level (`component_factories.py`), not
+   touching the pure kernels or `combine_rewards`/`BaseEnv`.
+3. **New reward bundle** `mimic_source_switched_rewards_factory`. **Reward before this change**
+   (the currently-running `hhi_wide_150motion_128shape_discover_attention_dofreward`, via
+   `mimic_dof_tracking_rewards_factory`, §66): all five terms -- `dp_rew`, `dv_rew`,
+   `contact_match_rew`, `heading_rew`, `rh_rew` -- applied unconditionally to every episode, with
+   no source concept at all, because that run trains solely on the canonical AMASS corpus (no
+   HUMOS mixed in). **Reward after this change** splits that bundle by source and moves `rh_rew`
+   from the AMASS side to the HUMOS side (root height legitimately differs by body shape, so it
+   belongs with the shape-dependent terms rather than duplicated on both sides -- a judgment call,
+   not load-bearing):
+   - Source==0 (AMASS): `dp_rew`, `dv_rew`, `contact_match_rew`, `heading_rew` -- unchanged
+     coefficients from the DOF-space bundle, `rh_rew` dropped from this side.
+   - Source==1 (HUMOS): `gt_rew`, `gr_rew`, `rh_rew` (world-space) -- `gt_rew`/`gr_rew` are new
+     to the bundle (this run previously never used HUMOS data at all), coefficients loosened vs.
+     a precision baseline (first-guess values, not calibrated); `rh_rew` carried over from the
+     old bundle unchanged. No smoothing of the HUMOS reference itself, only tolerance.
+4. **Combined corpus build.** Concat `150_128shape_canonical_offset.pt` (tag 0) +
+   `small150_128shape.pt` (tag 1) → `150_128shape_mixed_source.pt`, 38,400 motions. The two are
+   already index-aligned per motion_id (verified), so it's a straight `torch.cat` per field
+   using `GlobalClipPool`'s field-list logic.
+5. **New experiment file** -- clone of `mlp_wide_discover_attention_dofreward.py`, swap in the
+   new reward factory and combined-corpus motion file. Everything else (attention architecture,
+   termination, evaluator, optimizers) held identical -- isolates this one variable.
+
+**Implementation:**
+- **Per-motion source tag**, threaded live into `EnvContext` during rollout, following the exact
+  pattern `motion_gender_ids` already uses:
+  - `protomotions/components/motion_lib.py`: `motion_source_id: Optional[Tensor]` class-level
+    field (0=canonical/AMASS, 1=HUMOS), `None` in `_create_empty`, sliced under `max_motions`,
+    `get_motion_source_id()` accessor.
+  - `protomotions/components/global_clip_pool.py`: added to `PER_MOTION_TENSOR_FIELDS` so
+    `_concat_clip_dicts` carries it through.
+  - `protomotions/envs/context_views.py`: `MimicContext.motion_source_id` (optional, `None` when
+    the loaded `MotionLib` carries no such metadata).
+  - `protomotions/envs/control/mimic_control.py`: `populate_context` fetches it via
+    `get_motion_source_id(motion_ids)` when present, passes into `MimicContext`.
+- **Masking at the factory level**, not inside the pure kernels: `mask_reward_by_source(reward,
+  motion_source_id, active_source_id)` added to `envs/rewards/base.py`. Every relevant factory
+  (`dp_rew_factory`, `dv_rew_factory`, `contact_match_rew_factory`, `heading_rew_factory`,
+  `gt_rew_factory`, `gr_rew_factory`, `rh_rew_factory`) gained an optional `source_mask` param --
+  when set, wraps `compute_func` via a new `_source_masked` helper and binds
+  `motion_source_id: EnvContext.mimic.motion_source_id` into `dynamic_vars`. No changes to
+  `combine_rewards`/`_METADATA_KEYS`/`BaseEnv` -- this is a value flowing through the existing
+  `dynamic_vars` mechanism, not a combiner policy.
+- **New bundle factory** `mimic_source_switched_rewards_factory` in `component_factories.py`:
+  canonical side (`source_mask=MOTION_SOURCE_CANONICAL`) = dp/dv/contact_match/heading, unchanged
+  coefficients from §66; HUMOS side (`source_mask=MOTION_SOURCE_HUMOS`) = gt/gr/rh, coefficients
+  loosened vs. a precision-tracking baseline (`gt_coef=-25.0` vs. the sharper `-100.0` default) --
+  an unvalidated first guess, to be tuned against real training curves.
+- **New data-build tool** `tools/build_mixed_source_corpus.py`: tags every motion in
+  `--canonical-file` with `motion_source_id=0` and every motion in `--humos-file` with
+  `motion_source_id=1`, concatenates via `GlobalClipPool._concat_clip_dicts` (the two source
+  files are already index-aligned by motion_id -- same clip/beta_key/gender ordering, verified in
+  §66's investigation -- so this is a straight per-field `torch.cat`, no remapping).
+- **New experiment file** `examples/experiments/mimic/mlp_wide_discover_attention_source_switched.py`:
+  clone of `mlp_wide_discover_attention_dofreward.py`, only `reward_components` swapped to
+  `mimic_source_switched_rewards_factory` and `--motion-file` pointed at the combined corpus --
+  same architecture/termination/evaluator/optimizers, isolating the reward-switching/data-mixing
+  change alone.
+
+**Verified (no GPU needed):** `py_compile` clean on every touched file. Standalone masking test:
+built fake `motion_source_id` tensors (mix of 0/1), confirmed `_source_masked`-wrapped
+`compute_dp_rew`/`compute_gt_rew` are exactly zero on the non-matching source and unchanged on
+the matching one. Built a real `smpl_mor` `RobotConfig`, instantiated the new experiment file's
+`env_config()`/`agent_config()` end-to-end -- `reward_components` has all 7 masked terms, each
+correctly bound to `EnvContext.mimic.motion_source_id`; evaluator/observation/termination/actor
+keys all match `mlp_wide_discover_attention_dofreward.py`. `git status --short` confirms only the
+intended files changed. Not verifiable locally: actual training behavior, whether the loosened
+HUMOS-side tolerance is well-calibrated, or whether this measurably improves shape-conditioning
+over the pure-canonical `attention_dofreward` run -- needs a pod run and wandb comparison, same
+as every other lever in this lineage. Corpus not yet built (needs `150_128shape_canonical_offset.pt`
++ `small150_128shape.pt` both present, e.g. on the pod) or launched.
+
 Not yet launched.

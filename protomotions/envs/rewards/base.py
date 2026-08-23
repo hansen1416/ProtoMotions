@@ -349,6 +349,26 @@ def power_consumption_sum(
         return torch.abs(dof_forces * dof_vel).sum(dim=-1)
 
 
+def mask_reward_by_source(
+    reward: Tensor, motion_source_id: Tensor, active_source_id: int
+) -> Tensor:
+    """Zero out a reward's contribution for envs whose current motion isn't the given source.
+
+    Used to build episode-level source-switched reward bundles (canonical/AMASS vs.
+    HUMOS) -- see note/README.note.md Section 67.
+
+    Args:
+        reward: Already-computed reward [num_envs].
+        motion_source_id: Per-env data-source tag [num_envs] (0=canonical/AMASS, 1=HUMOS).
+        active_source_id: The source id this reward should remain active for.
+
+    Returns:
+        Masked reward [num_envs]: unchanged where motion_source_id == active_source_id,
+        zero elsewhere.
+    """
+    return reward * (motion_source_id == active_source_id).float()
+
+
 def velocity_squared_sum(
     velocity: Tensor,
     indices: Optional[Tensor] = None,

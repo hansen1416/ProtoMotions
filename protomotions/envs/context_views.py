@@ -288,6 +288,10 @@ class MimicContext:
     anchor_idx: int = FieldPath()
     ref_lr: Tensor = FieldPath()
 
+    # Per-env data-source tag (0=canonical/AMASS, 1=HUMOS). See note/README.note.md
+    # Section 67. None when the loaded MotionLib carries no motion_source_id.
+    motion_source_id: Tensor = FieldPath()
+
     # Future root properties (precomputed)
     future_root_pos: Tensor = FieldPath()
     future_root_rot: Tensor = FieldPath()
@@ -315,6 +319,7 @@ class MimicContext:
         anchor_idx: int,
         ref_lr: Tensor,
         reward_ref_state: Optional["RobotState"] = None,
+        motion_source_id: Optional[Tensor] = None,
     ):
         """Initialize MimicContext with precomputed derived values.
 
@@ -330,6 +335,8 @@ class MimicContext:
             ref_lr: Reference DOF in local rotation format for DOF tracking rewards.
             reward_ref_state: Reference state used by reward factories. Defaults to
                 `ref_state` when not provided (i.e. no phase-tolerant window configured).
+            motion_source_id: Per-env data-source tag [num_envs] (0=canonical/AMASS,
+                1=HUMOS), or None when the loaded MotionLib carries no such metadata.
         """
         # Store direct values
         self.ref_state = ref_state
@@ -344,6 +351,7 @@ class MimicContext:
         self.future_dof_vel = future_dof_vel
         self.anchor_idx = anchor_idx
         self.ref_lr = ref_lr
+        self.motion_source_id = motion_source_id
 
         # Precompute future root properties
         self.future_root_pos = future_pos[:, :, 0, :]

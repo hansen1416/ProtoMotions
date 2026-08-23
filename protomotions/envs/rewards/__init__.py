@@ -41,6 +41,7 @@ from protomotions.envs.rewards.base import (
     absolute_difference_sum,
     power_consumption_sum,
     velocity_squared_sum,
+    mask_reward_by_source,
 )
 
 # Tracking reward kernels
@@ -101,6 +102,7 @@ __all__ = [
     "absolute_difference_sum",
     "power_consumption_sum",
     "velocity_squared_sum",
+    "mask_reward_by_source",
     # Tracking reward kernels
     "compute_gt_rew",
     "compute_gr_rew",

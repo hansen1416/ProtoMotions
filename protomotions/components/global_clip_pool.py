@@ -61,6 +61,7 @@ PER_MOTION_TENSOR_FIELDS = [
     "motion_weights",
     "motion_betas",
     "motion_gender_ids",
+    "motion_source_id",
 ]
 PER_MOTION_TUPLE_FIELDS = [
     "motion_files",

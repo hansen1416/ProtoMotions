@@ -152,6 +152,12 @@ class MotionLib:
     motion_clip_ids: Optional[Tuple[str, ...]] = None    # stable clip identity, shared across shapes
     # morphology =======
 
+    # source switching =======
+    # Optional per-motion data-source tag (static per motion, not per frame).
+    # 0 = canonical/AMASS, 1 = HUMOS. See note/README.note.md Section 67.
+    motion_source_id: Optional[torch.Tensor] = None       # [num_motions]
+    # source switching =======
+
     # Get all field names defined at class level
     _fields = list(__annotations__.keys())
 
@@ -232,6 +238,10 @@ class MotionLib:
         self.motion_asset_ids = None
         self.motion_clip_ids = None
         # morphology =======
+
+        # source switching =======
+        self.motion_source_id = None
+        # source switching =======
 
     @classmethod
     def empty(cls, device: str = "cpu"):
@@ -325,6 +335,18 @@ class MotionLib:
             return self.motion_gender_ids
 
         return self.motion_gender_ids[motion_ids]
+
+    def get_motion_source_id(
+        self, motion_ids: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """Get source ids for selected motion ids: 0=canonical/AMASS, 1=HUMOS."""
+        if self.motion_source_id is None:
+            raise RuntimeError("MotionLib does not contain motion_source_id.")
+
+        if motion_ids is None:
+            return self.motion_source_id
+
+        return self.motion_source_id[motion_ids]
 
     def get_motion_asset_ids(
         self, motion_ids: Optional[torch.Tensor] = None
@@ -783,6 +805,7 @@ class MotionLib:
                 "motion_weights",
                 "motion_betas",
                 "motion_gender_ids",
+                "motion_source_id",
             ):
                 if loaded_data.get(key) is not None:
                     loaded_data[key] = loaded_data[key][:n]

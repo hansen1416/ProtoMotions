@@ -132,6 +132,15 @@ class MimicControl(ControlComponent):
         
         # Get single-step reference state at current time (for rewards)
         ref_state = self.env.motion_lib.get_motion_state(motion_ids, motion_times)
+
+        # Per-env data-source tag for source-switched rewards (note/README.note.md
+        # Section 67). None when the loaded MotionLib carries no such metadata --
+        # only experiments that bind motion_source_id in a reward factory need it.
+        motion_source_id = (
+            self.env.motion_lib.get_motion_source_id(motion_ids)
+            if getattr(self.env.motion_lib, "motion_source_id", None) is not None
+            else None
+        )
         
         # Apply terrain height correction to reference state
         ref_gt = ref_state.rigid_body_pos.clone()
@@ -301,6 +310,7 @@ class MimicControl(ControlComponent):
             future_dof_vel=future_dof_vel,
             anchor_idx=self.env.robot_config.anchor_body_index,
             ref_lr=ref_lr,
+            motion_source_id=motion_source_id,
         )
     
     def create_visualization_markers(self, headless: bool) -> Dict[str, VisualizationMarkerConfig]:
