@@ -5810,5 +5810,66 @@ retune against real rollout data once available, same status the 0.5m default pr
 it was tuned by trial.
 
 **Next step (not yet started):** implement the above -- new reward kernels, `dp_error_factory`,
-new experiment file `mlp_wide_discover_dofreward.py` (clone of `mlp_wide_discover.py`, canonical
-corpus only, both `gt_error`/`dp_error` logged side by side for comparison).
+new experiment file combining this with the confirmed-good self-attention architecture (§61).
+See §66.
+
+## 66. DOF-Space Reward Implemented -- Combined Directly With Self-Attention, Not As a Standalone
+MLP Variant (2026-08-23)
+
+**Implemented §65's plan.** New shape-invariant reward/eval infrastructure, reused by any
+experiment file:
+- `protomotions/envs/rewards/tracking.py`: `compute_dp_rew` (DOF-angle position, mirrors
+  `compute_gt_rew`), `compute_dv_rew` (DOF-angle velocity, mirrors `compute_gv_rew`),
+  `compute_heading_rew` (root yaw-only, via the already-existing `calc_heading` utility).
+- `protomotions/envs/terminations/tracking.py`: `mean_dof_pos_error` (mean absolute per-DOF
+  error, radians -- mirrors `mean_body_pos_error`).
+- `protomotions/envs/component_factories.py`: `dp_rew_factory`, `dv_rew_factory`,
+  `heading_rew_factory`, `mimic_dof_tracking_rewards_factory` (bundles dp/dv/
+  `contact_match_rew_factory` -- reused as-is, already existed/`heading`/`rh`), and
+  `dp_error_factory(threshold=0.35)` -- the empirically-calibrated starting value from §65.
+- All exported through `envs/rewards/__init__.py` and `envs/terminations/__init__.py`.
+- Verified: `py_compile` clean on every touched file; standalone kernel calls on fake tensors
+  produce correctly-shaped output; built a real `smpl_mor` `RobotConfig` (confirms
+  `num_dofs=69` matches `dof_pos`) and instantiated `env_config()`/`agent_config()` end-to-end
+  -- all `EnvContext` path bindings (`EnvContext.mimic.reward_ref_state.dof_pos` etc.) resolved
+  without error. Not verifiable locally: actual training stability, or whether the 0.35 rad
+  threshold holds up -- no GPU on this machine.
+
+**Only one experiment file, not two.** Originally built a standalone `mlp_wide_discover_dofreward.py`
+(clone of `mlp_wide_discover.py`'s flat-MLP trunk, reward/eval swapped to DOF-space) as the
+single-variable-swap test. Superseded before launch: decided to combine the DOF-space reward
+directly with the self-attention architecture (§61) instead of running the flat-MLP version
+first, so the flat-MLP file was deleted rather than kept as a stepping stone.
+
+**New file: `examples/experiments/mimic/mlp_wide_discover_attention_dofreward.py`.** Combines,
+for the first time, two independently-confirmed levers on top of `mlp_wide_discover.py`'s
+relaxed termination/reward baseline:
+- The self-attention temporal encoder from `mlp_wide_discover_attention.py` (§61: 84.7%
+  eval/success_rate vs. baseline's 72% at matched step count on the 150-clip corpus, smoothest
+  loss curves in the lineage) -- kept as-is, **including its historical/lookahead observation
+  window** (`HISTORY_STEPS=[1,2,3,4,8,16,32]`, `FUTURE_STEPS=[1,2,4,8]`). Attention needs a
+  multi-step token sequence to attend over, so that obs change necessarily travels with the
+  architecture change -- this combined file is not a strict single-variable swap against
+  `mlp_wide_discover.py`, it's attention-with-its-required-window + DOF-space reward.
+- The DOF-space reward/eval from the deleted `mlp_wide_discover_dofreward.py`: `reward_components`
+  uses `mimic_dof_tracking_rewards_factory` (replacing `mimic_tracking_rewards_factory`);
+  `evaluator.evaluation_components` adds `dp_error` (threshold=0.35) *alongside* the existing
+  `gt_error` (threshold=0.5), not replacing it, so both failure curves are visible on the same
+  run for direct comparison.
+
+**Known open item, carried over unchanged, not fixed here:** the positional-encoding gap in the
+attention architecture (§62 -- Transformer has no explicit position embedding). Flagged as a
+candidate fix before a full-scale launch.
+
+Meant to run against the canonical (AMASS-only, no HUMOS) corpus, frame-0-grounded on the pod:
+
+    nohup python -u protomotions/train_agent.py \
+    --robot-name smpl_mor --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp_wide_discover_attention_dofreward.py \
+    --experiment-name hhi_wide_150motion_128shape_discover_attention_dofreward \
+    --motion-file /workspace/motion_cache/150_128shape_canonical/150_128shape_canonical_offset.pt \
+    --num-envs 6144 --batch-size 24576 --ngpu 1 \
+    --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+    --wandb-group hhi_wide_150motion_128shape_discover_attention_dofreward > /tmp/hhi_wide_150motion_128shape_discover_attention_dofreward.log 2>&1 &
+
+Not yet launched.

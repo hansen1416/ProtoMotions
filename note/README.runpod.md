@@ -590,8 +590,8 @@ nohup python -u protomotions/train_agent.py \
 nohup python -u protomotions/train_agent.py \
 --robot-name smpl_mor \
 --simulator isaacgym \
---experiment-path examples/experiments/mimic/mlp_wide_discover_dofreward.py \
---experiment-name hhi_wide_150motion_128shape_discover_dofreward \
+--experiment-path examples/experiments/mimic/mlp_wide_discover_attention_dofreward.py \
+--experiment-name hhi_wide_150motion_128shape_discover_attention_dofreward \
 --motion-file /workspace/motion_cache/150_128shape_canonical/150_128shape_canonical_offset.pt \
 --num-envs 4096 \
 --batch-size 16384 \
@@ -599,7 +599,7 @@ nohup python -u protomotions/train_agent.py \
 --use-wandb \
 --wandb-project hhi-protomotions \
 --wandb-entity yugoamaryl \
---wandb-group hhi_wide_150motion_128shape_discover_dofreward > /tmp/train_150motion_discover_dofreward.log 2>&1 &
+--wandb-group hhi_wide_150motion_128shape_discover_attention_dofreward > /tmp/hhi_wide_150motion_128shape_discover_attention_dofreward.log 2>&1 &
 ----
 
 

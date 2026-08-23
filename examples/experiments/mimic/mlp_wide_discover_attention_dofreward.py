@@ -27,17 +27,16 @@ termination/reward baseline, for the first time together:
     over, so this obs change travels with the architecture change, exactly as it did in the
     original attention experiment (its own env_config() is NOT byte-identical to
     `mlp_wide_discover.py`'s -- it's built on top of `mlp_wide_discover_historical_lookahead.py`).
-  - The shape-invariant DOF-space tracking reward/eval-failure criterion from
-    `mlp_wide_discover_dofreward.py` (note/README.note.md §65): `mimic_dof_tracking_rewards_factory`
-    (dp/dv/contact_match/heading/rh) replaces `mimic_tracking_rewards_factory` (gt/gr/gv/gav/rh),
-    and `dp_error` (mean DOF-angle error, radians, threshold=0.35) is logged alongside the
-    existing `gt_error` (mean world-space position error, meters, threshold=0.5) in the
-    evaluator, rather than replacing it, so both failure curves are visible on the same run.
+  - The shape-invariant DOF-space tracking reward/eval-failure criterion (note/README.note.md
+    §65-66): `mimic_dof_tracking_rewards_factory` (dp/dv/contact_match/heading/rh) replaces
+    `mimic_tracking_rewards_factory` (gt/gr/gv/gav/rh), and `dp_error` (mean DOF-angle error,
+    radians, threshold=0.35) is logged alongside the existing `gt_error` (mean world-space
+    position error, meters, threshold=0.5) in the evaluator, rather than replacing it, so both
+    failure curves are visible on the same run.
 
-Meant to run against the canonical (AMASS-only, no HUMOS) corpus, same as
-`mlp_wide_discover_dofreward.py` -- since `dof_pos` is exactly shape-invariant, the canonical
-single-theta(t)-per-clip corpus is a complete target for all 128 shapes under this reward, no
-HUMOS blending needed.
+Meant to run against the canonical (AMASS-only, no HUMOS) corpus -- since `dof_pos` is exactly
+shape-invariant, the canonical single-theta(t)-per-clip corpus is a complete target for all 128
+shapes under this reward, no HUMOS blending needed.
 
 **Known open item, not applied here (see note/README.note.md §62):** the attention architecture
 has a positional-encoding gap -- the Transformer has no explicit position embedding, so token
@@ -147,9 +146,9 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
     }
 
     # DOF-space (shape-invariant) tracking reward, replacing world-space gt/gr/gv/gav -- see
-    # mlp_wide_discover_dofreward.py / note/README.note.md Section 65. Weights are a first-guess,
-    # combining discover.py's split position+rotation / velocity+angular-velocity weights into
-    # one DOF-angle position/velocity term each.
+    # note/README.note.md Section 65-66. Weights are a first-guess, combining discover.py's
+    # split position+rotation / velocity+angular-velocity weights into one DOF-angle
+    # position/velocity term each.
     reward_components = {
         **mimic_dof_tracking_rewards_factory(
             dp_weight=0.8,
