@@ -5982,3 +5982,39 @@ as every other lever in this lineage. Corpus not yet built (needs `150_128shape_
 + `small150_128shape.pt` both present, e.g. on the pod) or launched.
 
 Not yet launched.
+
+## 68. Full Source-Weighted AMASS/HUMOS Reward -- Implemented (2026-08-25)
+
+**Experiment:** `examples/experiments/mimic/mlp_wide_discover_attention_source_weighted.py`.
+This is the controlled successor to the hard source switch in Section 67. The hard switch discards
+useful signal on each episode: AMASS receives no world-space feedback and HUMOS receives no
+shape-invariant pose feedback. The new experiment keeps all nine tracking terms active for both
+sources, but changes their scalar importance according to the source. Canonical AMASS uses a
+75% normalized-DOF / 25% world-space profile; HUMOS uses 30% DOF / 70% world-space. Positive
+reward mass is normalized to approximately 1.3 on both sides so one source does not dominate PPO
+simply because its nominal reward scale is larger; contact remains a separately scaled penalty.
+
+**Data choice:** use the 150-clip canonical AMASS corpus already retargeted to all 128 body shapes,
+not the original single-shape AMASS data, and combine it with the corresponding 150-clip x
+128-shape HUMOS corpus. `tools/build_mixed_source_corpus.py` now validates that both files have the
+same clip/shape row ordering before concatenation. It assigns source-specific task identities
+(`amass::<clip>` and `humos::<clip>`) while preserving the shared identity as
+`motion_base_clip_ids`. This prevents evaluator and curriculum updates for one source from leaking
+into the other source's version of the same clip.
+
+**Sampling and evaluation:** motion sampling is source-first with `[0.5, 0.5]` probability, then
+uses the learned curriculum weights only within the selected source. W&B reports `eval_amass/*`
+and `eval_humos/*` separately. AMASS success is defined by the shape-invariant `dp_error`
+threshold, while HUMOS success is defined by the world-position `gt_error` threshold; the old
+combined dual-threshold success remains logged for comparison, alongside
+`eval/source_conditioned_success_rate`. Best-checkpoint selection minimizes
+`eval_amass/dp_error/mean`, keeping the final AMASS rotation/DOF evaluation as the primary target
+instead of optimizing the misleading mixed success number.
+
+**Implementation status:** source-aware corpus metadata, source-first sampling, the blended reward
+factory, per-source evaluator metrics, source-specific success rules, and the new experiment file
+are implemented. Five focused CPU regression tests pass; the files compile, the experiment config
+instantiates, reward components pickle correctly, and a synthetic end-to-end corpus build passes.
+The real combined corpus has not yet been built and the experiment has not yet been launched; both
+require the two packaged input corpora on the RunPod. Build and launch commands are included in the
+new experiment file's module docstring.

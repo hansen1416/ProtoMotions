@@ -80,3 +80,13 @@ class MimicMotionManagerConfig(MotionManagerConfig):
         default=True,
         metadata={"help": "Whether to resample motion on environment reset."}
     )
+    source_sampling_weights: Optional[List[float]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Optional source-first sampling mass indexed by motion_source_id. "
+                "For example [0.5, 0.5] keeps AMASS and HUMOS sampling balanced "
+                "while curriculum weights operate within each source."
+            )
+        },
+    )

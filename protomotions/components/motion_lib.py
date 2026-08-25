@@ -149,7 +149,8 @@ class MotionLib:
     motion_genders: Optional[Tuple[str, ...]] = None
     motion_beta_keys: Optional[Tuple[str, ...]] = None
     motion_asset_ids: Optional[Tuple[str, ...]] = None   # e.g. "male_0e26b88d"
-    motion_clip_ids: Optional[Tuple[str, ...]] = None    # stable clip identity, shared across shapes
+    motion_clip_ids: Optional[Tuple[str, ...]] = None    # task identity, shared across shape variants
+    motion_base_clip_ids: Optional[Tuple[str, ...]] = None  # cross-source clip identity
     # morphology =======
 
     # source switching =======
@@ -237,6 +238,7 @@ class MotionLib:
         self.motion_beta_keys = None
         self.motion_asset_ids = None
         self.motion_clip_ids = None
+        self.motion_base_clip_ids = None
         # morphology =======
 
         # source switching =======
@@ -811,7 +813,15 @@ class MotionLib:
                     loaded_data[key] = loaded_data[key][:n]
 
             # Per-motion tuples / sequences
-            for key in ("motion_genders", "motion_beta_keys", "motion_asset_ids", "motion_files"):
+            for key in (
+                "motion_genders",
+                "motion_beta_keys",
+                "motion_asset_ids",
+                "motion_clip_ids",
+                "motion_base_clip_ids",
+                "motion_npz_files",
+                "motion_files",
+            ):
                 if loaded_data.get(key) is not None:
                     loaded_data[key] = loaded_data[key][:n]
 
@@ -830,6 +840,8 @@ class MotionLib:
             "motion_genders",
             "motion_beta_keys",
             "motion_asset_ids",
+            "motion_clip_ids",
+            "motion_base_clip_ids",
         ]:
             if hasattr(self, field) and getattr(self, field) is not None:
                 setattr(self, field, tuple(getattr(self, field)))
@@ -986,13 +998,22 @@ class MotionLib:
         self,
         asset_ids: List[str],
         deterministic: bool = False,
+        source_sampling_weights: Optional[List[float]] = None,
     ) -> torch.Tensor:
         """
         Sample one compatible motion for each asset_id.
 
+        When source_sampling_weights is provided, sampling is hierarchical: draw the
+        source first, then apply curriculum weights only among compatible motions from
+        that source. This keeps an explicit AMASS/HUMOS ratio from drifting as their
+        independent curricula evolve.
+
         Args:
             asset_ids: list of asset ids, e.g. ["male_0e26b88d", "female_0e26b88d"]
-            deterministic: if True, always pick the first compatible motion.
+            deterministic: if True, pick the first compatible motion (or first
+                positive-probability source, then its first motion).
+            source_sampling_weights: optional non-negative probability mass indexed
+                by motion_source_id, e.g. [0.5, 0.5].
 
         Returns:
             motion_ids: LongTensor [len(asset_ids)]
@@ -1000,20 +1021,63 @@ class MotionLib:
         if self.motion_asset_ids is None:
             raise RuntimeError("MotionLib does not contain motion_asset_ids.")
 
-        # {'male_0e26b88d': tensor([0], device='cuda:0'), 'female_0e26b88d': tensor([1], device='cuda:0'), ...}
-        # beta_key_motion_id_mapping
+        source_probs = None
+        if source_sampling_weights is not None:
+            if self.motion_source_id is None:
+                raise RuntimeError(
+                    "source_sampling_weights requires motion_source_id metadata."
+                )
+            source_probs = torch.as_tensor(
+                source_sampling_weights, dtype=torch.float32, device=self.device
+            )
+            if source_probs.ndim != 1 or source_probs.numel() == 0:
+                raise ValueError("source_sampling_weights must be a non-empty 1D list.")
+            if torch.any(source_probs < 0) or not torch.isfinite(source_probs).all():
+                raise ValueError(
+                    "source_sampling_weights must contain finite non-negative values."
+                )
+            if source_probs.sum() <= 0:
+                raise ValueError("source_sampling_weights must have positive total mass.")
+            max_source_id = int(self.motion_source_id.max().item())
+            if source_probs.numel() <= max_source_id:
+                raise ValueError(
+                    "source_sampling_weights does not cover every motion_source_id; "
+                    f"need at least {max_source_id + 1} entries."
+                )
+            source_probs = source_probs / source_probs.sum()
+
         asset_id_to_motion_ids = self.build_asset_id_to_motion_ids()
-
         sampled_motion_ids = []
+        sampled_source_ids = None
+        if source_probs is not None:
+            if deterministic:
+                source_id = torch.nonzero(source_probs > 0).flatten()[0]
+                sampled_source_ids = source_id.expand(len(asset_ids))
+            else:
+                # One batched draw avoids one GPU kernel launch per resetting env.
+                sampled_source_ids = torch.multinomial(
+                    source_probs,
+                    num_samples=len(asset_ids),
+                    replacement=True,
+                )
 
-        for asset_id in asset_ids:
+        for asset_index, asset_id in enumerate(asset_ids):
             if asset_id not in asset_id_to_motion_ids:
                 raise RuntimeError(
-                    f"No compatible motions found for asset_id='{asset_id}'. "
+                    f"No compatible motions found for asset_id={asset_id!r}. "
                     f"Available asset_ids include: {list(asset_id_to_motion_ids.keys())[:10]}"
                 )
 
             candidate_ids = asset_id_to_motion_ids[asset_id]
+            if source_probs is not None:
+                source_id = sampled_source_ids[asset_index]
+                source_mask = self.motion_source_id[candidate_ids] == source_id
+                candidate_ids = candidate_ids[source_mask]
+                if candidate_ids.numel() == 0:
+                    raise RuntimeError(
+                        f"No source {int(source_id.item())} motions found for "
+                        f"asset_id={asset_id!r}."
+                    )
 
             if deterministic:
                 motion_id = candidate_ids[0]

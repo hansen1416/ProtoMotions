@@ -613,7 +613,7 @@ nohup python -u protomotions/train_agent.py \
 --experiment-path examples/experiments/mimic/mlp_wide_discover_attention_source_switched.py \
 --experiment-name hhi_wide_150motion_128shape_discover_attention_source_switched \
 --motion-file /workspace/motion_cache/150_128shape_mixed_source.pt \
---num-envs 6144 --batch-size 24576 --ngpu 1 \
+--num-envs 2048 --batch-size 8192 --ngpu 1 \
 --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
 --wandb-group hhi_wide_150motion_128shape_discover_attention_source_switched > /tmp/hhi_wide_150motion_128shape_discover_attention_source_switched.log 2>&1 &
 ----

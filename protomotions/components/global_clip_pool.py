@@ -69,6 +69,7 @@ PER_MOTION_TUPLE_FIELDS = [
     "motion_beta_keys",
     "motion_asset_ids",
     "motion_clip_ids",
+    "motion_base_clip_ids",
     "motion_npz_files",
 ]
 

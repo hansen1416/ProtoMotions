@@ -15,7 +15,7 @@
 #
 """Configuration classes for evaluators."""
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass, field
 
 from protomotions.envs.mdp_component import MdpComponent
@@ -107,4 +107,32 @@ class MimicEvaluatorConfig(EvaluatorConfig):
             "min": 0.0,
             "max": 1.0,
         }
+    )
+    score_metric: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Optional logged evaluation metric used for score-based checkpointing. "
+                "None preserves the default combined success rate."
+            )
+        },
+    )
+    score_greater_is_better: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Whether larger score_metric values are better. When False, the "
+                "evaluator negates the metric before score-based checkpoint comparison."
+            )
+        },
+    )
+    source_success_components: Dict[int, List[str]] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "Optional evaluation-component names defining success per motion_source_id. "
+                "For example {0: ['dp_error'], 1: ['gt_error']} evaluates AMASS in "
+                "rotation/DOF space and HUMOS in world-position space."
+            )
+        },
     )

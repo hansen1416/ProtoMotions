@@ -107,7 +107,10 @@ class MimicMotionManager(MotionManager):
             and self.motion_lib.has_morphology_metadata()
         ):
             asset_ids = [self.env_asset_ids[i.item()] for i in reset_env_ids]
-            new_motion_ids = self.motion_lib.sample_motions_for_asset_ids(asset_ids)
+            new_motion_ids = self.motion_lib.sample_motions_for_asset_ids(
+                asset_ids,
+                source_sampling_weights=self.config.source_sampling_weights,
+            )
 
         # tensor([ 0,  1,  2,  3,  4,  5,  ...], device='cuda:0') 
         # tensor([65, 27,  1,  3, 61, 33, ...], device='cuda:0')

@@ -83,11 +83,50 @@ def _apply_source_mask(compute_func, active_source_id: int, motion_source_id, **
 def _source_masked(compute_func, active_source_id: int):
     """Wrap a reward compute_func so its output is zeroed for envs on another source.
 
-    The wrapped function takes an extra `motion_source_id` kwarg (bound via
-    `dynamic_vars` by the caller) alongside whatever `compute_func` already expects. Returns a
-    `functools.partial`, not a closure, so it stays picklable.
+    The wrapped function takes an extra motion_source_id kwarg (bound via
+    dynamic_vars by the caller) alongside whatever compute_func already expects. Returns a
+    functools.partial, not a closure, so it stays picklable.
     """
     return functools.partial(_apply_source_mask, compute_func, active_source_id)
+
+
+def _apply_source_weights(
+    compute_func,
+    canonical_weight: float,
+    humos_weight: float,
+    motion_source_id: Tensor,
+    **kwargs,
+):
+    """Compute one reward term once, then select its per-source scalar weight."""
+    reward = compute_func(**kwargs)
+    source_weight = torch.where(
+        motion_source_id == MOTION_SOURCE_CANONICAL,
+        torch.as_tensor(canonical_weight, dtype=reward.dtype, device=reward.device),
+        torch.as_tensor(humos_weight, dtype=reward.dtype, device=reward.device),
+    )
+    return reward * source_weight
+
+
+def _source_weighted_component(
+    component: MdpComponent,
+    canonical_weight: float,
+    humos_weight: float,
+) -> MdpComponent:
+    """Turn an ordinary reward component into a single-pass source-weighted component.
+
+    The source-specific scalar is applied inside the wrapped compute function, so every
+    underlying reward kernel runs once rather than duplicating AMASS/HUMOS components.
+    combine_rewards then uses a neutral outer weight of 1.0.
+    """
+    component.compute_func = functools.partial(
+        _apply_source_weights,
+        component.compute_func,
+        canonical_weight,
+        humos_weight,
+    )
+    component.dynamic_vars["motion_source_id"] = EnvContext.mimic.motion_source_id
+    component.static_params["weight"] = 1.0
+    return component
 
 
 # =============================================================================
@@ -584,46 +623,68 @@ def gr_rew_factory(
     )
 
 
-def gv_rew_factory(weight: float = 0.1, coefficient: float = -0.5) -> MdpComponent:
+def gv_rew_factory(
+    weight: float = 0.1,
+    coefficient: float = -0.5,
+    source_mask: Optional[int] = None,
+) -> MdpComponent:
     """Factory for velocity tracking reward.
 
     Args:
         weight: Reward weight.
         coefficient: Exponential coefficient for error.
+        source_mask: Optional motion source on which this term remains active.
 
     Returns:
         MdpComponent configured for velocity tracking.
     """
     from protomotions.envs.rewards import compute_gv_rew
 
+    compute_func = compute_gv_rew
+    dynamic_vars = {
+        "current_rigid_body_vel": EnvContext.current.rigid_body_vel,
+        "ref_rigid_body_vel": EnvContext.mimic.reward_ref_state.rigid_body_vel,
+    }
+    if source_mask is not None:
+        compute_func = _source_masked(compute_func, source_mask)
+        dynamic_vars["motion_source_id"] = EnvContext.mimic.motion_source_id
+
     return MdpComponent(
-        compute_func=compute_gv_rew,
-        dynamic_vars={
-            "current_rigid_body_vel": EnvContext.current.rigid_body_vel,
-            "ref_rigid_body_vel": EnvContext.mimic.reward_ref_state.rigid_body_vel,
-        },
+        compute_func=compute_func,
+        dynamic_vars=dynamic_vars,
         static_params={"weight": weight, "coefficient": coefficient},
     )
 
 
-def gav_rew_factory(weight: float = 0.1, coefficient: float = -0.1) -> MdpComponent:
+def gav_rew_factory(
+    weight: float = 0.1,
+    coefficient: float = -0.1,
+    source_mask: Optional[int] = None,
+) -> MdpComponent:
     """Factory for angular velocity tracking reward.
 
     Args:
         weight: Reward weight.
         coefficient: Exponential coefficient for error.
+        source_mask: Optional motion source on which this term remains active.
 
     Returns:
         MdpComponent configured for angular velocity tracking.
     """
     from protomotions.envs.rewards import compute_gav_rew
 
+    compute_func = compute_gav_rew
+    dynamic_vars = {
+        "current_rigid_body_ang_vel": EnvContext.current.rigid_body_ang_vel,
+        "ref_rigid_body_ang_vel": EnvContext.mimic.reward_ref_state.rigid_body_ang_vel,
+    }
+    if source_mask is not None:
+        compute_func = _source_masked(compute_func, source_mask)
+        dynamic_vars["motion_source_id"] = EnvContext.mimic.motion_source_id
+
     return MdpComponent(
-        compute_func=compute_gav_rew,
-        dynamic_vars={
-            "current_rigid_body_ang_vel": EnvContext.current.rigid_body_ang_vel,
-            "ref_rigid_body_ang_vel": EnvContext.mimic.reward_ref_state.rigid_body_ang_vel,
-        },
+        compute_func=compute_func,
+        dynamic_vars=dynamic_vars,
         static_params={"weight": weight, "coefficient": coefficient},
     )
 
@@ -943,6 +1004,101 @@ def mimic_source_switched_rewards_factory(
         "rh_rew": rh_rew_factory(
             weight=rh_weight, coefficient=rh_coef, source_mask=MOTION_SOURCE_HUMOS
         ),
+    }
+
+
+def build_source_weighted_reward_table(dof_mix: float) -> Dict[str, float]:
+    """Blend the calibrated DOF and world profiles at a fixed total positive mass.
+
+    The world profile has positive mass 1.3. The DOF profile's positive terms
+    (dp/dv/heading/rh) are rescaled from 1.4 to 1.3 before interpolation so source
+    choice cannot dominate PPO through nominal reward magnitude. Contact remains a
+    separately scaled penalty.
+    """
+    if not 0.0 <= dof_mix <= 1.0:
+        raise ValueError(f"dof_mix must be in [0, 1], got {dof_mix}")
+
+    dof_scale = 1.3 / 1.4
+    dof_profile = {
+        "dp": 0.8 * dof_scale,
+        "dv": 0.3 * dof_scale,
+        "contact": -0.1,
+        "heading": 0.1 * dof_scale,
+        "gt": 0.0,
+        "gr": 0.0,
+        "gv": 0.0,
+        "gav": 0.0,
+        "rh": 0.2 * dof_scale,
+    }
+    world_profile = {
+        "dp": 0.0,
+        "dv": 0.0,
+        "contact": 0.0,
+        "heading": 0.0,
+        "gt": 0.5,
+        "gr": 0.3,
+        "gv": 0.1,
+        "gav": 0.2,
+        "rh": 0.2,
+    }
+    return {
+        name: dof_mix * dof_profile[name] + (1.0 - dof_mix) * world_profile[name]
+        for name in dof_profile
+    }
+
+
+def mimic_source_weighted_rewards_factory(
+    canonical_dof_mix: float = 0.75,
+    humos_dof_mix: float = 0.30,
+    dp_coef: float = -40.0,
+    dv_coef: float = -0.5,
+    heading_coef: float = -10.0,
+    gt_coef: float = -25.0,
+    gr_coef: float = -5.0,
+    gv_coef: float = -0.5,
+    gav_coef: float = -0.1,
+    rh_coef: float = -100.0,
+) -> Dict[str, MdpComponent]:
+    """Full nine-factor reward with an episode-level per-source weight table.
+
+    AMASS-canonical and HUMOS episodes both receive every reward factor. Only the
+    scalar profile changes: canonical defaults to 75% normalized DOF / 25% world,
+    while HUMOS defaults to 30% normalized DOF / 70% world. The current source tag
+    selects weights after each raw term is computed; trajectories are never blended
+    or frame-aligned across sources.
+    """
+    canonical = build_source_weighted_reward_table(canonical_dof_mix)
+    humos = build_source_weighted_reward_table(humos_dof_mix)
+
+    components = {
+        "dp_rew": dp_rew_factory(weight=1.0, coefficient=dp_coef),
+        "dv_rew": dv_rew_factory(weight=1.0, coefficient=dv_coef),
+        "contact_match_rew": contact_match_rew_factory(weight=1.0),
+        "heading_rew": heading_rew_factory(weight=1.0, coefficient=heading_coef),
+        "gt_rew": gt_rew_factory(weight=1.0, coefficient=gt_coef),
+        "gr_rew": gr_rew_factory(weight=1.0, coefficient=gr_coef),
+        "gv_rew": gv_rew_factory(weight=1.0, coefficient=gv_coef),
+        "gav_rew": gav_rew_factory(weight=1.0, coefficient=gav_coef),
+        "rh_rew": rh_rew_factory(weight=1.0, coefficient=rh_coef),
+    }
+    term_by_component = {
+        "dp_rew": "dp",
+        "dv_rew": "dv",
+        "contact_match_rew": "contact",
+        "heading_rew": "heading",
+        "gt_rew": "gt",
+        "gr_rew": "gr",
+        "gv_rew": "gv",
+        "gav_rew": "gav",
+        "rh_rew": "rh",
+    }
+    return {
+        component_name: _source_weighted_component(
+            component,
+            canonical[term_by_component[component_name]],
+            humos[term_by_component[component_name]],
+        )
+        for component_name, component in components.items()
     }
 
 

@@ -27,6 +27,12 @@ from protomotions.agents.evaluators.config import MimicEvaluatorConfig
 from protomotions.envs.motion_manager.mimic_motion_manager import MimicMotionManager
 
 
+MOTION_SOURCE_NAMES = {
+    0: "amass",
+    1: "humos",
+}
+
+
 @dataclass
 class MimicEpisodeContext:
     """Per-episode-batch state for mimic evaluation."""
@@ -439,9 +445,117 @@ class MimicEvaluator(BaseEvaluator):
             if f"raw/{k}" in extras:
                 metrics[k].update(active_motion_ids, extras[f"raw/{k}"][active_env_ids].detach())
 
+    def _eval_global_motion_ids(self) -> Optional[Tensor]:
+        """Map local evaluation-buffer rows back to global MotionLib ids."""
+        if self._motion_failed is None:
+            return None
+        if self._eval_motion_subset is not None:
+            return self._eval_motion_subset
+        if self._motion_failed.shape[0] == self.motion_lib.num_motions():
+            return torch.arange(
+                self.motion_lib.num_motions(), device=self.device, dtype=torch.long
+            )
+        # Fixed-motion evaluation can use a smaller ad-hoc buffer without a stable
+        # local-to-global map. Skip source slices rather than mislabel rows.
+        return None
+
+    def _compute_source_eval_metrics(self) -> Dict[str, float]:
+        """Split success and component summaries by motion_source_id."""
+        if self._motion_failed is None or self.motion_lib.motion_source_id is None:
+            return {}
+
+        global_motion_ids = self._eval_global_motion_ids()
+        if global_motion_ids is None:
+            return {}
+
+        source_ids = self.motion_lib.get_motion_source_id(global_motion_ids).to(self.device)
+        if source_ids.shape[0] != self._motion_failed.shape[0]:
+            raise RuntimeError(
+                "Evaluation source-id count does not match evaluation result buffers."
+            )
+
+        to_log: Dict[str, float] = {}
+        source_conditioned_failures = torch.zeros_like(self._motion_failed)
+        for source_id, source_name in MOTION_SOURCE_NAMES.items():
+            source_mask = source_ids == source_id
+            if not source_mask.any():
+                continue
+
+            prefix = f"eval_{source_name}"
+            to_log[f"{prefix}/num_motions"] = int(source_mask.sum().item())
+            success_components = self.config.source_success_components.get(source_id)
+            if success_components:
+                source_failures = torch.zeros_like(self._motion_failed)
+                for component_name in success_components:
+                    if component_name not in self._per_component_failures:
+                        raise RuntimeError(
+                            f"Source {source_name!r} success component "
+                            f"{component_name!r} was not evaluated."
+                        )
+                    source_failures |= self._per_component_failures[component_name]
+            else:
+                source_failures = self._motion_failed
+            source_conditioned_failures[source_mask] = source_failures[source_mask]
+            to_log[f"{prefix}/success_rate"] = (
+                1.0 - source_failures[source_mask].float().mean().item()
+            )
+
+            for name, component in self.config.evaluation_components.items():
+                threshold = component.static_params.get("threshold", None)
+                if threshold is not None:
+                    failure_rate = (
+                        self._per_component_failures[name][source_mask]
+                        .float()
+                        .mean()
+                        .item()
+                    )
+                    to_log[f"{prefix}/{name}/failure_rate"] = failure_rate
+
+                step_count = self._component_step_count[name].float()
+                valid = source_mask & (step_count > 0)
+                if not valid.any():
+                    continue
+                mean_per_motion = (
+                    self._component_value_sum[name] / step_count.clamp(min=1)
+                )
+                to_log[f"{prefix}/{name}/mean"] = mean_per_motion[valid].mean().item()
+                to_log[f"{prefix}/{name}/max"] = (
+                    self._component_value_max[name][valid].max().item()
+                )
+                to_log[f"{prefix}/{name}/min"] = (
+                    self._component_value_min[name][valid].min().item()
+                )
+
+        known_source_mask = torch.zeros_like(self._motion_failed)
+        for source_id in MOTION_SOURCE_NAMES:
+            known_source_mask |= source_ids == source_id
+        if known_source_mask.any():
+            to_log["eval/source_conditioned_success_rate"] = (
+                1.0
+                - source_conditioned_failures[known_source_mask].float().mean().item()
+            )
+        return to_log
+
     def process_eval_results(self) -> Tuple[Dict, Optional[float]]:
-        """Process results and update motion sampling weights."""
-        to_log, success_rate = super().process_eval_results()
+        """Process results, choose the checkpoint score, and update sampling weights."""
+        to_log, evaluated_score = super().process_eval_results()
+        to_log.update(self._compute_source_eval_metrics())
+
+        score_metric = self.config.score_metric
+        if score_metric is not None:
+            if score_metric not in to_log:
+                raise RuntimeError(
+                    f"Configured score_metric {score_metric!r} was not produced. "
+                    f"Available evaluation metrics: {sorted(to_log)}"
+                )
+            metric_value = float(to_log[score_metric])
+            evaluated_score = (
+                metric_value
+                if self.config.score_greater_is_better
+                else -metric_value
+            )
+            to_log["eval/selection_score"] = evaluated_score
+
         self._update_motion_sampling_weights()
 
         additional_metrics = self._compute_additional_metrics(self._metrics)
@@ -455,7 +569,7 @@ class MimicEvaluator(BaseEvaluator):
             ):
                 self._save_predicted_motion_lib(self._metrics, epoch=self.agent.current_epoch)
 
-        return to_log, success_rate
+        return to_log, evaluated_score
 
     def cleanup_after_evaluation(self) -> None:
         """Restore env and motion manager state after evaluation."""
@@ -530,7 +644,14 @@ class MimicEvaluator(BaseEvaluator):
             self.env.motion_manager.on_motion_lib_reloaded()
             self.agent._force_full_env_reset = True
 
-        return {k.replace("eval/", "eval_holdout/", 1): v for k, v in holdout_log.items()}
+        def holdout_key(key: str) -> str:
+            if key.startswith("eval/"):
+                return key.replace("eval/", "eval_holdout/", 1)
+            if key.startswith("eval_"):
+                return key.replace("eval_", "eval_holdout_", 1)
+            return key
+
+        return {holdout_key(k): v for k, v in holdout_log.items()}
 
     def _plot_per_frame_metrics(
         self, metrics: Dict, actions_storage: list = None
