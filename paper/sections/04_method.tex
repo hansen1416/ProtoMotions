@@ -1,0 +1,141 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Data \& Asset Pipeline}
+\label{sec:method:data}
+
+Our pipeline spans three components: ProtoMotions (RL training framework), a HUMOS fork
+(shape-conditioned motion diffusion \todo{cite}) for shape-adapted motion targets, and SMPLSim for
+per-shape body assets. We sample 128 body shapes as 64 SMPL shape vectors $\beta \sim
+\mathcal{U}[-3,3]^{10}$ (seed 46) $\times$ 2 genders, each keyed by a deterministic hash. For each
+shape, SMPLSim generates one MJCF asset (physically accurate inertial mass, simplified feet,
+frozen hands, mass-scaled PD gains). \emph{Frame-0 grounding} computes each shape's lowest
+collision point once per shape (not per motion, $\sim$64$\times$ cheaper) and shifts every
+motion's root height so it starts just above the ground plane.
+
+\paragraph{Why HUMOS.} Naively retargeting AMASS motion capture onto a new body shape (plain
+forward kinematics, same joint-angle trajectory reposed onto a different skeleton) produces a
+reference motion that is \emph{exactly shape-invariant} by construction — the DOF-angle target is
+identical regardless of body shape, and therefore carries \textbf{zero shape-adaptation gradient}.
+HUMOS instead resamples each clip via shape-conditioned diffusion, producing a target that
+genuinely differs by body shape. Data pipeline: AMASS (18 of 23 sub-datasets) $\to$ SMPL+H forward
+kinematics at 20\,fps $\to$ mocap-artifact cleaning (treadmill/skating removal) $\to$ HumanML3D
+263-dim feature extraction $\to$ HUMOS diffusion inference per (clip, shape) pair. A known
+caveat, central to the reward design in Section~\ref{sec:method:reward} and
+Section~\ref{sec:exp:reward-source}: HUMOS output is measurably noisier/jitterier than
+ground-truth AMASS mocap.
+
+\subsection{Problem Formulation}
+\label{sec:method:problem}
+
+The policy $\pi_\theta(a_t \mid s_t)$ outputs joint target actions given proprioceptive state,
+future reference poses, previous action, and a morphology-conditioning vector
+$\mathrm{morphology\_obs}$ (gender id + raw SMPL betas, 11-dim; see
+Section~\ref{sec:method:morphology}), all under a shared running normalizer ($\sim$1014-dim total
+observation). A scalar \emph{phase} variable $\phi = t / T_{\text{clip}} \in [0,1]$ (elapsed motion
+time over clip length) is appended to resolve temporal aliasing in periodic motions — e.g., a
+squat and a kneel are visually near-identical at matching points in their own cycle without phase
+information. Contact-reward bodies are feet + knees + wrists (extended from feet-only) so that
+$\mathrm{contact\_match\_rew}$ gives nonzero signal on crawl/kneel clips.
+
+\subsection{Two-Stage Curriculum}
+\label{sec:method:curriculum}
+
+\textbf{Stage 1 (neutral pretrain):} full 20{,}946-clip library, single neutral body shape
+($\beta = 0$). \textbf{Stage 2 (shape transfer):} same motion library, 128 body shapes. The split
+is motivated by an earlier finding that a single combined train/eval split conflates motion-OOD
+and shape-OOD; decoupling into two stages lets each isolate one generalization axis.
+
+Two structural fixes were required for Stage 2 to work at all:
+
+\begin{enumerate}
+  \item \textbf{Residual PD control.} Stage 1's PD target is a fixed neutral pose offset by the
+  policy action, $q_{\text{target}} = q_{\text{neutral}} + s \cdot \tanh(a)$. Naively reusing this
+  in Stage 2 produced 3--4$\times$ higher action jerk. We instead anchor the PD target to the
+  \emph{reference} pose at the current timestep:
+  \begin{equation}
+    q_{\text{target}}(t) = q_{\text{ref}}(t) + 0.3 \cdot \tanh(a_t).
+    \label{eq:residual-pd}
+  \end{equation}
+  \item \textbf{Morphology-observation normalizer reset.} Stage 1's constant-$\beta$ training
+  drives the running variance of the morphology-observation slice toward zero; the resulting
+  normalizer then clamps Stage 2's real per-shape betas to a near-binary $\pm 5$ signal. We reset
+  the mean/variance statistics for just that observation slice before Stage 2 training.
+\end{enumerate}
+
+Stage 1 alone reaches 84.9\% success at epoch 20{,}200, with an 8.7\% persistent-failure tail
+dominated, at this full 20{,}946-clip scale, by a \emph{single-leg dynamic-balance} failure
+category not visible at smaller (1{,}024-clip) scale.
+
+\subsection{Architecture}
+\label{sec:method:architecture}
+
+The final architecture is a morphology-conditioned wide-MLP trunk: actor $2896 \times 6$, critic
+$1024 \times 4$. This choice was reached by iterative comparison against two alternatives
+(mixture-of-experts, self-attention temporal encoder), both null results reported in
+Section~\ref{sec:exp:architecture}; we state only the final architecture here.
+
+\subsection{Reward and Termination Design}
+\label{sec:method:reward}
+
+We use the ``discover'' reward relaxation: drop tracking-error-threshold termination (keep only
+fall detection) and drop effort/smoothness/contact-timing reward terms, keeping only
+tracking-shaping rewards. The motivation (CMU getting-up-policy-style two-phase curriculum) is to
+relax every constraint except ``did you get anywhere near the reference,'' so the policy's only
+objective on the hardest clips is finding \emph{any} successful trajectory. This followed four
+independent earlier attempts (mass-scaled PD gains, per-segment mass-scaled gains, soft-tracking
+relaxation, AMP-style discriminator reward) that converged to the same 40--65\% success band with
+no lever separating from the others.
+
+\paragraph{World-space tracking rewards.} For body position/rotation/velocity/angular velocity and
+root height, each reward is an exponential of mean squared (or angular) error:
+\begin{align}
+  r_{gt} &= \exp\!\big(c_{gt} \cdot \operatorname{mean}\|p - p_{\text{ref}}\|^2\big), & c_{gt} &= -25.0 \text{ to } -100.0 \\
+  r_{gr} &= \exp\!\big(c_{gr} \cdot \operatorname{mean}\, \angle(q, q_{\text{ref}})^2\big), & c_{gr} &= -5.0 \\
+  r_{gv} &= \exp\!\big(c_{gv} \cdot \operatorname{mean}\|v - v_{\text{ref}}\|^2\big), & c_{gv} &= -0.5 \\
+  r_{gav} &= \exp\!\big(c_{gav} \cdot \operatorname{mean}\|\omega - \omega_{\text{ref}}\|^2\big), & c_{gav} &= -0.1 \\
+  r_{rh} &= \exp\!\big(c_{rh} \cdot (h - h_{\text{ref}})^2\big), & c_{rh} &= -100.0
+\end{align}
+where $p, q, v, \omega$ are world-space rigid-body position, rotation, linear velocity, and
+angular velocity, and $\angle(\cdot,\cdot)$ is quaternion angular difference.
+
+\paragraph{DOF-space (shape-invariant) tracking rewards.} Local joint-angle position/velocity
+rewards, the shape-invariant counterpart to $r_{gt}/r_{gv}$ (Section~\ref{sec:evaluation}):
+\begin{align}
+  r_{dp} &= \exp\!\big(c_{dp} \cdot \operatorname{mean}\|q_{\text{dof}} - q_{\text{dof,ref}}\|^2\big), & c_{dp} &= -40.0 \\
+  r_{dv} &= \exp\!\big(c_{dv} \cdot \operatorname{mean}\|\dot{q}_{\text{dof}} - \dot{q}_{\text{dof,ref}}\|^2\big), & c_{dv} &= -0.5
+\end{align}
+and a yaw-only heading reward, $r_{\text{heading}} = \exp(c_{\text{heading}} \cdot
+\Delta\psi^2)$ with $c_{\text{heading}} = -10.0$, where $\Delta\psi$ is the (wrapped) root-heading
+difference — near-shape-invariant world-frame grounding, since a pelvis turn means about the same
+thing regardless of body proportions.
+
+The reference reward bundles used in this work:
+\begin{itemize}
+  \item \textbf{World-space bundle:} weights $(w_{gt}, w_{gr}, w_{gv}, w_{gav}, w_{rh}) = (0.5,
+  0.3, 0.1, 0.2, 0.2)$, coefficients $(-25.0, -5.0, -0.5, -0.1, -100.0)$.
+  \item \textbf{DOF-space bundle:} weights $(w_{dp}, w_{dv}, w_{\text{contact}},
+  w_{\text{heading}}, w_{rh}) = (0.8, 0.3, -0.1, 0.1, 0.2)$, coefficients $(-40.0, -0.5,
+  \text{---}, -10.0, -100.0)$.
+\end{itemize}
+The DOF-space bundle reached 75--78\% success, the largest single gain in this lineage, with
+near-zero fall-terminations. Combining world- and DOF-space signal across two motion sources
+(AMASS-canonical, shape-invariant by construction; HUMOS, shape-dependent) is the subject of the
+in-progress reward-source design in Section~\ref{sec:exp:reward-source}.
+
+\subsection{Training Infrastructure at Scale}
+\label{sec:method:infra}
+
+Full-scale training streams per-clip motion files from object storage (R2) rather than loading one
+static file (\texttt{GlobalClipPool}): a per-rank deterministic resident training pool with
+UCB-style priority refresh, a fixed evaluation holdout immune to resident-set churn, a weight floor
+(solved clips retain nonzero rehearsal priority), and a random rehearsal fraction.
+
+\subsection{Morphology Conditioning Representation}
+\label{sec:method:morphology}
+
+The final morphology-conditioning representation is raw SMPL betas concatenated with gender,
+$\mathrm{morphology\_obs} = [\text{gender\_id}, \beta_1, \ldots, \beta_{10}]$ (11-dim). This was
+chosen after comparing against three alternatives (Section~\ref{sec:exp:morphology}):
+FiLM-style multiplicative conditioning, a learned shape-embedding, and a 15-dim
+$z$-scored physics-derived feature vector (mass, height, limb-length-style scalars).

@@ -1,4 +1,4 @@
-# Paper Outline (current, 2026-08-24)
+# Paper Outline (current, 2026-08-25)
 
 Supersedes `README.paper.md` (Kimodo-era, archived — that pipeline was dropped 2026-06-22) and
 `README.prelim-report.md` / `README.eval-plan.md` (1024-clip pilot, June 27 — kept as historical
@@ -43,7 +43,7 @@ signal. HUMOS resamples each clip via shape-conditioned diffusion instead. Pipel
 inference per (clip, shape) pair -> packaged into MotionLib `.pt` files (full pipeline documented
 in `README.data-pipeline-chronological.md`). Known caveat, confirmed later (`README.note.md`
 §65-67): HUMOS output is noisier/jitterier than ground-truth AMASS mocap — this becomes the
-central constraint on the reward-design work in **5.6**.
+central constraint on the reward-design work in **5.5**.
 
 ### 4.2 Problem Formulation
 Task definition, observation/action space, morphology conditioning (`morphology_obs`: gender +
@@ -75,7 +75,7 @@ failure mode (the residual-PD fix addresses floor-contact jerk, not single-leg b
 Presents the **final** architecture used for the full-scale run: wide-MLP trunk (actor
 2896×6, critic 1024×4), morphology-conditioned. Note up front that this was reached via
 iterative trial against two alternatives (mixture-of-experts, self-attention temporal encoder)
-that are described and ablated in **5.4**, not here — Method states the answer, Experiments
+that are described and ablated in **5.3**, not here — Method states the answer, Experiments
 narrates how we got there. The MoE alternative was itself motivated by a specific diagnosis: going
 from the 1,024-clip pilot (128 shapes) to the full 20,946-clip Stage 1 (1 shape) *decreased* shape
 diversity yet success still dropped (0.84 -> 0.82-0.85 with a new persistent-failure tail),
@@ -97,7 +97,7 @@ instability as the actual bottleneck and motivated a literature search that surf
 discover-then-refine framing. The resulting "discover" config reached 75-78% success, the largest
 single gain in the 150-clip-lineage, with near-zero fall-terminations (failures are now almost
 entirely `gt_error`-threshold breaches, not falls) — it is the direct ancestor of the
-attention/DOF-reward/source-switching reward-design lineage in **5.6**.
+attention/DOF-reward/source-switching reward-design lineage in **5.5**.
 
 ### 4.6 Training Infrastructure at Scale
 `GlobalClipPool`: streams per-clip motion files from R2 instead of loading one static file,
@@ -105,12 +105,12 @@ resident training pool (per-rank deterministic clip vocabulary, UCB-style priori
 fixed eval holdout (immune to resident-set churn) + weight floor (solved clips keep nonzero
 rehearsal priority) + random rehearsal fraction. First full-scale launch hit an `EMFILE`
 (too-many-open-files) crash from ~256 concurrent `rclone` fetches per rank — fixed before the run
-that reached the results reported in **5.3**.
+that reached the results reported in **5.2**.
 
 ### 4.7 Morphology Conditioning Representation
 Final representation used at full scale: raw SMPL betas + gender, concatenated as
 `morphology_obs`. Note, as in 4.4, that this was chosen after comparing against three
-alternatives (comparison and result in **5.5**): FiLM-style multiplicative conditioning (**failed
+alternatives (comparison and result in **5.4**): FiLM-style multiplicative conditioning (**failed
 outright**, ~0.40-0.45 vs. ~0.84 baseline — traced to a 12,288-output conditioner bottleneck and
 multiplicative-gradient instability), a learned shape-embedding concatenated in place of raw betas
 (neutral, no measurable gain), and a 15-dim z-scored physics-derived feature vector (mass, height,
@@ -123,61 +123,20 @@ Dataset scale evolved through the project rather than being fixed upfront: 1,024
 pilot -> Stage 1 full 20,946-clip library at a single (neutral) shape -> a 20,946x2-shape
 intermediate set (population-median male/female bodies, used to stress-test MoE without waiting on
 full 128-shape data) -> a 150-clip x 128-shape reduced-scale testbed adopted for cost reasons as
-the standard architecture/reward ablation corpus (5.4-5.6) -> full 20,946x128-shape training via
+the standard architecture/reward ablation corpus (5.3-5.5) -> full 20,946x128-shape training via
 `GlobalClipPool` (4.6) for the final run. Metrics: `dp_error` (DOF-angle, shape-invariant — the
-primary metric, see **5.2**), `gt_error`/`gr_error` (world-space position/rotation, scale-confounded
-across shapes, kept for legacy/reward-design tracking), success rate, holdout eval.
+primary metric, full definition and justification in **6**), `gt_error`/`gr_error` (world-space
+position/rotation, scale-confounded across shapes, kept for legacy/reward-design tracking),
+success rate, holdout eval.
 
-### 5.2 Core Evaluation: Shape-Invariant Skill Consistency
-**Framing decision (2026-08-24, user-confirmed):** success rate against a single-body external
-baseline (PHC/PULSE/ExBody2/GMT) cannot demonstrate this paper's actual claim — that one policy
-learns the *same motion* across a wide body-shape distribution — since those methods only ever
-evaluate one body. World-space error (`gt_error`, meters) is not a fair axis even for *internal*
-cross-shape comparison: a taller body produces larger absolute position deviations for the same
-relative motor error, so raw meters bake in a body-scale confound before measuring skill at all.
-DOF-angle-space error (`dp_error`, radians) is exactly shape-invariant by construction (same joint
-target regardless of body) and is therefore the primary lens for the paper's core claim, not a
-secondary metric introduced for the reward-design work in 5.6.
-
-**Scope note: `dp_error` measures joint rotation, not root trajectory.** `dof_pos` is the actuated
-joint-angle vector (radians) local to each body's own kinematic tree — hinge/spherical joint values
-relative to their parent link. It excludes the root free-joint (pelvis translation and orientation
-in the world), which is tracked separately via `gt_error`/`gr_error` and is exactly the
-shape-dependent signal we're deliberately excluding from the headline metric. So the shape-invariance
-claim built on `dp_error` is scoped to **limb articulation** — "the same joint rotates the same way
-regardless of body" — not to whole-body world-space behavior. A tall and a short body executing the
-same clip will show identical `dp_error` trajectories even though their root paths differ in absolute
-distance (shorter legs, shorter stride, same joint angles) — that is expected and outside what this
-metric measures. If the paper also wants to claim root-level shape-adaptation (e.g., stride length
-scaling correctly with leg length), that needs a separate, explicitly shape-normalized root metric
-(e.g., root displacement normalized by height/leg length) — raw `gt_error` cannot support that claim
-either, for the same body-scale-confound reason given above.
-
-Three components:
-1. **Cross-shape consistency per clip.** For each clip, `dp_error` spread (std/IQR) across the 128
-   training shapes. A tight spread demonstrates shape-independent skill execution; a wide spread
-   would undercut the claim.
-2. **Shape-failure correlation.** Already computed across multiple runs (see 5.8): Pearson
-   r ≈ -0.09 to 0.003 between shape extremity (mass/height) and failure — effectively zero
-   relationship. Promoted here from a footnote in failure analysis to the headline evidence that
-   body shape does not predict success — i.e. the same motion is being learned regardless of body.
-3. **Held-out shape generalization (5.9, E7).** Extends the consistency claim past the 128 training
-   shapes to interpolated/extrapolated unseen shapes — the strongest version of this evaluation,
-   currently blocked on the `infer.py` pipeline bug.
-
-External comparison (PHC-style neutral-shape success rate, β=0) is retained only as a minor
-sanity-check footnote — confirming neutral-shape quality wasn't sacrificed for shape generalization
-— not as a headline result, since a single-body number structurally cannot speak to the
-shape-generalization claim this section exists to make.
-
-### 5.3 Main Results
+### 5.2 Main Results
 Stage 1 neutral pretrain: 84.9% success at epoch 20,200 (~174h, 6 GPUs), 8.7% persistent-failure
 tail (4.3). Stage 2 shape-transfer: the residual-adapter lineage (frozen backbone + adapter, v1-v6)
 plateaued at 78-82% success across every variant tried and was abandoned in favor of a from-scratch
 Stage 2 trunk, still in progress — full-scale Stage 2 success numbers are not yet final. Report
-alongside the 5.2 shape-consistency metrics, not success rate alone.
+alongside the shape-consistency metrics from **6**, not success rate alone.
 
-### 5.4 Architecture Evolution — Flat MLP → MoE → Self-Attention
+### 5.3 Architecture Evolution — Flat MLP → MoE → Self-Attention
 **Framing decision (2026-08-20, user-confirmed):** presented as a narrative of iterative design,
 not a flat ablation table — this is literally the order the architectures were tried, each one
 motivated by the failure mode of the last, all validated at reduced scale (150-clip / 1024-clip
@@ -205,45 +164,88 @@ docstring). Both MoE and attention were null/inconclusive results at the scale t
 honestly as "we checked, it didn't clearly help, so we kept the simpler/already-validated flat-MLP
 choice under the assumption it doesn't get worse at scale."
 
-### 5.5 Morphology Conditioning Ablation — Raw Betas vs. Physics-Derived Features
+### 5.4 Morphology Conditioning Ablation — Raw Betas vs. Physics-Derived Features
 Pilot-scale comparison (1024-clip × 128-shape corpus): `hhi_1024_transfer` (raw SMPL betas,
 21,400 epochs) vs. `hhi_phy_1024_transfer` (15-dim z-scored physics-derived features — mass,
 height, limb-length-style scalars — 17,200 epochs). T1 persistent-failure analysis: 177 vs. 167
 failing clips, **not statistically significant**; qualitative visual review favored physics
-features (5/8 vs. 0/8 clips judged visually improved). Same cost-sensitive framing as 5.4: run
+features (5/8 vs. 0/8 clips judged visually improved). Same cost-sensitive framing as 5.3: run
 once at reduced scale, result inconclusive-but-suggestive, raw betas kept as the simpler default
 for the full-scale run since the physics-feature signal wasn't strong enough to justify the extra
 feature-engineering surface at 20,946×128 scale.
 
-### 5.6 AMASS/HUMOS Reward Source Design — **in progress, not yet resolved**
+### 5.5 AMASS/HUMOS Reward Source Design — **in progress, not yet resolved**
 Motivation: AMASS-canonical DOF-space targets are exactly shape-invariant, so training on them
 alone gives zero shape-conditioning gradient; HUMOS is the only channel whose target differs by
-shape. Iterative design, same framing as 5.4/5.5: (1) DOF-space-only bundle on canonical corpus
+shape. Iterative design, same framing as 5.3/5.4: (1) DOF-space-only bundle on canonical corpus
 (`README.note.md` §65-66) — clean `dp_error` convergence, world-space metrics flat; (2)
 episode-level source-switching (§67, mask reward by AMASS-vs-HUMOS per episode) — world-space
 improves over (1) but underperforms the unmasked world-space baseline at matched steps (63% vs.
 83% success), likely because masking halves how often world-space reward fires; (3) combined
 unmasked full-factor reward on the mixed corpus, retuned weights — outcome pending.
 
-### 5.7 Reward/Termination Ablation
+### 5.6 Reward/Termination Ablation
 Discover-relaxed vs. stricter (`mlp_wide.py`-style) config — also validated at reduced scale
-for the same cost reason as 5.4/5.5, then carried forward as-is to full scale by explicit decision
+for the same cost reason as 5.3/5.4, then carried forward as-is to full scale by explicit decision
 rather than reverting.
 
-### 5.8 Failure Analysis
+### 5.7 Failure Analysis
 Persistent-failure motion clusters; overlap across single-shape and multi-shape settings
 (97.1% overlap between full-scale-scratch hardest-clip scoreboard and single-shape neutral
 persistent-failure set — the plateau is an intrinsic motion-difficulty ceiling, not shape- or
 reward-specific). Shape-failure correlation (Pearson r ≈ -0.09 to 0.003) reported here in full
-detail; headline framing of the same number lives in **5.2**.
+detail; headline framing of the same number lives in **6**.
 
-### 5.9 Cross-Shape Generalization
-Held-out beta interpolation/extrapolation (E7) — the strongest form of **5.2**'s shape-consistency
+### 5.8 Cross-Shape Generalization
+Held-out beta interpolation/extrapolation (E7) — the strongest form of **6**'s shape-consistency
 claim, extended past the 128 training shapes to unseen interpolated/extrapolated ones. **Blocked**
 on the `infer.py` held-out-beta pipeline bug in the humos repo — deferred in favor of reusing
 already-existing held-out-shape data in R2 once a good Stage 2 checkpoint exists.
 
-## 6. Discussion / Limitations
+## 6. Evaluation
+
+**Framing decision (2026-08-24, user-confirmed):** success rate against a single-body external
+baseline (PHC/PULSE/ExBody2/GMT) cannot demonstrate this paper's actual claim — that one policy
+learns the *same motion* across a wide body-shape distribution — since those methods only ever
+evaluate one body. World-space error (`gt_error`, meters) is not a fair axis even for *internal*
+cross-shape comparison: a taller body produces larger absolute position deviations for the same
+relative motor error, so raw meters bake in a body-scale confound before measuring skill at all.
+DOF-angle-space error (`dp_error`, radians) is exactly shape-invariant by construction (same joint
+target regardless of body) and is therefore the primary lens for the paper's core claim, not a
+secondary metric introduced for the reward-design work in 5.5.
+
+**Scope note: `dp_error` measures joint rotation, not root trajectory.** `dof_pos` is the actuated
+joint-angle vector (radians) local to each body's own kinematic tree — hinge/spherical joint values
+relative to their parent link. It excludes the root free-joint (pelvis translation and orientation
+in the world), which is tracked separately via `gt_error`/`gr_error` and is exactly the
+shape-dependent signal we're deliberately excluding from the headline metric. So the shape-invariance
+claim built on `dp_error` is scoped to **limb articulation** — "the same joint rotates the same way
+regardless of body" — not to whole-body world-space behavior. A tall and a short body executing the
+same clip will show identical `dp_error` trajectories even though their root paths differ in absolute
+distance (shorter legs, shorter stride, same joint angles) — that is expected and outside what this
+metric measures. If the paper also wants to claim root-level shape-adaptation (e.g., stride length
+scaling correctly with leg length), that needs a separate, explicitly shape-normalized root metric
+(e.g., root displacement normalized by height/leg length) — raw `gt_error` cannot support that claim
+either, for the same body-scale-confound reason given above.
+
+Three components:
+1. **Cross-shape consistency per clip.** For each clip, `dp_error` spread (std/IQR) across the 128
+   training shapes. A tight spread demonstrates shape-independent skill execution; a wide spread
+   would undercut the claim.
+2. **Shape-failure correlation.** Already computed across multiple runs (full detail in 5.7):
+   Pearson r ≈ -0.09 to 0.003 between shape extremity (mass/height) and failure — effectively zero
+   relationship. Promoted here to the headline evidence that body shape does not predict success —
+   i.e. the same motion is being learned regardless of body.
+3. **Held-out shape generalization (5.8, E7).** Extends the consistency claim past the 128 training
+   shapes to interpolated/extrapolated unseen shapes — the strongest version of this evaluation,
+   currently blocked on the `infer.py` pipeline bug.
+
+External comparison (PHC-style neutral-shape success rate, β=0) is retained only as a minor
+sanity-check footnote — confirming neutral-shape quality wasn't sacrificed for shape generalization
+— not as a headline result, since a single-body number structurally cannot speak to the
+shape-generalization claim this section exists to make.
+
+## 7. Discussion / Limitations
 
 Capability ceiling on the hard-motion cluster (persists across shape, reward-relaxation,
 architecture, and morphology-representation interventions). What didn't work and why: FiLM
@@ -252,11 +254,11 @@ capacity-matched control), self-attention temporal encoding (no separation from 
 no positional encoding in the shared `Transformer` class — flagged, deliberately not fixed, judged
 unlikely to move the ceiling), physics-derived morphology features (no statistically significant
 gain over raw betas, though qualitatively suggestive). Broader lesson from the design-evolution
-narrative (5.4/5.5): the hard-motion ceiling looks like it's about *motion difficulty*, not about
+narrative (5.3/5.4): the hard-motion ceiling looks like it's about *motion difficulty*, not about
 which architecture or which conditioning representation carries the signal — every lever tried
 moved metrics by less than noise. Resource constraints on ablation breadth addressed directly in
-5.4/5.5's framing rather than hidden. Shape-invariance evaluation (5.2) is a separate axis from this
+5.3/5.4's framing rather than hidden. Shape-invariance evaluation (6) is a separate axis from this
 ceiling discussion — the ceiling is about which *motions* are hard, not about *which bodies*
 execute them, consistent with the near-zero shape-failure correlation.
 
-## 7. Conclusion
+## 8. Conclusion

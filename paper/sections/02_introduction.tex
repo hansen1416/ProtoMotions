@@ -1,0 +1,25 @@
+\section{Introduction}
+\label{sec:introduction}
+
+Physics-based motion tracking policies (e.g., PHC, PULSE, ExBody2, GMT) reproduce reference human
+motions under physical simulation with high fidelity, but are trained and evaluated on a single,
+fixed body morphology. This limits their applicability to settings that require one controller to
+generalize across a population of body shapes — e.g., animating diverse virtual characters or
+transferring a single policy across a fleet of robots with varying morphology.
+
+We target a single policy that imitates arbitrary human motions across a wide distribution of body
+shapes: 128 SMPL shapes (64 betas $\times$ 2 genders), spanning 26--144\,kg and 1.13--1.67\,m. The
+central difficulty is that a naive combination of \emph{motion diversity} (tens of thousands of
+clips) and \emph{shape diversity} (128 morphologies) confounds two independent axes of
+generalization: whether the policy has seen a given \emph{motion}, and whether it has seen a given
+\emph{body}. Conflating them in one training/eval split makes failures hard to diagnose and
+progress hard to attribute.
+
+\paragraph{Contribution.} We propose a two-stage curriculum — neutral pretraining on the full
+20{,}946-clip HumanML3D library at a single body shape, followed by shape-transfer training across
+128 shapes — that explicitly decouples motion-OOD from shape-OOD. We identify and fix two
+structural failure modes specific to the shape-transfer stage (residual PD control, morphology
+observation normalizer reset; Section~\ref{sec:method}), and we introduce an evaluation protocol
+(Section~\ref{sec:evaluation}) that measures shape-invariant skill consistency directly, rather
+than relying on world-space error or single-body baselines that structurally cannot support a
+cross-shape generalization claim.

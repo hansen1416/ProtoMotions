@@ -41,6 +41,12 @@ pip install -e . && wandb login wandb_v1_6iadi9TQi193hMG3iOQxusmE7fV_J9dnnndtocV
 python tools/build_small_multishape_subset.py \
   --num-clips 150 \
   --output /workspace/motion_cache/small150_128shape.pt
+
+python tools/build_mixed_source_corpus.py \
+--canonical-file /workspace/motion_cache/150_128shape_canonical/150_128shape_canonical_offset.pt \
+--humos-file /workspace/motion_cache/small150_128shape.pt \
+--output /workspace/motion_cache/150_128shape_mixed_source_weighted.pt
+
 ------
 
 # neutral and transfer
@@ -616,6 +622,16 @@ nohup python -u protomotions/train_agent.py \
 --num-envs 2048 --batch-size 8192 --ngpu 1 \
 --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
 --wandb-group hhi_wide_150motion_128shape_discover_attention_source_switched > /tmp/hhi_wide_150motion_128shape_discover_attention_source_switched.log 2>&1 &
+
+
+nohup python -u protomotions/train_agent.py \
+--robot-name smpl_mor --simulator isaacgym \
+--experiment-path examples/experiments/mimic/mlp_wide_discover_attention_source_weighted.py \
+--experiment-name hhi_wide_150motion_128shape_discover_attention_source_weighted \
+--motion-file /workspace/motion_cache/150_128shape_mixed_source_weighted.pt \
+--num-envs 2048 --batch-size 8192 --ngpu 1 \
+--use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+--wandb-group hhi_wide_150motion_128shape_discover_attention_source_weighted > /tmp/hhi_wide_150motion_128shape_discover_attention_source_weighted.log 2>&1 &
 ----
 
 

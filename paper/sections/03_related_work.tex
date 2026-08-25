@@ -1,0 +1,16 @@
+\section{Related Work}
+\label{sec:related_work}
+
+\paragraph{Physics-based motion tracking.} PHC, PULSE, ExBody2, GMT, and other H2O-style trackers
+learn high-fidelity imitation policies under physical simulation, but all assume a single,
+fixed-morphology character; none address generalization across a body-shape distribution.
+
+\paragraph{Morphology-conditioned RL.} HUMOS \todo{cite} conditions motion generation (via
+shape-conditioned diffusion) on SMPL body shape, producing per-shape-adapted reference motions
+rather than a naively retargeted, shape-invariant one. MorFiC \todo{cite} \todo{one-line summary}.
+Our work builds directly on HUMOS's motion data to supply a shape-\emph{dependent} training signal
+(Section~\ref{sec:method}), but targets a control policy rather than a motion generator.
+
+\paragraph{Mixture-of-experts in actor-critic RL.} \todo{cite prior MoE-in-RL work}. We evaluate
+MoE as an architecture candidate for handling motion diversity (Section~\ref{sec:experiments}) and
+find it does not separate from a capacity-matched dense baseline in our setting.

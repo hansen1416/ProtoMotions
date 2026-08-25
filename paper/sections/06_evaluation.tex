@@ -1,0 +1,57 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+\paragraph{Framing.} Success rate against a single-body external baseline (PHC/PULSE/ExBody2/GMT)
+cannot demonstrate this paper's actual claim — that one policy learns the \emph{same motion}
+across a wide body-shape distribution — since those methods only ever evaluate one body.
+World-space error ($\mathrm{gt\_error}$, meters) is not a fair axis even for \emph{internal}
+cross-shape comparison: a taller body produces larger absolute position deviations for the same
+relative motor error, so raw meters bake in a body-scale confound before measuring skill at all.
+DOF-angle-space error ($\mathrm{dp\_error}$, radians) is exactly shape-invariant by construction
+(same joint target regardless of body) and is therefore the primary lens for the paper's core
+claim, not a secondary metric introduced only for the reward-design work of
+Section~\ref{sec:exp:reward-source}. Formally,
+\begin{equation}
+  \mathrm{dp\_error} = \operatorname{mean}_{d}\big| q_{\text{dof}}[d] - q_{\text{dof,ref}}[d] \big|,
+  \qquad
+  \mathrm{gt\_error} = \operatorname{mean}_{b}\big\| p[b] - p_{\text{ref}}[b] \big\|_2,
+  \label{eq:dp-gt-error}
+\end{equation}
+where $d$ ranges over actuated DOFs (radians) and $b$ ranges over rigid bodies (meters).
+
+\paragraph{Scope note: $\mathrm{dp\_error}$ measures joint rotation, not root trajectory.}
+$q_{\text{dof}}$ is the actuated joint-angle vector, local to each body's own kinematic tree —
+hinge/spherical joint values relative to their parent link. It excludes the root free-joint
+(pelvis translation and orientation in the world), which is tracked separately via
+$\mathrm{gt\_error}$/$\mathrm{gr\_error}$ and is exactly the shape-dependent signal deliberately
+excluded from the headline metric. The shape-invariance claim built on $\mathrm{dp\_error}$ is
+therefore scoped to \textbf{limb articulation} — ``the same joint rotates the same way regardless
+of body'' — not to whole-body world-space behavior. A tall and a short body executing the same
+clip show identical $\mathrm{dp\_error}$ trajectories even though their root paths differ in
+absolute distance (shorter legs, shorter stride, same joint angles); that is expected and outside
+what this metric measures. A root-level shape-adaptation claim (e.g., stride length scaling
+correctly with leg length) would require a separate, explicitly shape-normalized root metric
+(e.g., root displacement normalized by height/leg length) — raw $\mathrm{gt\_error}$ cannot
+support that claim either, for the same body-scale-confound reason.
+
+\subsection{Cross-Shape Consistency per Clip}
+For each clip, we report the spread (std/IQR) of $\mathrm{dp\_error}$ across the 128 training
+shapes. A tight spread demonstrates shape-independent skill execution; a wide spread would
+undercut the claim.
+
+\subsection{Shape-Failure Correlation}
+Computed across multiple runs (full detail in Section~\ref{sec:exp:failure}): Pearson
+$r \approx -0.09$ to $0.003$ between shape extremity (mass/height) and failure — effectively zero
+relationship. This is the headline evidence that body shape does not predict success, i.e.\ the
+same motion is being learned regardless of body.
+
+\subsection{Held-Out Shape Generalization}
+Extends the consistency claim past the 128 training shapes to interpolated/extrapolated unseen
+shapes (experiment E7, Section~\ref{sec:exp:cross-shape}) — the strongest version of this
+evaluation. \todo{Currently blocked on the \texttt{infer.py} pipeline bug.}
+
+\subsection{External Comparison (Footnote)}
+Neutral-shape success rate against single-body baselines (PHC-style, $\beta = 0$) is retained only
+as a minor sanity-check — confirming neutral-shape quality was not sacrificed for shape
+generalization — not as a headline result, since a single-body number structurally cannot speak to
+the shape-generalization claim this section exists to make.

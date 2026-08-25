@@ -1,0 +1,24 @@
+\section{Discussion / Limitations}
+\label{sec:discussion}
+
+A capability ceiling on a cluster of hard motions (crawl/kneel/squat, single-leg dynamic balance)
+persists across shape, reward-relaxation, architecture, and morphology-representation
+interventions. What did not work and why: FiLM-style conditioning (failed outright, traced to a
+12{,}288-output conditioner bottleneck and multiplicative-gradient instability); residual adapters
+(v1--v6, plateaued 78--82\%); MoE routing (no separation from a capacity-matched control);
+self-attention temporal encoding (no separation from flat-concat; the shared \texttt{Transformer}
+module also lacks positional encoding — flagged, deliberately not fixed, judged unlikely to move
+the ceiling); physics-derived morphology features (no statistically significant gain over raw
+betas, though qualitatively suggestive).
+
+The broader lesson from the design-evolution narrative
+(Sections~\ref{sec:exp:architecture}--\ref{sec:exp:morphology}) is that the hard-motion ceiling
+looks like it is about \emph{motion difficulty}, not about which architecture or which
+conditioning representation carries the signal — every lever tried moved metrics by less than
+noise. Resource constraints limited ablation breadth to reduced-scale corpora, addressed directly
+in the framing of those sections rather than hidden.
+
+The shape-invariance evaluation (Section~\ref{sec:evaluation}) is a separate axis from this
+ceiling discussion: the ceiling is about which \emph{motions} are hard, not about \emph{which
+bodies} execute them — consistent with the near-zero shape-failure correlation
+(Section~\ref{sec:exp:failure}).

@@ -1,0 +1,111 @@
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Setup}
+\label{sec:exp:setup}
+
+Dataset scale evolved through the project: a 1{,}024-clip $\times$ 128-shape pilot $\to$ Stage 1's
+full 20{,}946-clip library at one neutral shape $\to$ a 20{,}946-clip $\times$ 2-shape
+intermediate set (population-median male/female bodies, used to stress-test MoE without waiting on
+full 128-shape data) $\to$ a 150-clip $\times$ 128-shape reduced-scale testbed adopted for cost
+reasons as the standard architecture/reward ablation corpus
+(Sections~\ref{sec:exp:architecture}--\ref{sec:exp:reward-source}) $\to$ full
+20{,}946-clip $\times$ 128-shape training via \texttt{GlobalClipPool}
+(Section~\ref{sec:method:infra}) for the final run.
+
+\textbf{Metrics:} $\mathrm{dp\_error}$ (DOF-angle, shape-invariant — primary metric, full
+definition and justification in Section~\ref{sec:evaluation}), $\mathrm{gt\_error}$/
+$\mathrm{gr\_error}$ (world-space position/rotation, scale-confounded across shapes, kept for
+legacy/reward-design tracking), success rate, held-out clip evaluation.
+
+\subsection{Main Results}
+\label{sec:exp:main-results}
+
+Stage 1 neutral pretrain reaches 84.9\% success at epoch 20{,}200 ($\sim$174h, 6 GPUs), with an
+8.7\% persistent-failure tail (Section~\ref{sec:method:curriculum}). For Stage 2 shape-transfer,
+a residual-adapter lineage (frozen backbone + adapter, v1--v6) plateaued at 78--82\% success
+across every variant tried and was abandoned in favor of a from-scratch Stage 2 trunk, still in
+progress \todo{final Stage 2 success numbers pending}. Stage 2 results should be read alongside the
+shape-consistency metrics of Section~\ref{sec:evaluation}, not success rate in isolation.
+
+\subsection{Architecture Evolution: Flat MLP $\to$ MoE $\to$ Self-Attention}
+\label{sec:exp:architecture}
+
+Presented as a narrative of iterative design — the actual chronological order tried, each step
+motivated by the failure mode of the last — validated at reduced scale (150-clip / 1{,}024-clip
+corpora) rather than full scale, for cost reasons.
+
+\begin{enumerate}
+  \item \textbf{Flat-MLP baseline.} Wide MLP over flat-concatenated observations (history/lookahead
+  frames concatenated, not tokenized). Establishes a $\sim$75--80\% success-rate ceiling on the
+  hardest-clip subset.
+  \item \textbf{Mixture-of-Experts (MoE).} Hypothesis: distinct motion classes
+  (crawl/kneel/squat/turning) benefit from routed specialist sub-policies. \textbf{Result: null} —
+  a capacity-matched (parameter-matched, $\sim$95\%) wide-MLP control caught up to the MoE-stable
+  variant on all metrics; whether routing helps remains an open question.
+  \item \textbf{Self-attention temporal encoder.} Hypothesis: tokenizing per-frame history/
+  lookahead and attending (reusing the existing \texttt{Transformer} module) helps structure
+  learning over the dilated frame sequence. \textbf{Result: null} — no separation from flat-concat
+  at matched training steps.
+\end{enumerate}
+
+Both alternatives were null/inconclusive at the scale tested; we retain the simpler flat-MLP
+architecture, carried forward as a bundled recipe into the one full-scale run rather than
+re-validated at full scale.
+
+\subsection{Morphology Conditioning Ablation: Raw Betas vs.\ Physics-Derived Features}
+\label{sec:exp:morphology}
+
+Pilot-scale comparison ($1{,}024$-clip $\times$ 128-shape corpus): raw SMPL betas
+(21{,}400 epochs) vs.\ a 15-dim $z$-scored physics-derived feature vector (mass, height,
+limb-length-style scalars; 17{,}200 epochs). Persistent-failure-clip counts (177 vs.\ 167) are
+\textbf{not statistically significant}; qualitative visual review favored physics features (5/8
+vs.\ 0/8 clips judged visually improved). Raw betas are kept as the simpler default for the
+full-scale run — the physics-feature signal was not strong enough to justify the added
+feature-engineering surface at $20{,}946 \times 128$ scale.
+
+\subsection{AMASS/HUMOS Reward Source Design}
+\label{sec:exp:reward-source}
+\todo{In progress, not yet resolved.}
+
+Motivation: AMASS-canonical DOF-space targets are exactly shape-invariant
+(Section~\ref{sec:method:data}), so training on them alone gives zero shape-conditioning gradient;
+HUMOS is the only channel whose target genuinely differs by shape. Iterative design, same framing
+as Sections~\ref{sec:exp:architecture}--\ref{sec:exp:morphology}:
+\begin{enumerate}
+  \item DOF-space-only bundle on the canonical corpus — clean $\mathrm{dp\_error}$ convergence,
+  world-space metrics flat.
+  \item Episode-level source-switching (hard-mask reward terms by AMASS-vs-HUMOS per episode) —
+  world-space metrics improve over (1) but underperform the unmasked world-space baseline at
+  matched steps (63\% vs.\ 83\% success), likely because masking halves how often the world-space
+  reward fires per rollout.
+  \item Combined, unmasked, full-factor reward on the mixed corpus with per-source \emph{weights}
+  (not term masks) — outcome pending.
+\end{enumerate}
+
+\subsection{Reward/Termination Ablation}
+\label{sec:exp:reward-term-ablation}
+
+Discover-relaxed vs.\ a stricter baseline configuration (full termination + effort/smoothness/
+contact-timing terms), validated at reduced scale for the same cost reason as
+Sections~\ref{sec:exp:architecture}--\ref{sec:exp:morphology}, then carried forward as-is to full
+scale by explicit decision.
+
+\subsection{Failure Analysis}
+\label{sec:exp:failure}
+
+Persistent-failure motion clusters show substantial overlap across single-shape and multi-shape
+settings: 97.1\% overlap between the full-scale-scratch hardest-clip scoreboard and the
+single-shape neutral persistent-failure set — the plateau is an intrinsic motion-difficulty
+ceiling, not shape- or reward-specific. Shape-failure correlation (Pearson $r \approx -0.09$ to
+$0.003$ between shape extremity and failure) is reported here in full; the headline framing of the
+same result appears in Section~\ref{sec:evaluation}.
+
+\subsection{Cross-Shape Generalization}
+\label{sec:exp:cross-shape}
+
+Held-out beta interpolation/extrapolation (experiment E7) is the strongest form of
+Section~\ref{sec:evaluation}'s shape-consistency claim, extending it past the 128 training shapes
+to unseen interpolated/extrapolated shapes. \todo{Blocked on an \texttt{infer.py} held-out-beta
+pipeline bug; deferred in favor of reusing already-existing held-out-shape data once a Stage 2
+checkpoint is ready.}
