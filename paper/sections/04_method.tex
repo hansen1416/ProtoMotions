@@ -25,6 +25,23 @@ caveat, central to the reward design in Section~\ref{sec:method:reward} and
 Section~\ref{sec:exp:reward-source}: HUMOS output is measurably noisier/jitterier than
 ground-truth AMASS mocap.
 
+\begin{figure}[t]
+  \centering
+  \small
+  \begin{tabular}{c@{\;}c@{\;}c@{\;}c@{\;}c@{\;}c@{\;}c}
+    \fbox{\parbox{0.17\linewidth}{\centering Canonical AMASS\\150 clips $\times$ 128 shapes\\DOF/rotation target}}
+    & $+$ &
+    \fbox{\parbox{0.17\linewidth}{\centering HUMOS\\150 clips $\times$ 128 shapes\\world-space target}}
+    & $\longrightarrow$ &
+    \fbox{\parbox{0.22\linewidth}{\centering Source-conditioned reward\\AMASS: 75/25\\HUMOS: 30/70}}
+    & $\longrightarrow$ &
+    \fbox{\parbox{0.15\linewidth}{\centering One shared\\morphology-conditioned policy}}
+  \end{tabular}
+  \caption{Current source-weighted training pipeline. AMASS/HUMOS episodes are sampled 50/50;
+  both receive all tracking factors with source-specific DOF/world weights.}
+  \label{fig:source-weighted-pipeline}
+\end{figure}
+
 \subsection{Problem Formulation}
 \label{sec:method:problem}
 
