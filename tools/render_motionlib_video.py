@@ -92,6 +92,13 @@ def create_parser():
         help="Distance (metres) between adjacent humanoids in the layout.",
     )
     parser.add_argument(
+        "--camera-distance-scale",
+        type=float,
+        default=0.6,
+        help="Camera distance as a multiple of env spread — lower zooms in closer. "
+        "Try ~0.4 for 4 envs, ~0.6 (default) for 8, higher for larger batches.",
+    )
+    parser.add_argument(
         "--num-frames",
         type=int,
         default=None,
@@ -267,8 +274,14 @@ def build_layout_offsets(num_envs: int, layout: str, spacing: float) -> torch.Te
     return offsets
 
 
-def setup_fixed_camera(simulator, num_envs: int):
-    """Point the camera at the centroid of all envs and lock it there for recording."""
+def setup_fixed_camera(simulator, num_envs: int, distance_scale: float = 0.6):
+    """Point the camera at the centroid of all envs and lock it there for recording.
+
+    distance_scale multiplies the env spread to get camera distance — lower is
+    closer/more zoomed in. The old hardcoded 1.1 kept ~40 envs' worth of room even
+    when only a handful were actually rendered; 0.6 is a much tighter default for
+    the small (4-8 env) batches this tool is normally used with.
+    """
     import numpy as np
     from isaacgym import gymapi
 
@@ -288,9 +301,9 @@ def setup_fixed_camera(simulator, num_envs: int):
     )
 
     cam_pos = gymapi.Vec3(
-        float(centroid[0]) - spread * 1.1,
-        float(centroid[1]) - spread * 1.1,
-        float(centroid[2]) + spread * 0.6,
+        float(centroid[0]) - spread * distance_scale,
+        float(centroid[1]) - spread * distance_scale,
+        float(centroid[2]) + spread * distance_scale * 0.55,
     )
     cam_target = gymapi.Vec3(
         float(centroid[0]),
@@ -454,7 +467,7 @@ def main():
         pose_frame(0)
         simulator.step(zero_actions)
         simulator.render()
-        setup_fixed_camera(simulator, num_envs)
+        setup_fixed_camera(simulator, num_envs, distance_scale=args.camera_distance_scale)
 
         log.info(f"Recording {num_frames} frames ...")
         for frame_idx in tqdm(range(num_frames), desc="Recording", unit="frame"):
