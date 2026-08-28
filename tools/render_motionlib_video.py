@@ -162,24 +162,70 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(messag
 log = logging.getLogger(__name__)
 
 
-def create_checkerboard_ground(num_envs: int, device, simulator_type: str) -> SceneLib:
-    """Minimal flat checkerboard ground plane, same helper as the interactive visualizer."""
-    plane = MeshSceneObject(
-        name="ground_plane",
-        vertices=torch.tensor(
-            [[-50, -50, 0], [50, -50, 0], [50, 50, 0], [-50, 50, 0]], dtype=torch.float32
-        ),
-        faces=torch.tensor([[0, 1, 2], [0, 2, 3]], dtype=torch.int64),
-        options=ObjectOptions(fix_base_link=True, density=1.0),
+def create_checkerboard_ground(
+    num_envs: int, device: torch.device, simulator_type: str = "isaacgym"
+) -> SceneLib:
+    """Minimal flat checkerboard ground plane, copied verbatim from
+    examples/motion_libs_visualizer_mor.py's create_checkerboard_ground()."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    checkerboard_dir = os.path.join(
+        project_root, "protomotions/data/assets/checkerboard"
     )
-    scene = Scene(objects=[plane])
+
+    if simulator_type == "isaaclab":
+        asset_path = os.path.join(checkerboard_dir, "checkerboard_ground.usda")
+        asset_type = "USD"
+    else:
+        # IsaacGym, Newton, Genesis use URDF
+        asset_path = os.path.join(checkerboard_dir, "checkerboard_ground.urdf")
+        asset_type = "URDF"
+
+    if not os.path.exists(asset_path):
+        print(f"Warning: Checkerboard ground {asset_type} not found at {asset_path}")
+        print(f"Assets should be in: {checkerboard_dir}")
+        return None
+
+    # Get texture path for IsaacGym (IsaacLab loads it from USD)
+    texture_path = None
+    if simulator_type != "isaaclab":
+        texture_file = os.path.join(checkerboard_dir, "checkerboard_texture.png")
+        if os.path.exists(texture_file):
+            texture_path = texture_file
+
+    # Create scenes for each environment
+    # IMPORTANT: Each scene needs its own MeshSceneObject instance,
+    # otherwise attributes get overwritten during _process_scene_objects()
+    scenes = []
+    for _ in range(num_envs):
+        ground_mesh = MeshSceneObject(
+            object_path=asset_path,
+            translation=(0.0, 0.0, -0.005),  # Slightly below zero
+            rotation=(0.0, 0.0, 0.0, 1.0),  # No rotation (x, y, z, w)
+            options=ObjectOptions(
+                fix_base_link=True,  # Static object
+                vhacd_enabled=False,  # Disable convex decomposition for simple plane
+                texture_path=texture_path,  # Texture for IsaacGym (None for IsaacLab)
+            ),
+        )
+        scenes.append(Scene(objects=[ground_mesh], offset=(0.0, 0.0)))
+
+    # Configure scene lib
     scene_lib_config = SceneLibConfig(
-        scenes=[scene],
-        num_envs=num_envs,
-        replication_method=ReplicationMethod.EXACT,
-        subset_method=SubsetMethod.FIRST_K,
+        scene_file=None,  # No file, using inline scene
+        replicate_method=ReplicationMethod.SEQUENTIAL,
+        subset_method=SubsetMethod.FIRST,
+        pointcloud_samples_per_object=None,
     )
-    return SceneLib(config=scene_lib_config, device=device)
+
+    # Return a SceneLib without terrain (avoids collision geometry in simulators)
+    return SceneLib(
+        config=scene_lib_config,
+        num_envs=num_envs,
+        scenes=scenes,
+        device=device,
+        terrain=None,  # No terrain to avoid unwanted collisions
+    )
 
 
 def build_layout_offsets(num_envs: int, layout: str, spacing: float) -> torch.Tensor:
