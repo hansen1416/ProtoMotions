@@ -117,6 +117,13 @@ def create_parser():
         help="Use CPU only for simulation (experimental, GPU is default).",
     )
     parser.add_argument(
+        "--keep-frames",
+        action="store_true",
+        default=False,
+        help="Don't delete the temp dir of per-frame PNGs after encoding — useful "
+        "for debugging a bad video (e.g. black/empty output) by inspecting raw frames.",
+    )
+    parser.add_argument(
         "--ground",
         action="store_true",
         default=False,
@@ -414,15 +421,12 @@ def main():
                 "simulator._viewer is None (headless=True?) — cannot capture frames."
             )
 
-        simulator.render()
-        setup_fixed_camera(simulator, num_envs)
-
         zero_actions = torch.zeros(
             num_envs, robot_cfg.kinematic_info.num_dofs, device=device
         )
+        env_ids_all = torch.arange(num_envs, device=device)
 
-        log.info(f"Recording {num_frames} frames ...")
-        for frame_idx in tqdm(range(num_frames), desc="Recording", unit="frame"):
+        def pose_frame(frame_idx: int):
             lib_frame_indices = torch.clamp(
                 torch.full_like(env_motion_ids, frame_idx),
                 max=env_motion_lengths - 1,
@@ -438,10 +442,23 @@ def main():
             current_state.rigid_body_rot[:, 0, :] = state.rigid_body_rot.to(device).detach()[:, 0, :]
             current_state.rigid_body_vel[:, 0, :] = torch.zeros(num_envs, 3, device=device)
             current_state.rigid_body_ang_vel[:, 0, :] = torch.zeros(num_envs, 3, device=device)
+            simulator.reset_envs(current_state, env_ids=env_ids_all)
 
-            env_ids = torch.arange(num_envs, device=device)
-            simulator.reset_envs(current_state, env_ids=env_ids)
+        # Warm-up: pose every env to its real frame-0 position BEFORE locking the
+        # camera. Otherwise the camera gets computed from actors' raw/default
+        # (pre-reset) root positions — which can be degenerate (all stacked near
+        # the origin, or uninitialized GPU memory) — and stays frozen there for
+        # every subsequent frame even once reset_envs starts placing actors
+        # correctly, producing a video with nothing in frame. Mirrors
+        # record_video_mor.py's "env.reset(None) before _setup_fixed_camera" order.
+        pose_frame(0)
+        simulator.step(zero_actions)
+        simulator.render()
+        setup_fixed_camera(simulator, num_envs)
 
+        log.info(f"Recording {num_frames} frames ...")
+        for frame_idx in tqdm(range(num_frames), desc="Recording", unit="frame"):
+            pose_frame(frame_idx)
             simulator.step(zero_actions)
             simulator.render()
             gym.write_viewer_image_to_file(viewer, os.path.join(frames_tmp, f"{frame_idx:06d}.png"))
@@ -465,7 +482,10 @@ def main():
         )
         log.info(f"Saved → {output_path}")
     finally:
-        shutil.rmtree(frames_tmp, ignore_errors=True)
+        if args.keep_frames:
+            log.info(f"Keeping raw frames at {frames_tmp}")
+        else:
+            shutil.rmtree(frames_tmp, ignore_errors=True)
         if hasattr(simulator, "close"):
             simulator.close()
         if xvfb_proc is not None:

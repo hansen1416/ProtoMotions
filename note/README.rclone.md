@@ -97,7 +97,7 @@ rclone copy r2:proto-data/150_128shape_canonical/ /workspace/motion_cache/150_12
     --multi-thread-chunk-size=128M \
     --progress
 
-rclone copy ./tmp r2:proto-data/ckpt/ \
+rclone copy ./output/videos/ r2:proto-data/videos/ \
     --transfers=1 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
