@@ -116,6 +116,16 @@ def create_parser():
         default=False,
         help="Use CPU only for simulation (experimental, GPU is default).",
     )
+    parser.add_argument(
+        "--ground",
+        action="store_true",
+        default=False,
+        help=(
+            "Spawn a visual checkerboard ground plane (loads a mesh via trimesh — "
+            "off by default since it's purely cosmetic and depends on trimesh/asset "
+            "setup that can be flaky on some pods; the video works fine without it)."
+        ),
+    )
     return parser
 
 
@@ -362,7 +372,13 @@ def main():
                 "No DISPLAY set and Xvfb is not installed. Run: apt install xvfb"
             )
 
-    scene_lib = create_checkerboard_ground(num_envs, device, "isaacgym")
+    if args.ground:
+        scene_lib = create_checkerboard_ground(num_envs, device, "isaacgym")
+    else:
+        # No scene objects — avoids trimesh/mesh-asset loading entirely, which is
+        # what create_checkerboard_ground() needs and can be flaky about on a fresh
+        # pod. The ground plane is purely cosmetic for kinematic-playback capture.
+        scene_lib = SceneLib.empty(num_envs=num_envs, device=device)
 
     SimulatorClass = get_class(sim_cfg._target_)
     simulator = SimulatorClass(
