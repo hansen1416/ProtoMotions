@@ -6094,3 +6094,109 @@ python tools/render_motionlib_video.py \
     --robot smpl_mor --layout pairs --start 0 --batch-size 4 \
     --camera-distance-scale 0.5 --output output/videos/before_after_dynamic_pairs1-2.mp4
 ```
+
+## 70. Temporal-Slot and Token-Type Embeddings for Attention (2026-08-29)
+
+**Experiment:** `examples/experiments/mimic/mlp_wide_discover_attention_slot_type.py`. The
+existing temporal-attention model concatenates current-state, seven history, and four future
+tokens, but previously supplied no positional information. Self-attention was therefore unable
+to explicitly identify a token as, for example, history step -1 versus -32.
+
+This controlled experiment adds one learned embedding for each of the 12 sequence slots and one
+learned type embedding for each token source (current, history, future). Both actor and critic use
+the embeddings. The environment, observations, reward, token encoders, transformer capacity, MLP
+heads, PPO settings, and direct `morphology_obs`/`previous_actions` path are inherited unchanged
+from `mlp_wide_discover_attention.py`. The change adds only 7,680 parameters in total. The shared
+`TransformerConfig` options default to disabled, so all existing experiments and checkpoint
+layouts remain unchanged.
+
+**Validation:** actor and critic configs each contain exactly one enabled 12-slot/3-type
+transformer. A CPU forward/backward test produced the expected output shape and confirmed gradient
+flow into both embedding tables. Legacy transformer construction creates no additional parameters;
+Python compilation and `git diff --check` also pass. Training behavior remains untested.
+
+**Refined-motion launch:**
+```bash
+nohup python -u protomotions/train_agent.py \
+--robot-name smpl_mor --simulator isaacgym \
+--experiment-path examples/experiments/mimic/mlp_wide_discover_attention_slot_type.py \
+--experiment-name hhi_wide_150motion_discover_attention_slot_type_refined \
+--motion-file /workspace/motion_cache/small150_128shape_refined.pt \
+--num-envs 4096 --batch-size 16384 --ngpu 1 \
+--use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+--wandb-group hhi_wide_150motion_discover_attention_slot_type_refined \
+> /tmp/hhi_wide_150motion_discover_attention_slot_type_refined.log 2>&1 &
+```
+
+## 71. Planned Actor-Only adaLN-Zero Morphology Conditioning and Neutral-to-Multishape Transfer
+(2026-08-29)
+
+**Status:** design only; not implemented. The next conditioning experiment will build on §70's
+attention + temporal-slot/type model. Morphology will condition only the actor's transformer;
+the critic transformer will remain unconditioned, but both final heads will retain a direct
+morphology input. "Critic unchanged" means architecture only -- it will still train normally.
+
+**Data routing:** current state, seven history frames, and four future target frames keep their
+existing independent token encoders, producing a `[batch, 12, 256]` sequence after the learned
+slot/type embeddings are added. `previous_actions` continues to bypass attention. The environment
+morphology is the existing 11-D `[gender_id, beta_0, ..., beta_9]` observation, transformed with
+fixed rather than running-stat normalization:
+
+```text
+gender = 2 * gender_id - 1
+betas  = clamp(betas / 3, -1, 1)
+m      = concat(gender, betas)                         # [B, 11]
+c      = Linear(11,128) -> SiLU -> Linear(128,256)    # [B, 256]
+```
+
+Fixed beta scaling is important because a neutral-only Stage 1 has effectively zero beta
+variance; running mean/variance learned there would be invalid when Stage 2 introduces the full
+shape distribution. The first experiment will use gender + raw SMPL betas only. The existing 15
+z-scored physics features may later be appended as a separate ablation, not bundled into the first
+test.
+
+**Actor adaLN-Zero:** each of the two actor transformer blocks gets a morphology projection from
+`c` to six 256-D vectors: attention scale/shift/gate and FFN scale/shift/gate. Each normalized
+activation is modulated as `LN(x) * (1 + scale) + shift`, and each attention/FFN residual is
+multiplied by its gate. The final projection producing all six vectors is zero-initialized, so
+scale, shift, and gate begin at zero and the new block initially reproduces the unconditioned
+transformer. The same `c` is broadcast across all 12 temporal tokens because body shape is fixed
+for the episode.
+
+After attention, the actor keeps the direct path
+`[conditioned_attn_out, previous_actions, m] -> existing 6x2896 action head`. The critic uses its
+ordinary slot/type transformer followed by `[attn_out, previous_actions, m] -> existing 4x1024
+value head`. This gives the actor both a deep morphology-dependent interpretation of temporal
+features and a simple final-head fallback, while avoiding simultaneous adaLN experimentation in
+the value network.
+
+**Neutral Stage 1:** neutral-only data can teach balance, tracking, temporal alignment, and the
+reference-to-action mapping, but it cannot teach beta dependence because every sample has the
+same morphology. Therefore, train the §70 temporal backbone on neutral bodies with the morphology
+conditioner absent or held at identity; do not interpret neutral-only performance as evidence
+that the conditioner has learned shape adaptation.
+
+**Function-preserving Stage 2 initialization:** load the neutral backbone, insert the actor adaLN
+modules with zero output projections, and initialize the final actor/critic morphology columns to
+zero. The transferred model must initially produce the neutral policy for every shape instead of
+allowing unconstrained weights that only ever saw constant neutral betas to perturb actions when
+nonzero betas first appear. If converting a checkpoint whose head already concatenated a constant
+neutral morphology, first absorb that constant contribution into the first-layer bias, then zero
+the morphology columns; this preserves the neutral function exactly. Reset optimizer state and do
+not reuse neutral-only morphology-normalizer statistics.
+
+**Multishape Stage 2:** train on all 128 bodies with each body's matching reference motion. Sample
+shape uniformly before applying motion-difficulty sampling and retain roughly 10-20% neutral-body
+samples as an anti-forgetting anchor. A short new-module-only warm-up is acceptable, but the actor
+backbone must then be unfrozen: use a conservative backbone learning rate (initially `2e-6` to
+`5e-6`) and a larger rate for the new conditioner/morphology connections (initially `2e-5`). The
+critic remains fully trainable at its existing `1e-4` starting rate. Permanently freezing the
+neutral backbone is specifically rejected because the earlier Stage-2 adapter lineage showed that
+a single-shape backbone can learn to ignore morphology and leave a downstream adapter with an
+irrecoverable information bottleneck.
+
+**Required comparison:** final conclusions require two matched multishape runs: (A) actor-only
+adaLN-Zero trained from scratch and (B) the identical model initialized from the neutral Stage-1
+checkpoint. Dataset, shape/motion sampling, reward, learning rates after warm-up, and Stage-2
+training steps must match. Neutral pretraining is expected primarily to improve early optimization
+and stability; only this control can establish whether it also raises the final success ceiling.
