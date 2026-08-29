@@ -222,7 +222,8 @@ class TransformerConfig:
     """Configuration for Transformer encoder.
     
     Multi-head self-attention transformer that processes tokenized inputs.
-    Supports optional masking for variable-length sequences.
+    Supports optional masking for variable-length sequences and opt-in learned
+    slot/type embeddings.
     """
 
     _target_: str = "protomotions.agents.common.transformer.Transformer"
@@ -281,6 +282,32 @@ class TransformerConfig:
             "options": ["relu", "tanh", "gelu", "silu", None],
         }
     )
+    use_learned_slot_embeddings: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Add one learned embedding per sequence slot before attention. "
+                "Requires max_sequence_length."
+            )
+        },
+    )
+    max_sequence_length: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Maximum token count supported by learned slot embeddings. "
+                "Ignored when use_learned_slot_embeddings is false."
+            )
+        },
+    )
+    use_learned_token_type_embeddings: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Add a learned source-type embedding to each non-mask input token group."
+            )
+        },
+    )
 
     def __post_init__(self):
         if self.input_and_mask_mapping is not None:
@@ -297,3 +324,8 @@ class TransformerConfig:
                 ), f"Key {key} is defined as an input key to be masked but not in in_keys {self.in_keys}"
 
         assert len(self.out_keys) == 1, "Transformer supports exactly one output key"
+        if self.use_learned_slot_embeddings:
+            assert self.max_sequence_length is not None, (
+                "max_sequence_length is required when learned slot embeddings are enabled"
+            )
+            assert self.max_sequence_length > 0, "max_sequence_length must be positive"

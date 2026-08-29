@@ -91,13 +91,13 @@ rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
     --multi-thread-chunk-size=128M \
     --progress
 
-rclone copy r2:proto-data/150_128shape_canonical/ /workspace/motion_cache/150_128shape_canonical/ \
+rclone copy r2:proto-data/150motion_refined/ /workspace/motion_cache/refinement_pilot/ \
     --transfers=2 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
     --progress
 
-rclone copy ./output/videos/ r2:proto-data/videos/ \
+rclone copy ./small150_128shape_refined.pt r2:proto-data/150motions/ \
     --transfers=1 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \

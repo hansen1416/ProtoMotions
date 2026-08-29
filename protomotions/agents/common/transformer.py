@@ -20,13 +20,12 @@ in reinforcement learning. Used primarily in motion tracking and MaskedMimic age
 for handling sequential observations.
 
 Key Classes:
-    - Transformer: Main transformer model with positional encoding
-    - PositionalEncoding: Sinusoidal positional encodings for sequence position
+    - Transformer: Main transformer model with optional learned slot/type embeddings
 
 Key Features:
     - Multi-head self-attention for temporal dependencies
     - Multiple input heads with different encoders
-    - Positional encoding for sequence awareness
+    - Optional learned embeddings for sequence-slot and input-group identity
     - Flexible output heads (single or multi-headed)
 """
 
@@ -51,7 +50,8 @@ class Transformer(TensorDictModuleBase):
 
     Attributes:
         input_models: Dictionary of input encoders for different observation types.
-        sequence_pos_encoder: Positional encoding layer.
+        slot_embeddings: Optional learned sequence-slot embeddings.
+        token_type_embeddings: Optional learned input-group embeddings.
         seqTransEncoder: Stack of transformer encoder layers.
         in_keys: List of input keys collected from all input models.
         out_keys: List containing output key.
@@ -86,6 +86,20 @@ class Transformer(TensorDictModuleBase):
                 token_input_keys.append(in_key)
         self._token_input_keys = token_input_keys
 
+        self.slot_embeddings = None
+        if self.config.use_learned_slot_embeddings:
+            self.slot_embeddings = nn.Parameter(
+                torch.empty(1, self.config.max_sequence_length, self.config.latent_dim)
+            )
+            nn.init.normal_(self.slot_embeddings, mean=0.0, std=0.02)
+
+        self.token_type_embeddings = None
+        if self.config.use_learned_token_type_embeddings:
+            self.token_type_embeddings = nn.Parameter(
+                torch.empty(len(self._token_input_keys), self.config.latent_dim)
+            )
+            nn.init.normal_(self.token_type_embeddings, mean=0.0, std=0.02)
+
         # Transformer layers
         seqTransEncoderLayer = nn.TransformerEncoderLayer(
             d_model=self.config.latent_dim,
@@ -111,12 +125,31 @@ class Transformer(TensorDictModuleBase):
             TensorDict with transformer output added at self.out_keys[0].
         """
         all_tokens = []
-        for in_key in self._token_input_keys:
+        for token_type, in_key in enumerate(self._token_input_keys):
             if tensordict[in_key].dim() == 2:
-                all_tokens.append(tensordict[in_key].unsqueeze(1))
+                tokens = tensordict[in_key].unsqueeze(1)
             else:
-                all_tokens.append(tensordict[in_key])
+                tokens = tensordict[in_key]
+
+            if tokens.shape[-1] != self.config.latent_dim:
+                raise ValueError(
+                    f"Transformer input '{in_key}' has token size {tokens.shape[-1]}, "
+                    f"expected latent_dim={self.config.latent_dim}"
+                )
+
+            if self.token_type_embeddings is not None:
+                tokens = tokens + self.token_type_embeddings[token_type].view(1, 1, -1)
+            all_tokens.append(tokens)
         all_tokens = torch.cat(all_tokens, dim=1)
+
+        if self.slot_embeddings is not None:
+            sequence_length = all_tokens.shape[1]
+            if sequence_length > self.slot_embeddings.shape[1]:
+                raise ValueError(
+                    f"Transformer received {sequence_length} tokens, but learned slot "
+                    f"embeddings support at most {self.slot_embeddings.shape[1]}"
+                )
+            all_tokens = all_tokens + self.slot_embeddings[:, :sequence_length]
 
         all_masks = []
         for in_key in self._token_input_keys:

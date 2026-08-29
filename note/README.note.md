@@ -6018,3 +6018,79 @@ instantiates, reward components pickle correctly, and a synthetic end-to-end cor
 The real combined corpus has not yet been built and the experiment has not yet been launched; both
 require the two packaged input corpora on the RunPod. Build and launch commands are included in the
 new experiment file's module docstring.
+
+## 69. HUMOS Motion Refinement Tool (2026-08-28)
+
+**Tool:** `tools/refine_humos_motion.py`. Offline, CPU-only kinematic cleanup of HUMOS-sourced
+`MotionLib` `.pt` files before training. It targets stance-foot drift, collision-geometry ground
+penetration, and high-frequency joint jitter without requiring Isaac Gym, a GPU, or a policy.
+It uses PyTorch plus NumPy/SciPy; it is not a physics simulation and therefore does not prove
+dynamic feasibility.
+
+**Command (full 150-clip x 128-shape corpus, 19,200 motions):**
+```bash
+python3 tools/refine_humos_motion.py \
+    --motion-file data_cache/small150_128shape.pt \
+    --out-motion-file data_cache/small150_128shape_refined.pt \
+    --device cpu \
+    --report
+```
+`--limit N` restricts processing/output to the first N motions (the full source file is still
+loaded). The corrected two-FK-pass pipeline is expected to take roughly 30-40 minutes for all
+19,200 motions on CPU. Peak RAM remains approximately 13-15GB with `--report`; output is ~8.4GB.
+The full 19,200-motion output has not yet been generated.
+
+**Corrected procedure, per motion:**
+1. **Contact validation/detection** -- validates the stored tensor's shape/finiteness, thresholds
+   float contacts at 0.5, or recomputes missing/malformed/empty contacts. Cleans ankle and toe
+   masks independently with short-gap hysteresis and saves the cleaned semantic schedule.
+2. **SO(3)-safe smoothing** -- converts the 23 non-root SMPL exponential-map rotations into
+   sign-continuous unit quaternions, applies Savitzky-Golay filtering, renormalizes, and maps back
+   to the principal exponential-map branch. The correction tapers to zero at contact-state
+   boundaries, blends at 0.5 strength, and is capped at 8 degrees per joint/frame. This replaces
+   the unsafe old component-wise filtering of raw exponential maps.
+3. **Post-smoothing FK** -- recomputes the body pose with the exact morphology asset before any
+   spatial correction. This fixes the old ordering, where joint smoothing happened after foot and
+   ground corrections and could reintroduce both skating and penetration.
+4. **Conservative stance-root correction** -- ankle and toe contact windows each propose a root-XY
+   translation toward that contact point's median position; simultaneous constraints are averaged
+   as a least-squares compromise. The correction is capped at 10cm and smoothed over 21 frames to
+   avoid transferring foot jitter into the pelvis. This reduces common root drift; it is explicitly
+   not exact foot locking and cannot repair relative foot motion or pivots without leg IK.
+5. **Final ground clearance** -- evaluates every frame against the selected shape's MJCF collision
+   geometry. A five-frame smooth lift envelope is applied to the root; it is never smaller than the
+   lift required to keep the lowest collision point at least 5mm above the floor.
+6. **Final FK and derivatives** -- reruns morphology-specific FK after all corrections, derives
+   global/local velocities separately inside each motion (never across clip boundaries), checks all
+   tensors for finite values, and saves `gts/grs/gvs/gavs/dps/dvs/lrs/contacts`. Other metadata is
+   preserved, and output uses a temporary file plus atomic replacement.
+
+**Validation after correction:** an end-to-end real-data run used the first 200 motions (40,000
+frames), covering all 128 morphology assets and two clip groups. Unlike the obsolete pilot, metrics
+use exact one-frame velocities, respect motion boundaries, check every represented shape, and
+measure cross-shape variance within each base clip.
+
+- Stance-foot horizontal speed: mean `0.0186 -> 0.0134 m/s` (-28%); p95
+  `0.0449 -> 0.0294 m/s` (-35%).
+- Frames with collision geometry below the floor: `44.2125% -> 0%`; maximum penetration
+  `0.1908m -> 0m`.
+- Per-motion all-body jerk: median `4.00 -> 3.58 m/s^3`; p95 `7.34 -> 7.08 m/s^3`.
+  Root jerk stayed effectively flat (median `2.95 -> 2.95`, p95 `5.61 -> 5.64 m/s^3`).
+- Local-rotation fidelity: mean change `0.012 degrees`, maximum `0.158 degrees`.
+- Within-clip cross-shape L-knee range variance: `0.000591 -> 0.000592` (no collapse).
+- Saved tensor shapes, finiteness, quaternion normalization, syntax, and diff integrity passed.
+
+These results establish useful kinematic cleanup with negligible rotation drift. They do not yet
+establish improved ProtoMotions success rate or torque/balance feasibility; that requires training
+or simulator replay on the refined corpus.
+
+**Companion viz tool:** `tools/render_motionlib_video.py` -- headless kinematic-only MP4 rendering
+of a packaged MotionLib file (no checkpoint/policy needed), for pods/remote GPU machines only (the
+IsaacGym viewer needs a real GPU; not runnable on a broken/no-GPU local machine). `--layout pairs`
+renders even env index (before) next to odd env index (after) for direct comparison, e.g.:
+```bash
+python tools/render_motionlib_video.py \
+    --motion-file data_cache/refinement_pilot/before_after_interleaved_dynamic.pt \
+    --robot smpl_mor --layout pairs --start 0 --batch-size 4 \
+    --camera-distance-scale 0.5 --output output/videos/before_after_dynamic_pairs1-2.mp4
+```
