@@ -6200,3 +6200,26 @@ adaLN-Zero trained from scratch and (B) the identical model initialized from the
 checkpoint. Dataset, shape/motion sampling, reward, learning rates after warm-up, and Stage-2
 training steps must match. Neutral pretraining is expected primarily to improve early optimization
 and stability; only this control can establish whether it also raises the final success ceiling.
+
+## 72. Final Slot/Type vs. adaLN Review and Full-Dataset Experiment (2026-08-30)
+
+**Final 150-motion finding:** runs `7yhmeff9` (slot/type + actor adaLN-Zero) and `49hr1o99`
+(slot/type only) were manually stopped. At their last shared evaluation, epoch 5,399, slot/type only
+reached `88.67%` success versus adaLN's `86.67%`, with lower GT error (`0.2169` vs. `0.2408`), GR
+error (`0.3172` vs. `0.3781`), action delta (`0.891` vs. `1.230` degrees), and normalized jerk
+(`2,099` vs. `3,771`, 44% lower). Across the 13 shared late evaluations from epochs 2,999-5,399,
+adaLN's mean success was only slightly higher (`86.87%` vs. `86.00%`); the original refined
+attention control averaged `87.69%`. With 150 motions and a randomly sampled shape per motion,
+this is not a robust success-rate win for either new model, but slot/type-only has a clear
+smoothness/control-quality advantage. The full-dataset choice is therefore slot/type-only trained
+directly on all shapes, not the two-stage adaLN plan.
+
+**New experiment:**
+`examples/experiments/mimic/mlp_wide_stage2_discover_attention_slot_type.py`. This thin wrapper
+inherits the existing full-scale `mlp_wide_stage2_discover_attention.py` configuration, including
+the `GlobalClipPool` rotation, fixed holdout, observations, discover reward, PPO settings, and
+inference overrides. Its only model change is enabling learned 12-slot temporal embeddings and
+current/history/future token-type embeddings in both actor and critic transformers. Compilation,
+module/config assertions, and the expected `GlobalClipPool` defaults passed. The full launch
+command is recorded in the experiment file's module docstring; this experiment has not yet been
+launched.
