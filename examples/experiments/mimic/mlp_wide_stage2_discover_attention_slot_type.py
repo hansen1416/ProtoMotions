@@ -5,9 +5,9 @@
 This is the GlobalClipPool counterpart of
 ``mlp_wide_discover_attention_slot_type.py``. It inherits the full Stage-2 data
 rotation, versioned global split, observations, rewards, PPO settings, and transformer
-capacity from ``mlp_wide_stage2_discover_attention.py``. The only change is to
-enable learned temporal-slot and token-source-type embeddings in the actor and
-critic transformers.
+capacity from ``mlp_wide_stage2_discover_attention.py``. It enables learned
+temporal-slot and token-source-type embeddings in the actor and critic transformers
+and evaluates a fixed four-shape panel per clip.
 
 Full-scale launch:
 
@@ -82,5 +82,9 @@ def agent_config(
         transformer_config.use_learned_slot_embeddings = True
         transformer_config.max_sequence_length = NUM_TEMPORAL_TOKENS
         transformer_config.use_learned_token_type_embeddings = True
+
+    # Compare checkpoints on the same deterministic morphology panel.
+    config.evaluator.eval_shapes_per_motion = 4
+    config.evaluator.eval_shape_sampling_seed = 42
 
     return config

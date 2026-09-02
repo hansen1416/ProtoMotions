@@ -13,12 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-import torch
-import numpy as np
-from typing import Dict, Optional, Tuple, Any
-from torch import Tensor
+import hashlib
 import math
 from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
+
+import numpy as np
+import torch
+from torch import Tensor
 
 from protomotions.agents.evaluators.base_evaluator import BaseEvaluator
 from protomotions.agents.evaluators.metrics import MotionMetrics
@@ -196,19 +198,122 @@ class MimicEvaluator(BaseEvaluator):
             selected.append(motion_ids[pick])
         return torch.cat(selected).sort().values
 
+    @staticmethod
+    def _stable_shape_score(
+        seed: int, clip_id: str, asset_id: str, duplicate_index: int
+    ) -> bytes:
+        """Return a stable pseudo-random ordering key for one clip-shape pair."""
+        value = repr((seed, clip_id, asset_id, duplicate_index)).encode("utf-8")
+        return hashlib.sha256(value).digest()
+
+    def _sample_fixed_shapes_per_motion_legacy_positional(
+        self, num_shapes_per_motion: int, seed: int
+    ) -> torch.Tensor:
+        """Select a deterministic shape panel per positional clip column.
+
+        This fallback is only for morphology data without motion_clip_ids. The
+        selection is stable while the legacy shape-major grid ordering is stable.
+        """
+        asset_id_to_motion_ids = self.motion_lib.build_asset_id_to_motion_ids()
+        asset_ids = list(asset_id_to_motion_ids)
+        all_ids = torch.stack(list(asset_id_to_motion_ids.values()), dim=0)
+        num_shapes, num_clips = all_ids.shape
+        panel_size = min(num_shapes_per_motion, num_shapes)
+
+        selected = []
+        for clip_col in range(num_clips):
+            ranked_shape_rows = sorted(
+                range(num_shapes),
+                key=lambda shape_row: self._stable_shape_score(
+                    seed,
+                    f"legacy-column-{clip_col}",
+                    asset_ids[shape_row],
+                    0,
+                ),
+            )
+            selected.append(all_ids[ranked_shape_rows[:panel_size], clip_col])
+        return torch.cat(selected).sort().values
+
+    def _sample_fixed_shapes_per_motion(
+        self, num_shapes_per_motion: int, seed: int
+    ) -> torch.Tensor:
+        """Select a fixed pseudo-random shape panel for every unique motion clip.
+
+        Stable clip and asset identities keep the selected clip-shape pairs unchanged
+        across evaluation calls, GlobalClipPool reloads, and GPU partitions. Clips
+        with fewer variants than requested contribute every available variant.
+        """
+        if num_shapes_per_motion < 1:
+            raise ValueError("num_shapes_per_motion must be at least 1")
+        if not self.motion_lib.has_clip_identity_metadata():
+            return self._sample_fixed_shapes_per_motion_legacy_positional(
+                num_shapes_per_motion, seed
+            )
+
+        clip_id_to_motion_ids = self.motion_lib.build_clip_id_to_motion_ids()
+        motion_asset_ids = self.motion_lib.motion_asset_ids
+        selected = []
+        for clip_id in sorted(clip_id_to_motion_ids):
+            motion_ids = clip_id_to_motion_ids[clip_id]
+            candidate_ids = motion_ids.detach().cpu().tolist()
+
+            # Asset identity makes the selected physical shapes invariant to global
+            # motion-ID changes after a resident-pool reload. The duplicate index is
+            # only a deterministic tie-breaker for duplicated asset rows.
+            candidates = sorted(
+                (
+                    (motion_asset_ids[motion_id], motion_id)
+                    for motion_id in candidate_ids
+                ),
+                key=lambda item: (item[0], item[1]),
+            )
+            duplicate_counts = {}
+            ranked = []
+            for asset_id, motion_id in candidates:
+                duplicate_index = duplicate_counts.get(asset_id, 0)
+                duplicate_counts[asset_id] = duplicate_index + 1
+                ranked.append(
+                    (
+                        self._stable_shape_score(
+                            seed, clip_id, asset_id, duplicate_index
+                        ),
+                        motion_id,
+                    )
+                )
+            ranked.sort(key=lambda item: item[0])
+            panel_size = min(num_shapes_per_motion, len(ranked))
+            selected.extend(motion_id for _, motion_id in ranked[:panel_size])
+
+        return torch.tensor(
+            selected, dtype=torch.long, device=self.motion_lib.device
+        ).sort().values
+
     def initialize_eval(self) -> Dict:
         """Initialize evaluation tracking and cache env state for restoration."""
         total_motions = self.motion_lib.num_motions()
 
         # Subsample motions to cap GPU memory usage from MotionMetrics tensors.
-        if self.config.eval_one_shape_per_motion and self.motion_lib.has_morphology_metadata():
+        if (
+            self.config.eval_shapes_per_motion is not None
+            and self.motion_lib.has_morphology_metadata()
+        ):
+            # Cover every clip with a fixed body-shape panel. This intentionally
+            # overrides max_eval_motions so the cap cannot bias clip coverage.
+            self._eval_motion_subset = self._sample_fixed_shapes_per_motion(
+                self.config.eval_shapes_per_motion,
+                self.config.eval_shape_sampling_seed,
+            )
+        elif (
+            self.config.eval_one_shape_per_motion
+            and self.motion_lib.has_morphology_metadata()
+        ):
             # Cover every clip with one random body shape instead of all shapes.
             self._eval_motion_subset = self._sample_one_shape_per_motion()
         else:
             max_eval = self.config.max_eval_motions
             if max_eval is not None and total_motions > max_eval:
-                perm = torch.randperm(total_motions, device=self.device)[:max_eval].sort().values
-                self._eval_motion_subset = perm
+                perm = torch.randperm(total_motions, device=self.device)[:max_eval]
+                self._eval_motion_subset = perm.sort().values
             else:
                 self._eval_motion_subset = None
 
