@@ -6223,3 +6223,19 @@ current/history/future token-type embeddings in both actor and critic transforme
 module/config assertions, and the expected `GlobalClipPool` defaults passed. The full launch
 command is recorded in the experiment file's module docstring; this experiment has not yet been
 launched.
+
+## 73. Full Stage-2 Per-Clip HUMOS Refinement (2026-08-30)
+
+**Tool:** `tools/refine_humos_r2_per_clip.py`. A resumable preprocessing job is now running from
+`r2:proto-data/hhi_stage2_per_clip/` to
+`r2:proto-data/hhi_stage2_per_clip_refined/`. It downloads one file per worker, runs the §69
+contact/footskate, SO(3) smoothing, per-frame ground-clearance, and FK refinement, uploads and
+size-verifies the result, then deletes its local input/output. The destination manifest contains
+only verified clips during processing; `refinement_complete.json` is written only after all
+20,951 clips finish.
+
+The initial two-clip pilot completed successfully: footskate decreased, penetration became zero,
+rotation fidelity and cross-shape variation were preserved, and both outputs passed remote
+verification. The full RunPod job uses four concurrent workers with two CPU threads each on eight
+vCPUs (`--workers 4 --threads-per-worker 2`); it resumes by skipping already uploaded clips and is
+expected to take roughly 1.5-2.5 days. The GPU is not used by this CPU-only refinement.

@@ -15,7 +15,7 @@
 #
 """
 Mimic Environment — Full-Scale Stage 2: Self-Attention Temporal Encoder + Discover Reward/Term
-(20,946 clips x 128 shapes, GlobalClipPool)
+(20,951 clips x 128 shapes, GlobalClipPool)
 
 Full-dataset counterpart to `mlp_wide_discover_attention.py`, which was validated on the 150-clip
 corpus (`hhi_wide_150motion_discover_attention`, wandb `p6b2la4h`: 84.7% eval/success_rate vs.
@@ -36,15 +36,16 @@ hard-motion-cluster capacity limit, not a temporal-precision one).
    CMU's getting-up-policies two-phase curriculum, relax every constraint that isn't "did you get
    anywhere near the reference" so the policy's only job is finding ANY successful trajectory
    through the hardest clips). That relaxation was validated on the 150-clip and 13-clip subsets
-   only, never before at full 20,946-clip scale -- carried forward as-is by explicit decision
+   only, never before at full 20,951-clip scale -- carried forward as-is by explicit decision
    (2026-08-19 session) rather than reverting to `mlp_wide.py`'s stricter config, since the point
    of scaling up is carrying the whole validated recipe forward, not cherry-picking pieces of it.
 2. `motion_lib_config()` and `additional_experiment_arguments()` are new, copied from
    `mlp_wide_stage2_scratch.py`'s `GlobalClipPool` wiring (same pattern used successfully for
    `hhi_wide_stage2_scratch`, wandb `hl2g9b0m`) -- streams per-clip motion files from R2 instead of
-   loading one static `.pt` file, with a resident training pool, a fixed eval holdout immune to
-   resident-set churn, a weight floor so solved clips keep nonzero rehearsal priority, and a random
-   rehearsal fraction. Falls back to the plain static `MotionLibConfig` if
+   loading one static `.pt` file, with a resident training pool, a versioned global 90/5/5 split,
+   a fixed validation set immune to resident-set churn, a weight floor so solved clips keep
+   nonzero rehearsal priority, and a random rehearsal fraction. Falls back to the plain static
+   `MotionLibConfig` if
    `--global-clip-pool-source` isn't passed, so this file still works unchanged for small-scale
    testing (e.g. the smoke test recommended below).
    `evaluator.eval_metrics_every` is bumped from `mlp_wide_discover_attention.py`'s implicit
@@ -64,7 +65,7 @@ observation window. Recommend a short run first (small `--global-clip-pool-size`
 confirm a freshly-streamed clip has enough buffered past/future frames before committing the full
 run below.
 
-Full-scale launch, matching `hl2g9b0m`'s GlobalClipPool settings and env/batch sizing:
+Full-scale launch with `hl2g9b0m`'s pool/env sizing and the versioned global split:
 
     nohup python -u protomotions/train_agent.py \\
     --robot-name smpl_mor --simulator isaacgym \\
@@ -73,7 +74,7 @@ Full-scale launch, matching `hl2g9b0m`'s GlobalClipPool settings and env/batch s
     --global-clip-pool-source r2:proto-data/hhi_stage2_per_clip/ \\
     --global-clip-pool-cache-dir /workspace/motion_cache \\
     --global-clip-pool-size 256 --global-clip-pool-rebuild-every 256 \\
-    --global-clip-pool-eval-holdout-size 128 --global-clip-pool-weight-floor 0.05 \\
+    --global-clip-pool-weight-floor 0.05 \\
     --global-clip-pool-random-fraction 0.2 \\
     --num-envs 6144 --batch-size 24576 --ngpu 6 \\
     --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \\
@@ -119,19 +120,34 @@ def scene_lib_config(args: argparse.Namespace):
 
 
 def additional_experiment_arguments(parser: argparse.ArgumentParser):
-    """GlobalClipPool CLI arguments -- same block as `mlp_wide_stage2_scratch.py`'s. All 3 fix
-    flags (eval-holdout-size, weight-floor, random-fraction) default to exactly the old
-    GlobalClipPool behavior when omitted (0, 0.0, 0.0 respectively), matching that file's
-    already-validated defaults for this exact dataset.
-    """
+    """GlobalClipPool arguments with the versioned HHI Stage-2 split enabled by default."""
     parser.add_argument(
         "--global-clip-pool-source",
         type=str,
         default=None,
         help=(
-            "rclone remote directory of per-clip Stage 2 motion files + clip_manifest.jsonl "
-            "(e.g. r2:proto-data/hhi_stage2_per_clip/)."
+            "rclone remote directory of per-clip Stage 2 motion files and versioned split "
+            "artifacts (e.g. r2:proto-data/hhi_stage2_per_clip_refined/)."
         ),
+    )
+    parser.add_argument(
+        "--global-clip-pool-train-manifest-name",
+        type=str,
+        default="splits/hhi_stage2_v1/train_manifest.jsonl",
+        help="Explicit training manifest path inside the GlobalClipPool R2 source.",
+    )
+    parser.add_argument(
+        "--global-clip-pool-validation-manifest-name",
+        type=str,
+        default="splits/hhi_stage2_v1/validation_manifest.jsonl",
+        help="Explicit validation manifest path inside the GlobalClipPool R2 source.",
+    )
+    parser.add_argument(
+        "--global-clip-pool-split-metadata-name",
+        type=str,
+        default="splits/hhi_stage2_v1/split_metadata.json",
+        help="Versioned metadata binding train/validation roles to hashes and recording test "
+        "provenance without exposing the test manifest to training.",
     )
     parser.add_argument(
         "--global-clip-pool-size", type=int, default=256,
@@ -173,10 +189,9 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
         "global_clip_weights instead of a flat 1.0.",
     )
     parser.add_argument(
-        "--global-clip-pool-eval-holdout-size", type=int, default=128,
-        help="Clips/rank permanently excluded from training and reserved for a fixed "
-        "generalization probe, evaluated separately each eval tick under eval_holdout/* metric "
-        "keys. 0 disables the holdout (old behavior).",
+        "--global-clip-pool-eval-holdout-size", type=int, default=0,
+        help="Legacy per-rank holdout mode. Must remain 0 in this experiment's default "
+        "explicit train/validation split mode.",
     )
     parser.add_argument(
         "--global-clip-pool-weight-floor", type=float, default=0.05,
@@ -197,6 +212,9 @@ def motion_lib_config(args: argparse.Namespace):
 
         return GlobalClipPoolConfig(
             r2_source=args.global_clip_pool_source,
+            manifest_name=args.global_clip_pool_train_manifest_name,
+            validation_manifest_name=args.global_clip_pool_validation_manifest_name,
+            split_metadata_name=args.global_clip_pool_split_metadata_name,
             local_cache_dir=args.global_clip_pool_cache_dir,
             resident_pool_size=args.global_clip_pool_size,
             cache_size_multiplier=args.global_clip_pool_cache_multiplier,

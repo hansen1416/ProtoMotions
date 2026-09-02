@@ -27,6 +27,7 @@ existing full-block `MotionLib._load_motion_state_dict` swap-in-place path -- no
 insert/evict support is added to MotionLib's tensor indexing.
 """
 
+import hashlib
 import json
 import logging
 import math
@@ -35,8 +36,8 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, List, Optional
+from pathlib import Path, PurePosixPath
+from typing import Dict, List, Optional, Tuple
 
 import torch
 
@@ -85,7 +86,26 @@ class GlobalClipPoolConfig(MotionLibConfig):
     )
     manifest_name: str = field(
         default="clip_manifest.jsonl",
-        metadata={"help": "Manifest filename inside r2_source, one JSON line per clip."},
+        metadata={
+            "help": "Training manifest path inside r2_source, one JSON line per clip. In "
+            "legacy mode this remains the all-clips manifest."
+        },
+    )
+    validation_manifest_name: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Explicit validation manifest path inside r2_source. Requires "
+            "split_metadata_name and eval_holdout_size=0. There is intentionally no test "
+            "manifest field in the training API."
+        },
+    )
+    split_metadata_name: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Versioned split_metadata.json path inside r2_source. It binds the train "
+            "and validation roles to exact files/hashes and exposes only test hash/count "
+            "provenance; the test manifest itself is never downloaded."
+        },
     )
     local_cache_dir: str = field(
         default="/workspace/motion_cache",
@@ -169,7 +189,8 @@ class GlobalClipPoolConfig(MotionLibConfig):
     eval_holdout_size: int = field(
         default=0,
         metadata={
-            "help": "Number of clips/rank permanently excluded from the trainable vocabulary "
+            "help": "Legacy mode only: number of clips/rank permanently excluded from the "
+            "trainable vocabulary "
             "and reserved for a fixed generalization probe (see MimicEvaluator._evaluate_holdout). "
             "0 (default) disables the holdout entirely -- exactly today's behavior, no clips "
             "withheld. Holdout clips never enter global_clip_weights/_select_top_k's candidate "
@@ -195,6 +216,18 @@ class GlobalClipPoolConfig(MotionLibConfig):
             "of how low its weight has decayed."
         },
     )
+    # Populated from verified split metadata during GlobalClipPool construction. These init=False
+    # fields remain part of dataclasses.asdict(), so train_agent stores them in
+    # resolved_configs.pt/.yaml and W&B hyperparameters without mutable CLI overrides.
+    split_version: Optional[str] = field(default=None, init=False)
+    split_id: Optional[str] = field(default=None, init=False)
+    source_manifest_sha256: Optional[str] = field(default=None, init=False)
+    train_manifest_sha256: Optional[str] = field(default=None, init=False)
+    validation_manifest_sha256: Optional[str] = field(default=None, init=False)
+    test_manifest_sha256: Optional[str] = field(default=None, init=False)
+    train_clip_count: int = field(default=0, init=False)
+    validation_clip_count: int = field(default=0, init=False)
+    test_clip_count: int = field(default=0, init=False)
 
 
 class GlobalClipPool(MotionLib):
@@ -234,48 +267,115 @@ class GlobalClipPool(MotionLib):
         self.local_cache_dir = Path(config.local_cache_dir) / f"rank{self.rank}"
         self.local_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        clip_id_to_remote_name = self._load_manifest(config.r2_source, config.manifest_name)
-
-        # Deterministic per-rank clip vocabulary: fully reproducible from the (static) manifest
-        # plus a fixed seed/world_size, so it needs no checkpoint entry of its own -- same idiom
-        # `MotionLibPool` uses for its shard partition (`remote_files[rank::world_size]`).
-        all_clip_ids = sorted(clip_id_to_remote_name.keys())
-        rng = random.Random(config.clip_partition_shuffle_seed)
-        rng.shuffle(all_clip_ids)
-        rank_clip_ids_full: List[str] = all_clip_ids[self.rank :: self.world_size]
-        if not rank_clip_ids_full:
-            raise RuntimeError(
-                f"No clips assigned to rank {self.rank} (world_size={self.world_size}) "
-                f"out of {len(all_clip_ids)} clips in the manifest at {config.r2_source}. "
-                "world_size is larger than the number of clips."
+        explicit_split = (
+            config.validation_manifest_name is not None
+            or config.split_metadata_name is not None
+        )
+        if explicit_split and (
+            config.validation_manifest_name is None
+            or config.split_metadata_name is None
+        ):
+            raise ValueError(
+                "Explicit split mode requires both validation_manifest_name and "
+                "split_metadata_name."
+            )
+        if explicit_split and config.eval_holdout_size != 0:
+            raise ValueError(
+                "eval_holdout_size is a legacy per-rank split and must be 0 when explicit "
+                "train/validation manifests are configured."
             )
 
-        # Carve a fixed, deterministic eval holdout off the END of the (already shuffled)
-        # per-rank list, BEFORE building the trainable vocabulary below -- holdout clips must
-        # never enter rank_clip_ids/clip_id_to_local_index/global_clip_weights, so they can never
-        # be selected by _select_top_k or trained on. See GlobalClipPoolConfig.eval_holdout_size.
-        holdout_size = min(config.eval_holdout_size, max(len(rank_clip_ids_full) - 1, 0))
-        if holdout_size > 0:
-            self.eval_holdout_clip_ids: List[str] = rank_clip_ids_full[-holdout_size:]
-            self.rank_clip_ids: List[str] = rank_clip_ids_full[:-holdout_size]
+        if explicit_split:
+            split_metadata = self._load_split_metadata(
+                config.r2_source, config.split_metadata_name
+            )
+            self._validate_split_manifest_roles(split_metadata)
+            clip_id_to_remote_name, train_manifest_sha256 = self._load_manifest(
+                config.r2_source, config.manifest_name
+            )
+            validation_id_to_remote_name, validation_manifest_sha256 = self._load_manifest(
+                config.r2_source, config.validation_manifest_name
+            )
+            overlap = set(clip_id_to_remote_name) & set(validation_id_to_remote_name)
+            if overlap:
+                sample = ", ".join(sorted(overlap)[:5])
+                raise RuntimeError(
+                    f"Training and validation manifests overlap on {len(overlap)} clips, "
+                    f"including {sample}."
+                )
+            self._validate_and_record_split_provenance(
+                split_metadata,
+                train_manifest_sha256,
+                validation_manifest_sha256,
+                len(clip_id_to_remote_name),
+                len(validation_id_to_remote_name),
+            )
+
+            self.rank_clip_ids = self._partition_clip_ids(
+                clip_id_to_remote_name,
+                rank=self.rank,
+                world_size=self.world_size,
+                seed=config.clip_partition_shuffle_seed,
+            )
+            self.eval_holdout_clip_ids = self._partition_clip_ids(
+                validation_id_to_remote_name,
+                rank=self.rank,
+                world_size=self.world_size,
+                seed=config.clip_partition_shuffle_seed ^ 0x5EED,
+            )
         else:
-            self.eval_holdout_clip_ids = []
-            self.rank_clip_ids = rank_clip_ids_full
+            clip_id_to_remote_name, train_manifest_sha256 = self._load_manifest(
+                config.r2_source, config.manifest_name
+            )
+            config.train_manifest_sha256 = train_manifest_sha256
+            config.train_clip_count = len(clip_id_to_remote_name)
+            validation_id_to_remote_name = clip_id_to_remote_name
+
+            # Legacy behavior: shuffle the all-clips manifest, partition it by rank, then carve
+            # eval_holdout_size clips off each rank. New experiments should use explicit global
+            # manifests because this legacy holdout membership changes with world_size.
+            rank_clip_ids_full = self._partition_clip_ids(
+                clip_id_to_remote_name,
+                rank=self.rank,
+                world_size=self.world_size,
+                seed=config.clip_partition_shuffle_seed,
+            )
+            holdout_size = min(
+                config.eval_holdout_size, max(len(rank_clip_ids_full) - 1, 0)
+            )
+            if holdout_size > 0:
+                self.eval_holdout_clip_ids = rank_clip_ids_full[-holdout_size:]
+                self.rank_clip_ids = rank_clip_ids_full[:-holdout_size]
+            else:
+                self.eval_holdout_clip_ids = []
+                self.rank_clip_ids = rank_clip_ids_full
+
+        if not self.rank_clip_ids:
+            raise RuntimeError(
+                f"No training clips assigned to rank {self.rank} "
+                f"(world_size={self.world_size}) from {len(clip_id_to_remote_name)} clips."
+            )
+        if explicit_split and not self.eval_holdout_clip_ids:
+            raise RuntimeError(
+                f"No validation clips assigned to rank {self.rank} "
+                f"(world_size={self.world_size}) from {len(validation_id_to_remote_name)} clips."
+            )
 
         self._clip_remote_name: Dict[str, str] = {
             cid: clip_id_to_remote_name[cid] for cid in self.rank_clip_ids
         }
         self._eval_holdout_remote_name: Dict[str, str] = {
-            cid: clip_id_to_remote_name[cid] for cid in self.eval_holdout_clip_ids
+            cid: validation_id_to_remote_name[cid] for cid in self.eval_holdout_clip_ids
         }
         self.clip_id_to_local_index: Dict[str, int] = {
             cid: i for i, cid in enumerate(self.rank_clip_ids)
         }
         log.info(
             f"[GlobalClipPool] rank {self.rank}/{self.world_size}: "
-            f"{len(self.rank_clip_ids)}/{len(all_clip_ids)} clips assigned "
-            f"({len(self.eval_holdout_clip_ids)} held out for eval), "
-            f"resident_pool_size={config.resident_pool_size}"
+            f"{len(self.rank_clip_ids)}/{len(clip_id_to_remote_name)} training clips assigned, "
+            f"{len(self.eval_holdout_clip_ids)}/{len(validation_id_to_remote_name)} validation "
+            f"clips assigned, resident_pool_size={config.resident_pool_size}, "
+            f"split_version={config.split_version or 'legacy'}"
         )
 
         num_clips = len(self.rank_clip_ids)
@@ -321,23 +421,69 @@ class GlobalClipPool(MotionLib):
                 scores[clip_id.strip()] = float(score.strip())
         return scores
 
-    def _load_manifest(self, r2_source: str, manifest_name: str) -> Dict[str, str]:
-        manifest_dir = self.local_cache_dir / "_manifest_dl"
-        manifest_dir.mkdir(parents=True, exist_ok=True)
-        remote_manifest = f"{r2_source.rstrip('/')}/{manifest_name}"
-        local_manifest = manifest_dir / manifest_name
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with open(path, "rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
-        # The manifest is a static, one-time artifact of the (already-complete) repackaging job --
-        # skip re-fetching it if a local copy already exists, instead of re-downloading on every
-        # single process launch/restart regardless of cache state.
-        if not local_manifest.exists():
+    @staticmethod
+    def _partition_clip_ids(
+        clip_id_to_remote_name: Dict[str, str],
+        rank: int,
+        world_size: int,
+        seed: int,
+    ) -> List[str]:
+        """Partition one already-role-specific manifest without changing global membership."""
+        if world_size <= 0 or not 0 <= rank < world_size:
+            raise ValueError(
+                f"Invalid distributed partition rank={rank}, world_size={world_size}."
+            )
+        clip_ids = sorted(clip_id_to_remote_name)
+        random.Random(seed).shuffle(clip_ids)
+        return clip_ids[rank::world_size]
+
+    @staticmethod
+    def _normalize_remote_relative_path(relative_name: str) -> str:
+        path = PurePosixPath(relative_name)
+        if (
+            not relative_name
+            or path.is_absolute()
+            or ".." in path.parts
+            or path.as_posix() == "."
+        ):
+            raise ValueError(
+                f"Manifest paths must be non-empty, relative R2 paths without '..': "
+                f"{relative_name!r}"
+            )
+        return path.as_posix()
+
+    def _download_remote_file(self, r2_source: str, relative_name: str) -> Path:
+        relative_name = self._normalize_remote_relative_path(relative_name)
+        source_cache_key = hashlib.sha256(
+            r2_source.rstrip("/").encode("utf-8")
+        ).hexdigest()[:16]
+        local_path = (
+            self.local_cache_dir
+            / "_manifest_dl"
+            / source_cache_key
+            / Path(*PurePosixPath(relative_name).parts)
+        )
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        remote_path = f"{r2_source.rstrip('/')}/{relative_name}"
+
+        # Split artifacts are immutable and versioned. A source-specific local directory prevents
+        # identically named manifests from different R2 prefixes sharing a stale cache entry.
+        if not local_path.exists():
             try:
                 subprocess.run(
                     [
                         "rclone",
-                        "copy",
-                        remote_manifest,
-                        str(manifest_dir),
+                        "copyto",
+                        remote_path,
+                        str(local_path),
                         "--s3-no-check-bucket",
                         "--retries=10",
                         "--retries-sleep=30s",
@@ -352,24 +498,176 @@ class GlobalClipPool(MotionLib):
                 ) from e
             except subprocess.CalledProcessError as e:
                 raise RuntimeError(
-                    f"Failed to download manifest {remote_manifest} (rc={e.returncode}): {e.stderr}"
+                    f"Failed to download {remote_path} (rc={e.returncode}): {e.stderr}"
                 ) from e
 
-        if not local_manifest.exists():
-            raise RuntimeError(f"Manifest not found after download: {local_manifest}")
+        if not local_path.exists():
+            raise RuntimeError(f"Remote file not found after download: {local_path}")
+        return local_path
+
+    def _load_manifest(
+        self, r2_source: str, manifest_name: str
+    ) -> Tuple[Dict[str, str], str]:
+        manifest_name = self._normalize_remote_relative_path(manifest_name)
+        local_manifest = self._download_remote_file(r2_source, manifest_name)
+        remote_manifest = f"{r2_source.rstrip('/')}/{manifest_name}"
 
         clip_id_to_remote_name: Dict[str, str] = {}
-        with open(local_manifest, "r") as f:
-            for line in f:
+        with open(local_manifest, "r") as stream:
+            for line_number, line in enumerate(stream, start=1):
                 line = line.strip()
                 if not line:
                     continue
                 entry = json.loads(line)
-                clip_id_to_remote_name[entry["clip_id"]] = entry["file"]
+                if "clip_id" not in entry or "file" not in entry:
+                    raise RuntimeError(
+                        f"{remote_manifest}:{line_number} must contain 'clip_id' and 'file'."
+                    )
+                clip_id = str(entry["clip_id"])
+                if clip_id in clip_id_to_remote_name:
+                    raise RuntimeError(
+                        f"Duplicate clip_id {clip_id!r} in manifest {remote_manifest}."
+                    )
+                clip_id_to_remote_name[clip_id] = str(entry["file"])
 
         if not clip_id_to_remote_name:
             raise RuntimeError(f"Manifest {remote_manifest} is empty.")
-        return clip_id_to_remote_name
+        return clip_id_to_remote_name, self._sha256_file(local_manifest)
+
+    def _load_split_metadata(self, r2_source: str, metadata_name: str) -> dict:
+        metadata_name = self._normalize_remote_relative_path(metadata_name)
+        local_metadata = self._download_remote_file(r2_source, metadata_name)
+        try:
+            metadata = json.loads(local_metadata.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Could not parse split metadata {local_metadata}: {exc}") from exc
+        if metadata.get("schema_version") != 1:
+            raise RuntimeError(
+                f"Unsupported split metadata schema_version={metadata.get('schema_version')!r}; "
+                "expected 1."
+            )
+        return metadata
+
+    def _split_role_remote_path(self, split_metadata: dict, role: str) -> str:
+        try:
+            role_file = split_metadata["manifests"][role]["file"]
+        except (KeyError, TypeError) as exc:
+            raise RuntimeError(f"Split metadata is missing manifests.{role}.file.") from exc
+        role_file = self._normalize_remote_relative_path(str(role_file))
+        metadata_name = self._normalize_remote_relative_path(
+            self.config.split_metadata_name
+        )
+        metadata_parent = PurePosixPath(metadata_name).parent
+        return (metadata_parent / PurePosixPath(role_file)).as_posix()
+
+    def _validate_split_manifest_roles(self, split_metadata: dict) -> None:
+        expected_train = self._split_role_remote_path(split_metadata, "train")
+        expected_validation = self._split_role_remote_path(split_metadata, "validation")
+        configured_train = self._normalize_remote_relative_path(self.config.manifest_name)
+        configured_validation = self._normalize_remote_relative_path(
+            self.config.validation_manifest_name
+        )
+        if configured_train != expected_train:
+            raise RuntimeError(
+                f"Configured training manifest {configured_train!r} does not match the train "
+                f"role bound by split metadata ({expected_train!r})."
+            )
+        if configured_validation != expected_validation:
+            raise RuntimeError(
+                f"Configured validation manifest {configured_validation!r} does not match the "
+                f"validation role bound by split metadata ({expected_validation!r})."
+            )
+        # Test hash/count provenance is validated below. Its path is never resolved or downloaded;
+        # GlobalClipPool intentionally has no test-manifest configuration or loader API.
+
+    def _validate_and_record_split_provenance(
+        self,
+        split_metadata: dict,
+        train_sha256: str,
+        validation_sha256: str,
+        train_count: int,
+        validation_count: int,
+    ) -> None:
+        try:
+            manifests = split_metadata["manifests"]
+            train_spec = manifests["train"]
+            validation_spec = manifests["validation"]
+            test_spec = manifests["test"]
+            source_spec = split_metadata["source_manifest"]
+            split_version = str(split_metadata["split_version"])
+            seed = int(split_metadata["seed"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"Malformed split metadata: {exc}") from exc
+
+        checks = (
+            ("train sha256", train_sha256, str(train_spec["sha256"])),
+            (
+                "validation sha256",
+                validation_sha256,
+                str(validation_spec["sha256"]),
+            ),
+            ("train clip count", train_count, int(train_spec["clip_count"])),
+            (
+                "validation clip count",
+                validation_count,
+                int(validation_spec["clip_count"]),
+            ),
+        )
+        for label, actual, expected in checks:
+            if actual != expected:
+                raise RuntimeError(
+                    f"Split metadata {label} mismatch: actual={actual!r}, expected={expected!r}."
+                )
+
+        split_identity = {
+            "schema_version": int(split_metadata["schema_version"]),
+            "split_version": split_version,
+            "seed": seed,
+            "source_manifest_sha256": str(source_spec["sha256"]),
+            "manifest_sha256": {
+                role: str(manifests[role]["sha256"])
+                for role in ("train", "validation", "test")
+            },
+            "manifest_clip_count": {
+                role: int(manifests[role]["clip_count"])
+                for role in ("train", "validation", "test")
+            },
+        }
+        computed_split_id = hashlib.sha256(
+            json.dumps(
+                split_identity, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+        metadata_split_id = str(split_metadata.get("split_id", ""))
+        if computed_split_id != metadata_split_id:
+            raise RuntimeError(
+                "split_metadata.json has an invalid split_id: "
+                f"computed={computed_split_id}, recorded={metadata_split_id}."
+            )
+
+        self.config.split_version = split_version
+        self.config.split_id = computed_split_id
+        self.config.source_manifest_sha256 = str(source_spec["sha256"])
+        self.config.train_manifest_sha256 = train_sha256
+        self.config.validation_manifest_sha256 = validation_sha256
+        self.config.test_manifest_sha256 = str(test_spec["sha256"])
+        self.config.train_clip_count = train_count
+        self.config.validation_clip_count = validation_count
+        self.config.test_clip_count = int(test_spec["clip_count"])
+
+    def split_provenance(self) -> dict:
+        """Return the role hashes/counts saved with checkpoints and W&B config."""
+        return {
+            "split_version": self.config.split_version,
+            "split_id": self.config.split_id,
+            "source_manifest_sha256": self.config.source_manifest_sha256,
+            "train_manifest_sha256": self.config.train_manifest_sha256,
+            "validation_manifest_sha256": self.config.validation_manifest_sha256,
+            "test_manifest_sha256": self.config.test_manifest_sha256,
+            "train_clip_count": self.config.train_clip_count,
+            "validation_clip_count": self.config.validation_clip_count,
+            "test_clip_count": self.config.test_clip_count,
+        }
 
     def _download_missing_clips(self, remote_names: List[str]) -> None:
         """Download all listed (not-yet-cached) per-clip files in ONE rclone invocation, using
@@ -762,9 +1060,23 @@ class GlobalClipPool(MotionLib):
             "weights": self.global_clip_weights.clone(),
             "visit_counts": self.global_clip_visit_counts.clone(),
             "rebuild_count": self.rebuild_count,
+            "split_provenance": self.split_provenance(),
         }
 
     def load_global_clip_weights_state_dict(self, state_dict: dict) -> None:
+        checkpoint_provenance = state_dict.get("split_provenance")
+        current_provenance = self.split_provenance()
+        if checkpoint_provenance is not None and checkpoint_provenance != current_provenance:
+            raise RuntimeError(
+                "Checkpointed split provenance does not match the configured split. "
+                f"checkpoint={checkpoint_provenance}, current={current_provenance}."
+            )
+        if self.config.split_id is not None and checkpoint_provenance is None:
+            raise RuntimeError(
+                "Checkpoint has no split provenance but the current run uses an explicit "
+                "versioned split; refusing an unverifiable resume."
+            )
+
         if tuple(state_dict["clip_ids"]) != tuple(self.rank_clip_ids):
             raise RuntimeError(
                 "Checkpointed clip vocabulary doesn't match this rank's current partition -- "

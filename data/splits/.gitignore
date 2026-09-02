@@ -1,0 +1,4 @@
+# Bulk split artifacts are deterministic generator output and live in versioned R2 prefixes.
+# Keep only compact split_metadata.json files in Git.
+*_manifest.jsonl
+*_ids.txt

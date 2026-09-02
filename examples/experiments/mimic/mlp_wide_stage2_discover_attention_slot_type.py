@@ -4,7 +4,7 @@
 
 This is the GlobalClipPool counterpart of
 ``mlp_wide_discover_attention_slot_type.py``. It inherits the full Stage-2 data
-rotation, fixed holdout, observations, rewards, PPO settings, and transformer
+rotation, versioned global split, observations, rewards, PPO settings, and transformer
 capacity from ``mlp_wide_stage2_discover_attention.py``. The only change is to
 enable learned temporal-slot and token-source-type embeddings in the actor and
 critic transformers.
@@ -15,10 +15,10 @@ Full-scale launch:
     --robot-name smpl_mor --simulator isaacgym \
     --experiment-path examples/experiments/mimic/mlp_wide_stage2_discover_attention_slot_type.py \
     --experiment-name hhi_wide_stage2_discover_attention_slot_type \
-    --global-clip-pool-source r2:proto-data/hhi_stage2_per_clip/ \
+    --global-clip-pool-source r2:proto-data/hhi_stage2_per_clip_refined/ \
     --global-clip-pool-cache-dir /workspace/motion_cache \
     --global-clip-pool-size 256 --global-clip-pool-rebuild-every 256 \
-    --global-clip-pool-eval-holdout-size 128 --global-clip-pool-weight-floor 0.05 \
+    --global-clip-pool-weight-floor 0.05 \
     --global-clip-pool-random-fraction 0.2 \
     --num-envs 6144 --batch-size 24576 --ngpu 6 \
     --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
