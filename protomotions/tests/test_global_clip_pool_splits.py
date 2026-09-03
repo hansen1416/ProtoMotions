@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 
 from protomotions.components.global_clip_pool import (
     GlobalClipPool,
@@ -112,6 +113,29 @@ def test_explicit_manifest_partition_changes_rank_assignment_not_membership():
         for left in range(world_size):
             for right in range(left + 1, world_size):
                 assert set(partitions[left]).isdisjoint(partitions[right])
+
+
+def test_resume_restores_global_scoreboard_on_cpu():
+    pool = object.__new__(GlobalClipPool)
+    pool.config = GlobalClipPoolConfig()
+    pool.rank_clip_ids = ["clip_a", "clip_b"]
+    pool.rebuild_count = 0
+    pool._select_top_k = lambda: torch.tensor([0, 1])
+    pool._materialize_resident_set = lambda _: None
+
+    pool.load_global_clip_weights_state_dict(
+        {
+            "clip_ids": ("clip_a", "clip_b"),
+            "weights": torch.tensor([0.25, 0.75]),
+            "visit_counts": torch.tensor([2, 3]),
+            "rebuild_count": 4,
+        }
+    )
+
+    assert pool.global_clip_weights.device.type == "cpu"
+    assert pool.global_clip_visit_counts.device.type == "cpu"
+    assert torch.equal(pool.global_clip_weights, torch.tensor([0.25, 0.75]))
+    assert torch.equal(pool.global_clip_visit_counts, torch.tensor([2, 3]))
 
 
 def test_split_metadata_binds_roles_and_records_test_without_loading_it(tmp_path):

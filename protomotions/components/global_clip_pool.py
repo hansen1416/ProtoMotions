@@ -1083,8 +1083,14 @@ class GlobalClipPool(MotionLib):
                 "did the manifest, world_size, or clip_partition_shuffle_seed change? Refusing "
                 "to load global clip weights against a mismatched vocabulary."
             )
-        self.global_clip_weights = state_dict["weights"].clone()
-        self.global_clip_visit_counts = state_dict["visit_counts"].clone()
+        # Env checkpoints are loaded with map_location=self.device, which moves even
+        # these CPU-authored curriculum tensors onto the local CUDA device. Keep the
+        # global scoreboard on CPU, matching fresh initialization and the CPU indices/
+        # shape counts used while rebuilding a resident set.
+        self.global_clip_weights = state_dict["weights"].detach().cpu().clone()
+        self.global_clip_visit_counts = (
+            state_dict["visit_counts"].detach().cpu().clone()
+        )
         self.rebuild_count = state_dict["rebuild_count"]
         # Reconstitutes a resident set consistent with the restored scoreboard -- not a new
         # curriculum decision, so this must NOT bump rebuild_count/visit_counts again (see
