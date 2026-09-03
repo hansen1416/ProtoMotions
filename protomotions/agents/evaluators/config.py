@@ -69,32 +69,10 @@ class MimicEvaluatorConfig(EvaluatorConfig):
             "help": (
                 "Cap the number of motions evaluated per eval run. "
                 "None = evaluate all motions. "
-                "Ignored when morphology-aware per-clip shape sampling is enabled. "
+                "Ignored when eval_one_shape_per_motion=True. "
                 "Reduces GPU memory when the motion library is large."
             ),
             "min": 1,
-        },
-    )
-    eval_shapes_per_motion: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "When set and morphology metadata is available, evaluate this many "
-                "deterministically selected body-shape variants per unique motion clip. "
-                "Selections are stable across evaluations and override both "
-                "eval_one_shape_per_motion and max_eval_motions. None preserves the "
-                "legacy eval_one_shape_per_motion behavior."
-            ),
-            "min": 1,
-        },
-    )
-    eval_shape_sampling_seed: int = field(
-        default=42,
-        metadata={
-            "help": (
-                "Seed used for deterministic per-clip body-shape selection when "
-                "eval_shapes_per_motion is set."
-            )
         },
     )
     eval_one_shape_per_motion: bool = field(
@@ -103,8 +81,8 @@ class MimicEvaluatorConfig(EvaluatorConfig):
             "help": (
                 "When True and the motion library has morphology metadata, "
                 "cover every unique motion clip but pair each with one randomly "
-                "sampled gender-beta shape per evaluation run. Used only when "
-                "eval_shapes_per_motion is None and overrides max_eval_motions."
+                "sampled gender-beta shape per evaluation run. "
+                "Overrides max_eval_motions."
             )
         },
     )

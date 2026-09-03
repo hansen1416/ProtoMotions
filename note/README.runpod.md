@@ -679,8 +679,8 @@ nohup python -u protomotions/train_agent.py \
 --global-clip-pool-rebuild-every 256 \
 --global-clip-pool-weight-floor 0.05 \
 --global-clip-pool-random-fraction 0.2 \
---num-envs 6144 \
---batch-size 24576 \
+--num-envs 2048 \
+--batch-size 8192 \
 --ngpu 6 \
 --use-wandb \
 --wandb-project hhi-protomotions \

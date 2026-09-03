@@ -6239,3 +6239,11 @@ rotation fidelity and cross-shape variation were preserved, and both outputs pas
 verification. The full RunPod job uses four concurrent workers with two CPU threads each on eight
 vCPUs (`--workers 4 --threads-per-worker 2`); it resumes by skipping already uploaded clips and is
 expected to take roughly 1.5-2.5 days. The GPU is not used by this CPU-only refinement.
+
+## 74. Four-Shape Evaluation Attempt and Reversion (2026-09-03)
+
+A deterministic four-shape-per-clip evaluation panel was tested in the full-dataset slot/type
+run. At epoch 768, the process ran out of GPU memory while loading the next 256-clip resident pool
+after validation. The larger evaluation buffers contributed to this post-evaluation memory peak.
+The experiment has therefore returned to the original evaluator: one randomly sampled body shape
+per clip per evaluation. This keeps full clip coverage with substantially lower GPU memory use.
