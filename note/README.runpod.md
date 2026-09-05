@@ -675,7 +675,8 @@ nohup python -u protomotions/train_agent.py \
 --experiment-name hhi_wide_stage2_discover_attention_slot_type_refined \
 --global-clip-pool-source r2:proto-data/hhi_stage2_per_clip_refined/ \
 --global-clip-pool-cache-dir /workspace/motion_cache \
---global-clip-pool-size 256 \
+--global-clip-pool-size 128 \
+--global-clip-pool-cache-multiplier 1.0 \
 --global-clip-pool-rebuild-every 256 \
 --global-clip-pool-weight-floor 0.05 \
 --global-clip-pool-random-fraction 0.2 \
@@ -687,7 +688,6 @@ nohup python -u protomotions/train_agent.py \
 --wandb-entity yugoamaryl \
 --wandb-group hhi_wide_stage2_discover_attention_slot_type_refined \
 > /tmp/hhi_wide_stage2_discover_attention_slot_type_refined.log 2>&1 &
-
 ----
 
 

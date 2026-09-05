@@ -18,6 +18,7 @@ import numpy as np
 from typing import Dict, Optional, Tuple, Any
 from torch import Tensor
 import math
+import hashlib
 from dataclasses import dataclass
 
 from protomotions.agents.evaluators.base_evaluator import BaseEvaluator
@@ -156,8 +157,16 @@ class MimicEvaluator(BaseEvaluator):
         unique_clips = {clip_ids[i] for i in motion_ids.detach().cpu().tolist()}
         return torch.cat([clip_id_to_motion_ids[c] for c in unique_clips]).to(motion_ids.device)
 
+    def _eval_shape_panel_index(self) -> int:
+        """Return a resume-stable index for the current evaluation shape panel."""
+        eval_every = self.config.eval_metrics_every
+        current_epoch = getattr(self.agent, "current_epoch", None)
+        if current_epoch is not None and eval_every is not None and eval_every > 0:
+            return int(current_epoch) // int(eval_every)
+        return int(self.eval_count)
+
     def _sample_one_shape_per_motion_legacy_positional(self) -> torch.Tensor:
-        """For every unique clip (by column position), pick one random gender-beta shape.
+        """For every unique clip (by column position), pick one rotating shape.
 
         Fallback only -- see `_build_clip_expansion_index_legacy_positional`. Assumes all shapes
         have the same clips in the same positional order and the same clip count.
@@ -171,29 +180,40 @@ class MimicEvaluator(BaseEvaluator):
         # [num_shapes, num_clips]
         all_ids = torch.stack(shape_lists, dim=0)
 
-        # For each clip position, draw one random shape
-        shape_picks = torch.randint(num_shapes, (num_clips,), device=all_ids.device)
+        # Stagger clips across shapes in each panel and rotate every clip on the next panel.
+        panel_index = self._eval_shape_panel_index()
+        seed = int(getattr(self.config, "eval_shape_sampling_seed", 42))
+        shape_picks = (
+            torch.arange(num_clips, device=all_ids.device) + seed + panel_index
+        ) % num_shapes
         clip_idx = torch.arange(num_clips, device=all_ids.device)
 
         selected = all_ids[shape_picks, clip_idx]
         return selected.sort().values
 
     def _sample_one_shape_per_motion(self) -> torch.Tensor:
-        """For every unique clip, pick one random gender-beta shape.
+        """For every unique clip, pick one deterministic, rotating shape.
 
         Groups by real `motion_clip_ids` identity when available, so it's correct even against a
         partial/ragged resident clip pool where clips may have unequal shape counts; falls back
-        to the shape-major positional grid otherwise. Returns sorted global motion IDs — one per
-        unique clip.
+        to the shape-major positional grid otherwise. A stable per-clip hash staggers the panel
+        across body shapes; the panel index advances the choice by one variant at each scheduled
+        evaluation. This is reproducible across resume because the panel index is derived from the
+        checkpointed training epoch rather than process-local RNG state. Returns sorted global
+        motion IDs -- one per unique clip.
         """
         if not self.motion_lib.has_clip_identity_metadata():
             return self._sample_one_shape_per_motion_legacy_positional()
 
         clip_id_to_motion_ids = self.motion_lib.build_clip_id_to_motion_ids()
+        panel_index = self._eval_shape_panel_index()
+        seed = int(getattr(self.config, "eval_shape_sampling_seed", 42))
         selected = []
-        for motion_ids in clip_id_to_motion_ids.values():
-            pick = torch.randint(motion_ids.shape[0], (1,), device=motion_ids.device)
-            selected.append(motion_ids[pick])
+        for clip_id, motion_ids in clip_id_to_motion_ids.items():
+            digest = hashlib.sha256(f"{seed}:{clip_id}".encode("utf-8")).digest()
+            offset = int.from_bytes(digest[:8], byteorder="big")
+            pick = (offset + panel_index) % motion_ids.shape[0]
+            selected.append(motion_ids[pick : pick + 1])
         return torch.cat(selected).sort().values
 
     def initialize_eval(self) -> Dict:
@@ -202,7 +222,8 @@ class MimicEvaluator(BaseEvaluator):
 
         # Subsample motions to cap GPU memory usage from MotionMetrics tensors.
         if self.config.eval_one_shape_per_motion and self.motion_lib.has_morphology_metadata():
-            # Cover every clip with one random body shape instead of all shapes.
+            # Cover every clip with one rotating body shape instead of all shapes. Batching below
+            # guarantees the chosen reference is run on the identical morphology asset.
             self._eval_motion_subset = self._sample_one_shape_per_motion()
         else:
             max_eval = self.config.max_eval_motions
@@ -384,6 +405,13 @@ class MimicEvaluator(BaseEvaluator):
             global_ids = None
             total_eval = self.motion_lib.num_motions()
 
+        if (
+            global_ids is not None
+            and self.motion_lib.has_morphology_metadata()
+            and self.motion_manager.env_asset_ids is not None
+        ):
+            return self._build_morphology_matched_eval_batches(global_ids)
+
         batches = []
         for start in range(0, total_eval, self.num_envs):
             end = min(start + self.num_envs, total_eval)
@@ -396,6 +424,85 @@ class MimicEvaluator(BaseEvaluator):
                 f"Evaluating motions {start} to {end} "
                 f"(global ids {actual_ids[0].item()}..{actual_ids[-1].item()}), "
                 f"out of total eval set {total_eval}"
+            )
+            batches.append((env_ids, local_ids, actual_ids))
+        return batches
+
+    def _build_morphology_matched_eval_batches(self, global_ids: Tensor):
+        """Schedule every reference motion only on an env with the same morphology asset.
+
+        Simulator assets are fixed per environment. Assigning a chosen shape variant to envs
+        0..N-1 therefore compares almost every reference against the wrong body. Grouping by asset
+        and chunking by the number of compatible envs preserves the one-shape-per-clip memory
+        footprint while making the physical robot/reference pairing exact.
+        """
+        env_asset_ids = tuple(self.motion_manager.env_asset_ids)
+        asset_to_env_ids = {}
+        for env_id, asset_id in enumerate(env_asset_ids):
+            asset_to_env_ids.setdefault(asset_id, []).append(env_id)
+
+        actual_id_list = global_ids.detach().cpu().tolist()
+        motion_asset_ids = self.motion_lib.get_motion_asset_ids(global_ids)
+        pending_by_asset = {}
+        for local_id, (actual_id, asset_id) in enumerate(
+            zip(actual_id_list, motion_asset_ids)
+        ):
+            if asset_id not in asset_to_env_ids:
+                raise RuntimeError(
+                    "Evaluation motion has no environment with a matching morphology asset: "
+                    f"motion_id={actual_id}, asset_id={asset_id!r}."
+                )
+            pending_by_asset.setdefault(asset_id, []).append((local_id, actual_id))
+
+        num_batches = max(
+            math.ceil(len(pending) / len(asset_to_env_ids[asset_id]))
+            for asset_id, pending in pending_by_asset.items()
+        )
+        batches = []
+        for batch_index in range(num_batches):
+            assignments = []
+            for asset_id, pending in pending_by_asset.items():
+                compatible_envs = asset_to_env_ids[asset_id]
+                start = batch_index * len(compatible_envs)
+                chunk = pending[start : start + len(compatible_envs)]
+                assignments.extend(
+                    (env_id, local_id, actual_id)
+                    for env_id, (local_id, actual_id) in zip(compatible_envs, chunk)
+                )
+
+            # Stable env order keeps tensor indexing and logs easy to inspect.
+            assignments.sort(key=lambda assignment: assignment[0])
+            env_ids = torch.tensor(
+                [assignment[0] for assignment in assignments],
+                dtype=torch.long,
+                device=self.device,
+            )
+            local_ids = torch.tensor(
+                [assignment[1] for assignment in assignments],
+                dtype=torch.long,
+                device=self.device,
+            )
+            actual_ids = torch.tensor(
+                [assignment[2] for assignment in assignments],
+                dtype=torch.long,
+                device=self.device,
+            )
+
+            # This assertion guards the exact invariant that sequential batching broke.
+            assigned_motion_assets = self.motion_lib.get_motion_asset_ids(actual_ids)
+            for env_id, motion_asset_id in zip(
+                env_ids.detach().cpu().tolist(), assigned_motion_assets
+            ):
+                if env_asset_ids[env_id] != motion_asset_id:
+                    raise RuntimeError(
+                        "Morphology-mismatched evaluation assignment: "
+                        f"env_id={env_id}, env_asset={env_asset_ids[env_id]!r}, "
+                        f"motion_asset={motion_asset_id!r}."
+                    )
+
+            print(
+                f"Evaluating morphology-matched batch {batch_index + 1}/{num_batches}: "
+                f"{actual_ids.numel()} motions, out of total eval set {global_ids.numel()}"
             )
             batches.append((env_ids, local_ids, actual_ids))
         return batches

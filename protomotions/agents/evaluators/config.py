@@ -80,9 +80,20 @@ class MimicEvaluatorConfig(EvaluatorConfig):
         metadata={
             "help": (
                 "When True and the motion library has morphology metadata, "
-                "cover every unique motion clip but pair each with one randomly "
-                "sampled gender-beta shape per evaluation run. "
+                "cover every unique motion clip with one deterministic, rotating "
+                "gender-beta shape per evaluation run. Each reference is scheduled "
+                "only on an environment carrying the matching morphology asset. "
                 "Overrides max_eval_motions."
+            )
+        },
+    )
+    eval_shape_sampling_seed: int = field(
+        default=42,
+        metadata={
+            "help": (
+                "Stable seed for the per-clip rotating evaluation-shape panel. The panel "
+                "is deterministic for a training epoch and advances on each scheduled "
+                "evaluation without allocating metrics for additional shapes."
             )
         },
     )

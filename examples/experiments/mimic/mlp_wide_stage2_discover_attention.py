@@ -176,7 +176,7 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     )
     parser.add_argument(
         "--global-clip-pool-selection-temperature", type=float, default=1.0,
-        help="Softmax temperature over priority rank used to sample the resident set.",
+        help="Deprecated compatibility option; priority slots now use explicit top-UCB.",
     )
     parser.add_argument(
         "--global-clip-pool-weight-ema-alpha", type=float, default=0.1,

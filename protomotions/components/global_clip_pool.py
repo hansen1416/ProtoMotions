@@ -161,10 +161,9 @@ class GlobalClipPoolConfig(MotionLibConfig):
     selection_temperature: float = field(
         default=1.0,
         metadata={
-            "help": "Softmax temperature over priority *rank* (not raw value) used to sample "
-            "the resident set. Higher = flatter/more exploratory; near-0 approaches "
-            "deterministic top-K. Rank-based so it stays well-behaved regardless of the "
-            "absolute scale of global_clip_weights."
+            "help": "Deprecated and retained only for checkpoint/config compatibility. "
+            "Priority slots now use explicit deterministic top-UCB selection; exploration "
+            "is controlled solely by random_fraction."
         },
     )
     weight_ema_alpha: float = field(
@@ -210,7 +209,7 @@ class GlobalClipPoolConfig(MotionLibConfig):
         default=0.0,
         metadata={
             "help": "Fraction of each rebuild's K resident slots filled by pure uniform random "
-            "selection (ignoring priority entirely), instead of the priority-rank softmax. 0.0 "
+            "selection (ignoring priority entirely), instead of explicit top-UCB clips. 0.0 "
             "(default) reproduces the old fully-priority-based selection exactly. A nonzero "
             "fraction (e.g. 0.2) guarantees every clip gets periodic forced rehearsal regardless "
             "of how low its weight has decayed."
@@ -749,11 +748,13 @@ class GlobalClipPool(MotionLib):
         (slowly, log-scale) with `rebuild_count` even if the clip is never picked, so it's
         guaranteed to eventually outrank a stale already-known-hard clip.
 
-        Selection itself samples proportional to priority *rank* (softmax over -rank/temperature)
-        rather than taking the deterministic top-K. Deterministic top-K swaps a whole cluster of
-        similarly-scored clips into (or out of) residency in lockstep the moment their shared
-        score axis crosses the cutoff -- rank-based sampling still favors high-priority clips but
-        avoids that correlated, all-at-once churn (cf. Prioritized Level Replay, Jiang et al. 2021).
+        Priority slots are the explicit top-UCB clips. The previous implementation applied a
+        float32 softmax to negative integer ranks with a default temperature of 1.0. At realistic
+        partition sizes that distribution underflowed after roughly rank 100, making a supposedly
+        stochastic selection effectively top-K for K=128 and allowing zero-probability entries to
+        be selected for larger K. Explicit top-UCB is the intended and numerically unambiguous
+        exploitation rule; `random_fraction` below is its separate exploration/rehearsal
+        channel.
 
         `config.random_fraction` reserves that fraction of the K slots for pure uniform-random
         selection (ignoring priority entirely), sampled BEFORE the priority pass and excluded from
@@ -786,9 +787,9 @@ class GlobalClipPool(MotionLib):
             2.0 * math.log(t + 1) / (self.global_clip_visit_counts[remaining_indices].float() + 1.0)
         )
         priority = self.global_clip_weights[remaining_indices] + bonus
-        ranks = priority.argsort(descending=True).argsort()
-        probs = torch.softmax(-ranks.float() / self.config.selection_temperature, dim=0)
-        chosen_sub = torch.multinomial(probs, k_priority, replacement=False)
+        # Stable sorting gives equal-priority clips a deterministic local-index tie break. Pure
+        # random exploration is deliberately handled only by `random_idx` above.
+        chosen_sub = priority.argsort(descending=True, stable=True)[:k_priority]
         priority_idx = remaining_indices[chosen_sub]
 
         return torch.cat([random_idx, priority_idx])
