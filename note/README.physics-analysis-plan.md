@@ -1,7 +1,30 @@
 # Shape-Conditioned Physical Analysis Plan
 
-**Date:** 2026-09-01  
+**Date:** 2026-09-01 (updated 2026-09-05)  
 **Status:** Planned; run after selecting the final full-scale checkpoint.
+
+## Update 2026-09-05 -- two evaluator bugs fixed, existing split infrastructure identified
+
+Two bugs in the online training evaluator were found and fixed this week, both directly relevant
+to this plan's instrumentation:
+
+1. **Morphology/env-asset mismatch in eval batching.** The training-time `MimicEvaluator` assigned
+   eval batches to sequential `env_ids = arange(0, N)` with no check that an env's fixed physical
+   asset matched the shape the selected reference motion was generated for. Fixed by
+   `MimicEvaluator._build_morphology_matched_eval_batches`, which groups by asset and asserts the
+   match at runtime. On the running `hhi_wide_stage2_discover_attention_slot_type_refined` job,
+   `eval_holdout/success_rate` jumped from ~78-82% to ~96-98% at the exact epoch the fix landed --
+   confirming the mismatch was real and material, not a rounding error. **The offline paired
+   physics evaluator this plan builds (Sec. 6) must implement the same explicit shape/env-asset
+   assertion, not assume batch-order alignment** -- see the new item in Sec. 11.
+2. **`GlobalClipPool` priority-selection numerical bug**, unrelated to physics measurement but worth
+   knowing when interpreting which checkpoints saw which clips: the old softmax-over-rank sampler
+   underflowed past ~rank 100 in float32, so it was already collapsing to top-K in practice. Now
+   explicit deterministic top-K. Does not change this plan's design.
+
+Separately, the versioned split infrastructure this plan needs already exists and is already
+active on the current run -- see Sec. 3 below for the exact manifests/hashes. This replaces the
+open-ended "select ~48-60 clips" language with a concrete, already-frozen source set.
 
 ## 1. Purpose
 
@@ -24,13 +47,42 @@ The interesting result is not merely that a heavier body requires more raw torqu
 
 ## 3. Freeze the evaluation protocol
 
+This project already has a versioned, hash-verified clip split -- `hhi_stage2_v1`
+(`GlobalClipPoolConfig.split_metadata_name`), active by default on the current stage-2 experiment.
+Per the resolved config actually logged for the running `hhi_wide_stage2_discover_attention_slot_type_refined`
+job:
+
+| Role | Manifest | Clip count | SHA-256 |
+|---|---|---|---|
+| Train | `splits/hhi_stage2_v1/train_manifest.jsonl` | 18,855 | `bddfd28b...` |
+| Validation | `splits/hhi_stage2_v1/validation_manifest.jsonl` | 1,048 | `78c7e588...` |
+| Test | *(never downloaded -- provenance only)* | 1,048 | `41b77af3...` |
+
+The training pipeline records the test manifest's hash and count (`GlobalClipPoolConfig.test_manifest_sha256`,
+`test_clip_count`) but never fetches it -- "no test manifest field in the training API" is already
+enforced in code (`GlobalClipPool`). **Use this existing split rather than selecting a fresh clip
+set:** the validation split is what `MimicEvaluator._evaluate_holdout` already scores during
+training (`eval_holdout/*` in wandb) and is the right place to pilot/debug this plan's
+instrumentation; the untouched test split is the only legitimate source for headline paper numbers.
+
+Note that `eval_holdout/*` currently samples **one rotating shape per clip** (deterministic
+per-clip hash panel, not the full clip x 128-shape matrix) -- it tells you aggregate trend, not
+per-clip/per-shape structure. It cannot substitute for this plan's paired 128-shape panel.
+
 After full-scale training:
 
-1. Select the checkpoint using the existing fixed-holdout criterion.
-2. Freeze the checkpoint, resolved configuration, clip list, shape list, simulator settings, and random seeds.
+1. Select the checkpoint using the existing fixed-holdout criterion (`eval_holdout/*` on the
+   validation split above), and require the trend to be stable over several consecutive eval
+   cycles post-fix, not a single reading -- `eval/*` (non-holdout) is known to oscillate with
+   `GlobalClipPool` rebuild composition and is not a selection criterion.
+2. Freeze the checkpoint, resolved configuration (including `split_version`/manifest hashes above),
+   clip list, shape list, simulator settings, and random seeds.
 3. Use deterministic actor actions for the main analysis.
 4. Run in Isaac Gym, matching the training simulator.
 5. Record the checkpoint identity and evaluation manifest with every output.
+6. Do not download or open the test manifest until every instrumentation validation gate (Sec. 7 of
+   the companion `README.failure-and-physics-analysis-report.md`) has passed on the validation
+   split's pilot subset.
 
 The motion and shape samples must be fixed before inspecting the physics results.
 
@@ -38,7 +90,8 @@ The motion and shape samples must be fixed before inspecting the physics results
 
 ### 4.1 Main paired dataset
 
-Select approximately **48–60 fixed held-out clips**, stratified across:
+Select approximately **48–60 clips from the frozen, untouched `hhi_stage2_v1` test split** (1,048
+clips total; see Sec. 3), stratified across:
 
 - Walking and steady locomotion
 - Running and dynamic locomotion
@@ -46,6 +99,14 @@ Select approximately **48–60 fixed held-out clips**, stratified across:
 - Jumping and landing
 - Squatting, kneeling, and rising
 - Contact-rich or unusual motions such as crawling
+
+**Gap to close first:** the clip manifest only carries `clip_id`/`file` -- there is no existing
+motion-family/action-category label per clip anywhere in this repo (checked: no such field in
+`GlobalClipPool`'s manifest schema, no category lookup table under `data/`). Stratification
+requires building a `clip_id -> motion_family` mapping (e.g. from HumanML3D/AMASS text
+annotations, or a manual/LLM labeling pass over the test split's 1,048 clip IDs) before selection.
+Build and freeze this mapping from clip identity alone -- never from rollout results -- to keep
+the test split's "no model-selection feedback" guarantee intact.
 
 Evaluate every selected clip across all **128 training body shapes**. This gives approximately 6,000–8,000 paired rollouts and preserves the same-motion/across-shape structure.
 
@@ -58,7 +119,9 @@ Failures remain part of the dataset. Low torque from a collapsed or poorly track
 
 ### 4.2 Instrumentation pilot
 
-Before production evaluation, test the complete pipeline on:
+Before production evaluation, test the complete pipeline on **8 clips drawn from the validation
+split** (`splits/hhi_stage2_v1/validation_manifest.jsonl`, 1,048 clips) -- not the test split, so
+that debugging the instrumentation never touches the held-out set:
 
 - 8 clips
 - 16 representative shapes
@@ -98,6 +161,16 @@ For every rollout, record:
 - Tracking errors, success/failure state, termination reason, and episode length
 
 `tools/check_replay_torque_saturation.py` already provides the correct foundation for replaying a checkpoint in Isaac Gym, retrieving real PhysX-applied torque, and computing shape-scaled effort limits. Extend this approach into a general paired physics evaluator rather than relying on offline inverse dynamics.
+
+**Required, not optional:** whatever code assigns each (clip, shape) rollout to a simulator env
+must explicitly group by the env's fixed physical asset and assert the match at runtime, following
+`MimicEvaluator._build_morphology_matched_eval_batches`'s pattern in
+`protomotions/agents/evaluators/mimic_evaluator.py`. The training-time evaluator shipped for weeks
+with exactly this class of bug (sequential env-id assignment silently ignoring per-env morphology),
+and it produced plausible-looking but wrong numbers the whole time -- there was no crash, just
+quietly wrong torque/tracking data. A paired physics evaluator doing 6,000-8,000 rollouts across
+128 distinct physical assets is at least as exposed to this failure mode as the training evaluator
+was.
 
 Offline inverse dynamics should not be the principal method because earlier reference self-collisions produced physically meaningless torque spikes.
 
@@ -246,6 +319,9 @@ Before trusting the production output:
 
 1. Confirm applied torque matches `tools/check_replay_torque_saturation.py` on identical rollouts.
 2. Verify simulator-to-common DOF ordering and joint grouping.
+2b. For every rollout, assert the env's physical asset ID equals the selected shape's asset ID
+   before recording any metric -- a direct regression test against the exact bug class fixed in
+   `MimicEvaluator` on 2026-09-05 (see Update note at top of this file).
 3. Confirm torque stays within shape-specific effort limits up to numerical tolerance.
 4. Check that a static or slow stance produces vertical forces close to body weight.
 5. Independently recompute \(\tau\dot q\) for several trajectories.
@@ -283,9 +359,12 @@ If only raw torque scales with mass, the result is physically correct but largel
 
 ## 14. Recommended execution order
 
-1. Freeze the final checkpoint and evaluation manifest.
-2. Build and validate the 8-clip/16-shape pilot.
-3. Run the deterministic 48–60 clip × 128 shape paired evaluation.
+0. Confirm `eval_holdout/*` (validation split) has stabilized over several consecutive post-fix
+   eval cycles, and build the `clip_id -> motion_family` mapping needed for Sec. 4.1 stratification
+   -- both are prerequisites, not part of the frozen-checkpoint step below.
+1. Freeze the final checkpoint and evaluation manifest (train/validation/test hashes from Sec. 3).
+2. Build and validate the 8-clip/16-shape pilot on the **validation** split.
+3. Run the deterministic 48–60 clip × 128 shape paired evaluation on the **test** split.
 4. Produce the common-success and boundary analyses.
 5. Run the smaller wrong-beta causal evaluation.
 6. Add robustness perturbations only if the primary findings warrant them.

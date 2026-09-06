@@ -901,23 +901,47 @@ class GlobalClipPool(MotionLib):
     def has_eval_holdout(self) -> bool:
         return len(self.eval_holdout_clip_ids) > 0
 
-    def load_eval_holdout(self) -> None:
-        """Swap the live MotionLib data to the fixed, permanently-excluded eval holdout set.
+    def load_eval_holdout(self, clip_ids: Optional[List[str]] = None) -> None:
+        """Swap the live MotionLib content to all or a subset of the eval holdout.
 
-        Does NOT touch `rebuild_count`/`visit_counts`/`_resident_local_indices` -- the training
-        resident set's bookkeeping stays intact in memory while holdout data is loaded in its
-        place, so `restore_training_resident_set` can reload it afterward. Callers must also
-        trigger `env.motion_manager.on_motion_lib_reloaded()` since the underlying tensors change
-        size/identity (see `MimicEvaluator._evaluate_holdout`).
+        Does NOT touch `rebuild_count`/`visit_counts`/`_resident_local_indices`; callers decide
+        what, if anything, to update around this. Callers must also trigger
+        `env.motion_manager.on_motion_lib_reloaded()` and reset the affected environments.
+
+        Args:
+            clip_ids: Optional ordered subset of validation clip IDs. ``None`` preserves the
+                training-time behavior and loads the complete validation partition. Supplying
+                a subset lets standalone evaluation stream a large validation split without
+                materializing every clip and shape variant on one GPU at once.
         """
+        selected_clip_ids = (
+            list(self.eval_holdout_clip_ids) if clip_ids is None else list(clip_ids)
+        )
+        if not selected_clip_ids:
+            raise ValueError("Cannot load an empty validation clip subset.")
+        if len(selected_clip_ids) != len(set(selected_clip_ids)):
+            raise ValueError("Validation clip subset contains duplicate clip IDs.")
+        unknown = [
+            clip_id
+            for clip_id in selected_clip_ids
+            if clip_id not in self._eval_holdout_remote_name
+        ]
+        if unknown:
+            sample = ", ".join(unknown[:5])
+            raise ValueError(
+                f"Validation clip subset contains {len(unknown)} unknown clip IDs, "
+                f"including {sample}."
+            )
+
         log.info(
             f"[GlobalClipPool] rank {self.rank}: loading eval holdout "
-            f"({len(self.eval_holdout_clip_ids)} clips)"
+            f"({len(selected_clip_ids)}/{len(self.eval_holdout_clip_ids)} clips)"
         )
-        # Weight value is irrelevant here -- holdout clips are never selected via priority, this
-        # just satisfies _load_clip_set's motion_weights broadcast contract.
-        motion_weights = torch.ones(len(self.eval_holdout_clip_ids), dtype=torch.float32)
-        self._load_clip_set(self.eval_holdout_clip_ids, self._eval_holdout_remote_name, motion_weights)
+        # Weight value is irrelevant here -- this is a read-only evaluation set.
+        motion_weights = torch.ones(len(selected_clip_ids), dtype=torch.float32)
+        self._load_clip_set(
+            selected_clip_ids, self._eval_holdout_remote_name, motion_weights
+        )
 
     def restore_training_resident_set(self) -> None:
         """Reload whatever was resident for training before `load_eval_holdout` was called."""

@@ -1,10 +1,37 @@
 # Residual Motion Failure and Morphology-Dependent Physics Analysis
 
-**Date:** 2026-09-03  
+**Date:** 2026-09-03 (updated 2026-09-05)  
 **Status:** Pre-registered analysis plan; final full-scale results are not yet available.  
 **Purpose:** Complete the two remaining evidence-heavy parts of the paper: explain the residual
 motion failures and show how physical control changes when the same motion content is executed by
 different body shapes.
+
+## Update 2026-09-05
+
+Two bugs in the training-time evaluator/curriculum were found and fixed on the currently running
+`hhi_wide_stage2_discover_attention_slot_type_refined` job:
+
+1. **Eval batches ignored per-env morphology.** `MimicEvaluator` assigned eval rollouts to
+   sequential `env_ids`, not to envs whose fixed physical asset matched the selected reference's
+   shape. Fixed via `_build_morphology_matched_eval_batches` (explicit asset grouping + runtime
+   assertion). Effect was large and immediate: `eval_holdout/success_rate` jumped from ~78-82% to
+   ~96-98% at the fix boundary (epoch ~16,900-17,400). **Every pre-fix eval number in this run's
+   history, and by extension anything cited from earlier `discover_attention*` runs that used the
+   same evaluator code, should be treated as measured under the mismatch bug** -- do not carry
+   those absolute percentages into the paper without re-verifying on a post-fix checkpoint.
+2. `GlobalClipPool`'s priority selection had a float32 softmax-underflow bug (fixed to explicit
+   top-K); this affects which clips got trained on, not measurement, so it doesn't invalidate past
+   eval numbers, but it does mean the training curriculum changed at the same restart boundary --
+   don't attribute the post-fix jump to this change; the size and immediacy of the jump match the
+   eval-batching fix, not a curriculum change (which would show up as a trend shift, not a
+   step-discontinuity at a single eval tick).
+
+Also clarified: this project already has the versioned split infrastructure Sec. 3.1 below asks to
+freeze -- see the exact manifest names/hashes added there. The `eval_holdout/*` metric already
+being watched during training scores the **validation** split with **one rotating shape per clip**
+(deterministic, not random, per a separate fix landed the same day) -- useful for checkpoint
+selection and instrumentation debugging, but it is neither the full clip x 128-shape matrix nor
+the reserved **test** split this plan's headline numbers must come from.
 
 ## Executive conclusion
 
@@ -44,16 +71,35 @@ contact, balance, morphology, and actuation regimes.
   on refined HUMOS references. The four-shape online evaluator was reverted to one sampled shape
   per clip because its retained GPU buffers contributed to an out-of-memory failure during a pool
   rebuild. The paper analysis must therefore be a separate, batched, offline evaluation.
+- The project already has a versioned, hash-verified clip split, `hhi_stage2_v1`: train
+  (18,855 clips, manifest sha256 `bddfd28b...`), validation (1,048 clips, `78c7e588...`), and test
+  (1,048 clips, `41b77af3...`, hash/count recorded but the manifest itself never downloaded by any
+  training or analysis code to date). This satisfies most of Sec. 3.1's "freeze before opening test
+  results" requirement already -- it doesn't need to be designed, only respected.
+- With the eval-batching fix live, the validation split's `eval_holdout/success_rate` reached
+  ~96-98% within a few hundred epochs of restart (single rotating shape per clip, not the full
+  128-shape matrix). This is promising but is not the number the paper reports (wrong split, wrong
+  shape coverage) -- see Sec. 3.2's three-panel design below for what actually answers RQ-F1-F4/
+  RQ-P1-P4.
 
 ### 1.2 What remains unknown
 
-- The final static success rate and its uncertainty.
-- Whether the same clips remain hard after HUMOS refinement and full-scale slot/type training.
+- The final static success rate and its uncertainty **on the untouched test split, at full
+  128-shape coverage per clip** -- the validation split's single-shape rotating estimate is
+  encouraging context, not a substitute.
+- Whether the same clips remain hard after HUMOS refinement and full-scale slot/type training, now
+  that the evaluator itself is trustworthy (this was previously confounded by the eval-batching
+  bug; historical hard-clip lists predate the fix and should be treated as hypotheses to re-check,
+  not settled facts).
 - Whether failure is driven by motion identity, body shape, a clip-by-shape interaction, or a
   small number of bad reference frames.
 - Whether observed physical differences are just expected mass/size scaling or represent a
   genuine redistribution of control strategy.
 - Whether the actor causally uses its beta input.
+- Whether a `clip_id -> motion_family` label mapping exists anywhere reusable -- it does not
+  currently (checked: the clip manifest schema is `clip_id`/`file` only, no category field, no
+  lookup table under `data/`). Required before any "stratified by motion family" step in Sec. 3.2
+  or the physics plan can run.
 
 All final numerical claims must come from the frozen final checkpoint and evaluation protocol.
 Historical results should appear only as motivation or comparison.
@@ -104,29 +150,43 @@ Record and hash:
 
 - final checkpoint and resolved configuration;
 - code commit and local changes;
-- train/validation/test manifest versions and hashes;
+- train/validation/test manifest versions and hashes -- **already exists**: `split_version
+  hhi_stage2_v1`, train 18,855 clips (`bddfd28b...`), validation 1,048 clips (`78c7e588...`), test
+  1,048 clips (`41b77af3...`, never downloaded). These are already captured per-run in
+  `resolved_configs.pt` and the wandb run config (`motion_lib.split_id`, `*_manifest_sha256`,
+  `*_clip_count`) -- just cite the values from the frozen checkpoint's own run, don't re-derive;
 - refined reference manifest and refinement version;
 - morphology asset IDs and beta vectors;
 - simulator, physics parameters, control frequency, PD gains, torque limits, and terrain;
 - deterministic/stochastic action mode and random seeds;
 - metric definitions, tracking thresholds, and aggregation rules.
 
-The test manifest must remain unavailable for model selection. Use validation clips to debug the
-instrumentation and freeze thresholds. Repeated inspection of test failures must not feed back
-into architecture or reward design unless the resulting experiment is explicitly labeled a new
-training round.
+The test manifest must remain unavailable for model selection -- it already is, by construction of
+`GlobalClipPool` (there is intentionally no code path that downloads it during training). Use
+validation clips to debug the instrumentation and freeze thresholds. Repeated inspection of test
+failures must not feed back into architecture or reward design unless the resulting experiment is
+explicitly labeled a new training round.
 
 ### 3.2 Three nested evaluation panels
+
+All three panels draw from the **test** split (1,048 clips, `hhi_stage2_v1`, Sec. 3.1) for any
+number that will appear in the paper; use the **validation** split for pilots and threshold-fitting
+only, exactly as `MimicEvaluator._evaluate_holdout` already does during training.
+
+Stratification by motion family requires a `clip_id -> motion_family` mapping that does not
+currently exist in this repo (Sec. 1.2). Build it once, from clip identity/text annotation only,
+before drawing any panel below -- it must not be built by looking at which clips pass or fail.
 
 1. **Broad motion census:** every test clip on four fixed, preselected shapes. Choose a median
    body, a short/light body, a tall/heavy body, and a body with a contrasting limb-to-height
    ratio. Fixed shapes make checkpoint and method comparisons reproducible; random shapes do not.
-2. **Paired 128-shape benchmark:** approximately 100--200 fixed held-out clips, stratified by
-   motion family, evaluated on all 128 training morphologies. This is the primary denominator for
-   cross-shape success and failure claims.
+2. **Paired 128-shape benchmark:** approximately 100--200 fixed held-out clips (out of the test
+   split's 1,048), stratified by motion family, evaluated on all 128 training morphologies. This is
+   the primary denominator for cross-shape success and failure claims.
 3. **Instrumented physics panel:** a preselected 48--60-clip subset of the paired benchmark,
    spanning locomotion, running, turning, jumping, squatting, kneeling, and crawling. Evaluate all
-   128 shapes. Start with an 8-clip by 16-shape pilot to validate signals and storage.
+   128 shapes. Start with an 8-clip by 16-shape pilot **on the validation split** to validate
+   signals and storage before touching the test split.
 
 All panels should run offline in small clip/shape batches and release tensors between batches.
 This avoids the training-time evaluation memory peak while preserving deterministic coverage.
@@ -343,6 +403,14 @@ Record at simulator/control rate:
 Use `tools/check_replay_torque_saturation.py` as the instrumentation foundation, but first verify
 that the reported tensor is the applied torque after all clipping/scaling, its units and DOF order
 are correct, and multi-GPU/rank aggregation does not duplicate samples.
+
+The env-to-shape assignment for this instrumented replay must explicitly group by each env's fixed
+physical asset and assert the match before recording any sample, following
+`MimicEvaluator._build_morphology_matched_eval_batches`'s pattern. The training-time evaluator ran
+for weeks silently pairing some references with the wrong body asset (fixed 2026-09-05, Update
+note above) with no crash and no obviously-wrong numbers -- an offline evaluator doing paired
+rollouts across all 128 distinct physical assets is exposed to the identical failure mode and needs
+the identical guard.
 
 ### 5.4 Core metrics
 
@@ -585,6 +653,10 @@ Before inserting results, update several stale statements in `paper/`:
   shape-invariant.
 - Reproduce and archive the provenance of any quoted overlap or shape-correlation number before
   retaining it as a headline conclusion.
+- Any eval percentage quoted from before 2026-09-05 (this run or earlier `discover_attention*`
+  runs) was measured under the confirmed morphology/env-asset mismatch bug in `MimicEvaluator`.
+  Re-verify against a post-fix checkpoint before using it as a headline number; it is fine as
+  motivating/historical context if labeled as such.
 
 ## 10. Claim-strength decision rules
 

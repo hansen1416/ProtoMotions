@@ -192,3 +192,36 @@ def test_split_metadata_binds_roles_and_records_test_without_loading_it(tmp_path
             train_count=32,
             validation_count=4,
         )
+
+
+def test_load_eval_holdout_accepts_validated_subset():
+    pool = object.__new__(GlobalClipPool)
+    pool.rank = 0
+    pool.eval_holdout_clip_ids = ["clip_a", "clip_b", "clip_c"]
+    pool._eval_holdout_remote_name = {
+        "clip_a": "clip_a.pt",
+        "clip_b": "clip_b.pt",
+        "clip_c": "clip_c.pt",
+    }
+    observed = []
+
+    def load_clip_set(clip_ids, remote_name_map, motion_weights):
+        observed.append((list(clip_ids), remote_name_map, motion_weights.clone()))
+
+    pool._load_clip_set = load_clip_set
+    pool.load_eval_holdout(["clip_c", "clip_a"])
+
+    clip_ids, remote_name_map, weights = observed.pop()
+    assert clip_ids == ["clip_c", "clip_a"]
+    assert remote_name_map is pool._eval_holdout_remote_name
+    assert torch.equal(weights, torch.ones(2))
+
+    pool.load_eval_holdout()
+    assert observed.pop()[0] == pool.eval_holdout_clip_ids
+
+    with pytest.raises(ValueError, match="empty"):
+        pool.load_eval_holdout([])
+    with pytest.raises(ValueError, match="duplicate"):
+        pool.load_eval_holdout(["clip_a", "clip_a"])
+    with pytest.raises(ValueError, match="unknown"):
+        pool.load_eval_holdout(["clip_missing"])
