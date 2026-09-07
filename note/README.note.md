@@ -6268,3 +6268,27 @@ explicit stable top-UCB selection, while `random_fraction` supplies a separate u
 quota (0.2 in the full run). The immediate W&B success-rate jump after this commit primarily
 reflects removal of morphology-mismatched evaluation, not an instantaneous policy improvement;
 pre- and post-fix success rates must not be treated as measurements under the same protocol.
+
+## 76. Full Refined Slot/Type Training Result (2026-09-07)
+
+**Run:** [`hhi_wide_stage2_discover_attention_slot_type_refined`](https://wandb.ai/yugoamaryl/hhi-protomotions/runs/3mvgad6f)
+(`3mvgad6f`). The downloaded `last.ckpt` is from epoch 28,170; the final scheduled W&B
+evaluation was at epoch 28,159, after approximately 11.07 billion simulated frames. These results
+use the corrected morphology-matched protocol from §75.
+
+| Metric | Hard resident pool | Frozen validation holdout |
+|---|---:|---:|
+| Success rate | 89.84% | **98.47%** |
+| Mean body-position error | 0.0960 m | **0.0698 m** |
+| Mean body-rotation error | 0.2261 rad | **0.1760 rad** |
+| Mean maximum-joint position error | 0.1848 m | **0.1412 m** |
+| Normalized jerk | 1,442.8 | **1,151.7** |
+| High-jerk frames | 31.05% | **27.25%** |
+| Mean action delta | 0.743° | **0.591°** |
+
+The 1,048-clip frozen validation holdout substantially outperforms the current resident pool,
+which is expected because GlobalClipPool deliberately concentrates the resident set on difficult,
+high-priority clips. The holdout result is therefore the better generalization indicator, while
+the resident score measures the active hard curriculum. Both evaluations use one deterministic,
+rotating body shape per clip. The separate epoch-28,170 validation run and untouched test split
+remain outside this summary; no test-set result is claimed yet.
