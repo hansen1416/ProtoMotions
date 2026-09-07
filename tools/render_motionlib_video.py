@@ -140,6 +140,12 @@ def create_parser():
             "setup that can be flaky on some pods; the video works fine without it)."
         ),
     )
+    parser.add_argument(
+        "--target-markers",
+        action="store_true",
+        default=False,
+        help="Overlay red spheres at every reference rigid-body position.",
+    )
     return parser
 
 
@@ -179,6 +185,11 @@ from protomotions.components.scene_lib import (  # noqa: E402
 )
 from protomotions.robot_configs.base import ControlType  # noqa: E402
 from protomotions.robot_configs.factory import robot_config  # noqa: E402
+from protomotions.simulator.base_simulator.config import (  # noqa: E402
+    MarkerConfig,
+    MarkerState,
+    VisualizationMarkerConfig,
+)
 from protomotions.simulator.factory import simulator_config  # noqa: E402
 from protomotions.utils.hydra_replacement import get_class  # noqa: E402
 
@@ -410,7 +421,21 @@ def main():
         custom_key_handlers={},
         morphology_asset_ids=env_asset_ids,
     )
-    simulator._initialize_with_markers({})
+    visualization_markers = {}
+    if args.target_markers:
+        body_markers = []
+        for body_name in robot_cfg.kinematic_info.body_names:
+            marker_size = (
+                "small"
+                if robot_cfg.mimic_small_marker_bodies is not None
+                and body_name in robot_cfg.mimic_small_marker_bodies
+                else "regular"
+            )
+            body_markers.append(MarkerConfig(size=marker_size))
+        visualization_markers["body_markers_red"] = VisualizationMarkerConfig(
+            type="sphere", color=(1.0, 0.0, 0.0), markers=body_markers
+        )
+    simulator._initialize_with_markers(visualization_markers)
 
     assert simulator.env_id_to_asset_name == env_asset_ids, (
         "Simulator env->asset assignment does not match the requested motions' asset_ids."
@@ -456,6 +481,19 @@ def main():
             current_state.rigid_body_vel[:, 0, :] = torch.zeros(num_envs, 3, device=device)
             current_state.rigid_body_ang_vel[:, 0, :] = torch.zeros(num_envs, 3, device=device)
             simulator.reset_envs(current_state, env_ids=env_ids_all)
+            return state
+
+        def marker_callback_for(target_state):
+            if not args.target_markers:
+                return None
+            target_pos = target_state.rigid_body_pos.to(device).detach()
+            target_rot = target_state.rigid_body_rot.to(device).detach()
+            marker_states = {
+                "body_markers_red": MarkerState(
+                    translation=target_pos, orientation=target_rot
+                )
+            }
+            return lambda: marker_states
 
         # Warm-up: pose every env to its real frame-0 position BEFORE locking the
         # camera. Otherwise the camera gets computed from actors' raw/default
@@ -464,15 +502,19 @@ def main():
         # every subsequent frame even once reset_envs starts placing actors
         # correctly, producing a video with nothing in frame. Mirrors
         # record_video_mor.py's "env.reset(None) before _setup_fixed_camera" order.
-        pose_frame(0)
-        simulator.step(zero_actions)
+        target_state = pose_frame(0)
+        simulator.step(
+            zero_actions, markers_callback=marker_callback_for(target_state)
+        )
         simulator.render()
         setup_fixed_camera(simulator, num_envs, distance_scale=args.camera_distance_scale)
 
         log.info(f"Recording {num_frames} frames ...")
         for frame_idx in tqdm(range(num_frames), desc="Recording", unit="frame"):
-            pose_frame(frame_idx)
-            simulator.step(zero_actions)
+            target_state = pose_frame(frame_idx)
+            simulator.step(
+                zero_actions, markers_callback=marker_callback_for(target_state)
+            )
             simulator.render()
             gym.write_viewer_image_to_file(viewer, os.path.join(frames_tmp, f"{frame_idx:06d}.png"))
 

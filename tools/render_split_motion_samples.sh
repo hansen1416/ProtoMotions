@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Render five representative training clips and five validation clips from the
-# refined Stage-2 MotionLib dataset. Each video uses shape variant 0.
+# refined Stage-2 MotionLib dataset. Each video shows the first eight body-shape
+# variants of the same base motion, with red reference-pose markers.
 
 set -euo pipefail
 
@@ -42,7 +43,8 @@ render_split() {
             --motion-file "${motion_file}" \
             --robot smpl_mor \
             --start 0 \
-            --batch-size 1 \
+            --batch-size 8 \
+            --target-markers \
             --camera-distance-scale 0.8 \
             --output "${output_file}"
     done
