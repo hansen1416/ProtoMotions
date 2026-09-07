@@ -688,7 +688,20 @@ nohup python -u protomotions/train_agent.py \
 --wandb-entity yugoamaryl \
 --wandb-group hhi_wide_stage2_discover_attention_slot_type_refined \
 > /tmp/hhi_wide_stage2_discover_attention_slot_type_refined.log 2>&1 &
-----
+
+-----
+
+rclone copyto r2:proto-data/ckpt/hhi_wide_stage2_discover_attention_slot_type_refined.zip \
+      ./hhi_wide_stage2_discover_attention_slot_type_refined.zip \
+      --s3-no-check-bucket -P
+
+nohup python -u protomotions/evaluate_validation_split.py \
+    --checkpoint results/hhi_wide_stage2_discover_attention_slot_type_refined/last.ckpt \
+    --simulator isaacgym \
+    --num-envs 128 \
+    --clip-batch-size 1 \
+    --output results/hhi_wide_stage2_discover_attention_slot_type_refined/validation_eval_epoch_28170.json \
+    > /tmp/validation_eval_epoch_28170.log 2>&1 &
 
 
 
