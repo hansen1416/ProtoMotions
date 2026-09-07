@@ -379,6 +379,7 @@ def _remove_cached_clip_files(motion_lib, clip_ids: Sequence[str], remote_map) -
             cached_path.unlink()
 
 
+@torch.no_grad()
 def _evaluate_clip_batch(agent, motion_lib, clip_ids, batch_index):
     evaluator = agent.evaluator
     motion_lib.load_eval_holdout(clip_ids=clip_ids)
