@@ -45,7 +45,7 @@ render_split() {
             --start 0 \
             --batch-size 8 \
             --target-markers \
-            --camera-distance-scale 0.8 \
+            --camera-distance-scale 1.4 \
             --output "${output_file}"
     done
 }

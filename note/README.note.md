@@ -6247,3 +6247,24 @@ run. At epoch 768, the process ran out of GPU memory while loading the next 256-
 after validation. The larger evaluation buffers contributed to this post-evaluation memory peak.
 The experiment has therefore returned to the original evaluator: one randomly sampled body shape
 per clip per evaluation. This keeps full clip coverage with substantially lower GPU memory use.
+
+## 75. Morphology-Matched Evaluation and Pool-Sampling Correction (2026-09-07)
+
+Commit `3685247` corrected a major evaluation error. The one-shape-per-clip evaluator previously
+assigned selected references sequentially to simulator environments, even though every environment
+has a fixed morphology asset. Most references were therefore evaluated on the wrong body shape,
+creating false failures. Evaluation now groups references by `motion_asset_id` and runs each only
+on an environment with the identical asset. The resulting
+`Evaluating morphology-matched batch ...` sub-batches cover every selected motion exactly once.
+
+Evaluation-shape selection is also now deterministic and rotating: a stable hash of the clip ID
+and seed chooses the initial shape, and the checkpoint epoch advances the panel. This retains one
+shape per clip for memory efficiency while making repeated and resumed evaluations reproducible
+and gradually covering all 128 shapes.
+
+The same commit corrected GlobalClipPool selection. Float32 softmax over priority ranks underflowed
+for realistic pool partitions and did not provide the intended exploration. Priority slots now use
+explicit stable top-UCB selection, while `random_fraction` supplies a separate uniform rehearsal
+quota (0.2 in the full run). The immediate W&B success-rate jump after this commit primarily
+reflects removal of morphology-mismatched evaluation, not an instantaneous policy improvement;
+pre- and post-fix success rates must not be treated as measurements under the same protocol.
