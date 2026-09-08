@@ -1,0 +1,150 @@
+\section{Reproducibility Details}\label{app:reproducibility}
+
+\subsection{Source preparation and refinement settings}\label{app:preprocessing}
+
+The AMASS source collections used by the preparation pipeline are ACCAD,
+BioMotionLab\_NTroje, BMLhandball, BMLmovi, CMU, DFaust\_67, EKUT,
+Eyes\_Japan\_Dataset, HumanEva, KIT, MPI\_HDM05, MPI\_Limits, MPI\_mosh,
+SFU, SSM\_synced, TCD\_handMocap, TotalCapture, and Transitions\_mocap.
+Source preparation operates at 20\,Hz; the final motion libraries use
+30\,Hz. Joint ordering and quaternion conventions must follow the matching
+asset and MotionLib conversion rather than be inferred from source array
+positions.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Default settings of the current reference-refinement procedure.
+Frame counts refer to the 30\,Hz MotionLib representation. These are
+kinematic-processing settings, not physical constraints learned by the policy.}\label{tab:refinement_parameters}
+\begin{tabularx}{\linewidth}{@{}lY@{}}
+\toprule
+Operation & Setting \\
+\midrule
+Contact candidates & Left/right ankle and toe bodies \\
+Contact detection thresholds & Speed 0.15\,m/s; height 0.10\,m \\
+Contact cleanup & Close gaps up to 2 frames; remove runs shorter than 3 frames \\
+Rotation filter & Savitzky--Golay, 9-frame window, polynomial order 3 \\
+Rotation blend / bound & Strength 0.5; maximum geodesic correction $8^\circ$ \\
+Contact-transition guard & Separate segments; 2-frame transition taper \\
+Root XY correction & Median stance anchors; least-squares common translation \\
+Root correction regularization & 21-frame smoothing window; 0.10\,m displacement cap \\
+Ground clearance & 0.005\,m collision-geometry margin; 5-frame lift smoothing \\
+Final reconstruction & Per-asset FK and per-motion velocity recomputation \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{PD gains and limits}\label{app:control}
+
+Table~\ref{tab:pd_parameters} gives the base values configured for the
+SMPL morphology robot. For joint $d$ belonging to rigid body $j$, the
+simulator applies the multiplier
+\begin{equation}
+    \rho_{b,j} = \frac{m_{b,j}}{m_{\mathrm{ref},j}}
+\end{equation}
+to stiffness, damping, and effort limit. The velocity limit is not mass-scaled.
+All relevant asset masses, joint ranges, collision settings, and the reference
+asset must accompany a reproducible physical interpretation.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Base PD and actuation values before per-body mass scaling.
+Stiffness and damping use the simulator's rotational PD units
+(Nm/rad and Nm\,s/rad); effort limits are in Nm and velocity limits in rad/s.}\label{tab:pd_parameters}
+\begin{tabular}{lrrrr}
+\toprule
+Joint family & Stiffness & Damping & Effort limit & Velocity limit \\
+\midrule
+Hip, knee, ankle & 800 & 80 & 500 & 100 \\
+Toe & 500 & 50 & 500 & 100 \\
+Torso, spine, chest & 1,000 & 100 & 500 & 100 \\
+Neck, head, thorax, shoulder, elbow & 500 & 50 & 500 & 100 \\
+Wrist, hand & 300 & 30 & 500 & 100 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Windowed jerk convention}\label{app:smoothness}
+
+The logged smoothness score is computed from simulated global body positions
+using consecutive finite differences with control interval
+$\Delta t=1/30$\,s. A nominal 0.4\,s window contains
+$W=\max(4,\lfloor0.4/\Delta t\rfloor)$ frames, giving $W=12$ at the
+configured rate and duration $T_w=(W-1)\Delta t$. For body $j$ in window $w$,
+let $L_{w,j}$ be the sum of speed times $\Delta t$ and let
+$\dddot{p}_{w,j}$ denote the third finite difference. The implementation uses
+\begin{equation}
+    J_{w,j} =
+    \frac{T_w^5
+      \sum_{t\in w}\|\dddot{p}_{t,j}\|_2^2\,\Delta t}
+    {\max(L_{w,j},\epsilon)^2+\epsilon},
+    \qquad \epsilon=0.1,
+    \label{eq:jerk}
+\end{equation}
+where the sum includes the valid third-difference samples in the window.
+Window scores are averaged per body and then across bodies and motions.
+High-jerk percentage counts windows for which
+$\max_j J_{w,j}>6{,}500$.
+
+Equation~\eqref{eq:jerk} documents the existing numerical convention, including
+its regularizers; it is not presented as a universally dimensionless or
+sampling-rate-invariant biomechanical measure. Comparisons must keep the
+sample rate, window, units, regularizers, and aggregation fixed. Reference
+refinement reports also include raw jerk in m/s$^3$; those values are a
+different metric and cannot be compared numerically to this logged score.
+
+\subsection{Split and experiment provenance}\label{app:provenance}
+
+The split metadata is stored in
+\path{data/splits/hhi_stage2_v1/split_metadata.json}, with schema version 1,
+split seed 42, and split identifier
+\begin{quote}
+\footnotesize\ttfamily
+4c1c9d592e3dbeef15abe18cb50a3141820735849414ecc2d8959e9f38502263
+\end{quote}
+It records the source-manifest hash, training/validation/test manifest and
+ID-list hashes, difficulty information, and the forced training reservation.
+The generator uses 100 difficulty strata; the 150 requested development
+identities expand to 286 retained identities when existing mirrored partners
+are included. Checkpoint/run split provenance refers to these artifacts,
+not just a verbal 90/5/5 ratio.
+
+The documented HUMOS configuration selects
+\path{logs/humos/q6zbv2tu/checkpoints/latest-epoch=1599.ckpt}.
+Exact HUMOS and asset-generation revisions and checkpoint checksums must
+be archived with the final dataset specification. A checkpoint path identifies
+the local workflow but is not a substitute for an immutable checksum.
+
+The principal implementation entry points are:
+\begin{itemize}
+    \item Reference refinement:
+    \path{tools/refine_humos_motion.py}; streamed per-clip processing:
+    \path{tools/refine_humos_r2_per_clip.py}.
+    \item Selected full-scale experiment:
+    \path{examples/experiments/mimic/mlp_wide_stage2_discover_attention_slot_type.py},
+    inheriting the common attention experiment and enabling slot/type embeddings.
+    \item Corrected development comparison:
+    \path{tools/train_150_evalfix_ablation.sh}, cases A--E with seed 0.
+    \item Motion residency and evaluation:
+    \path{protomotions/components/global_clip_pool.py} and
+    \path{protomotions/agents/evaluators/mimic_evaluator.py}.
+    \item Standalone validation:
+    \path{protomotions/evaluate_validation_split.py}. Its output must record
+    the selected checkpoint, split, reference version, and shape panel.
+\end{itemize}
+
+For each final experiment, retain the resolved configuration, code revision,
+model/checkpoint checksum, body coefficient and asset manifests, split hashes,
+all resume segments, frame count, GPU model/count, and elapsed GPU-hours.
+For each evaluation, retain per-pair clip and asset IDs, panel selection,
+success/failure, valid horizon, and component errors in a local analysis file.
+The main full-scale W\&B identifier is \texttt{3mvgad6f}; the corrected
+small-scale group is \texttt{hhi\_150\_evalfix\_comparison}.
+The evaluation/sampling correction is recorded in commit \texttt{3685247}.
+
+\pending{Complete the immutable external-model/asset provenance, parameter
+counts, GPU-hour accounting, final per-pair evaluation exports, and caption
+coverage/alignment audit before treating this draft as a finalized benchmark
+report.}

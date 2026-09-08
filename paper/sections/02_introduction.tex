@@ -1,25 +1,59 @@
-\section{Introduction}
-\label{sec:introduction}
+\section{Introduction}\label{sec:introduction}
 
-Physics-based motion tracking policies (e.g., PHC, PULSE, ExBody2, GMT) reproduce reference human
-motions under physical simulation with high fidelity, but are trained and evaluated on a single,
-fixed body morphology. This limits their applicability to settings that require one controller to
-generalize across a population of body shapes — e.g., animating diverse virtual characters or
-transferring a single policy across a fleet of robots with varying morphology.
+A motion-imitation controller should reproduce an action without assuming that
+every character has the same body. Changes in limb lengths, mass distribution,
+and collision geometry alter both the reference trajectory and the dynamics
+required to follow it. Replaying an identical joint sequence across bodies does
+not necessarily preserve foot placement, clearance, or balance. Conversely,
+optimizing only spatial agreement can obscure whether the intended articulation
+has been retained. Learning across body shapes therefore requires a consistent
+relationship between source motion, shape-specific reference, and simulated body.
 
-We target a single policy that imitates arbitrary human motions across a wide distribution of body
-shapes: 128 SMPL shapes (64 betas $\times$ 2 genders), spanning 26--144\,kg and 1.13--1.67\,m. The
-central difficulty is that a naive combination of \emph{motion diversity} (tens of thousands of
-clips) and \emph{shape diversity} (128 morphologies) confounds two independent axes of
-generalization: whether the policy has seen a given \emph{motion}, and whether it has seen a given
-\emph{body}. Conflating them in one training/eval split makes failures hard to diagnose and
-progress hard to attribute.
+Existing work provides large motion-capture collections, body-shape-conditioned
+motion generation, and scalable physics-based control~\cite{amass,humanml3d,humos,deepmimic,phc,protomotions}. We build on these
+components to study a practical question: how can one policy imitate a large
+collection of shape-specific motions while preserving traceable data identities
+and a meaningful evaluation protocol? Our focus is their integration and
+empirical assessment, not a claim that morphology conditioning or attention is new.
 
-\paragraph{Contribution.} We propose a two-stage curriculum — neutral pretraining on the full
-20{,}946-clip HumanML3D library at a single body shape, followed by shape-transfer training across
-128 shapes — that explicitly decouples motion-OOD from shape-OOD. We identify and fix two
-structural failure modes specific to the shape-transfer stage (residual PD control, morphology
-observation normalizer reset; Section~\ref{sec:method}), and we introduce an evaluation protocol
-(Section~\ref{sec:evaluation}) that measures shape-invariant skill consistency directly, rather
-than relying on world-space error or single-body baselines that structurally cannot support a
-cross-shape generalization claim.
+Our data pipeline extends AMASS-derived HumanML3D clips to 128 body
+configurations. HUMOS generates the corresponding reference motions; SMPLSim
+constructs simulation assets from the same body parameters. A conservative
+refinement pass smooths rotations, reduces stance sliding through root
+translation, and enforces clearance of the modeled collision geometry.
+The inherited descriptions connect each source action to its generated
+variants. This association supports paired analysis and future language-based
+uses, but the controller studied here consumes reference motion, not text.
+
+The selected controller combines current state, dilated state history, and
+future reference targets through temporal slot/type attention. Body parameters
+and a previous action are concatenated into separate actor and critic heads.
+The main experiment trains directly on multiple shapes; neutral-body
+pretraining and mixed-source reward training are not part of the final method.
+We use a 150-clip development subset to make design exploration affordable,
+followed by full-scale training on a versioned split. Corrected small-scale
+reruns are now reassessing the design choices made during that development.
+
+This draft makes three contributions:
+\begin{enumerate}
+    \item A derived, text-associated multi-morphology corpus, with an explicit
+    construction procedure linking source clips, generated references, body
+    assets, and reproducible splits. Its captions are inherited rather than
+    newly annotated for each body.
+    \item A single morphology-conditioned imitation system operating across
+    18,855 training clips and 128 body configurations, integrating temporal
+    observations, matching simulation assets, reference refinement, and
+    memory-bounded motion streaming.
+    \item An empirical protocol separating architecture, reference quality,
+    and evaluation correctness, together with a preliminary full-scale
+    held-out monitoring result. The controlled ablation outcomes and
+    residual-failure findings remain to be completed.
+\end{enumerate}
+
+The recorded validation snapshot reaches 98.47\% success under the protocol in
+Section~\ref{sec:evaluation_protocol}. This result concerns held-out clip
+identities on trained body configurations, with one body evaluated per clip;
+it does not establish success for every shape or for unseen bodies.
+Section~\ref{sec:results} distinguishes this evidence from pending comparisons.
+A subsequent mechanics study is explicitly left as a placeholder in
+Section~\ref{sec:physics}.

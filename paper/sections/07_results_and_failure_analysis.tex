@@ -1,0 +1,173 @@
+\section{Results and Failure Analysis}\label{sec:results}
+
+\subsection{Recorded full-scale validation result}\label{sec:full_results}
+
+Table~\ref{tab:full_results} reports the final scheduled monitoring evaluation
+recorded for the selected full-scale slot/type run, at epoch 28,159 after
+approximately 11.07 billion simulated frames. The separately downloaded
+checkpoint is from epoch 28,170. These values are post-correction,
+morphology-matched evaluations, not measurements of that later checkpoint
+or of the independent test split.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Recorded full-scale monitoring snapshot. Validation contains
+1,048 held-out clips; each evaluation uses one selected trained body per clip.
+The active resident pool is difficulty-biased. Values are the stored
+distributed logging summaries from run \texttt{3mvgad6f}, epoch 28,159;
+no confidence intervals or all-shape coverage are implied.}\label{tab:full_results}
+\begin{tabular}{lrr}
+\toprule
+Metric & Hard resident pool & Validation holdout \\
+\midrule
+Success rate (\%) $\uparrow$ & 89.84 & 98.47 \\
+Mean body-position error (m) $\downarrow$ & 0.0960 & 0.0698 \\
+Mean global body-rotation error (rad) $\downarrow$ & 0.2261 & 0.1760 \\
+Mean maximum-joint position error (m) $\downarrow$ & 0.1848 & 0.1412 \\
+Windowed normalized jerk $\downarrow$ & 1,442.8 & 1,151.7 \\
+High-jerk windows (\%) $\downarrow$ & 31.05 & 27.25 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The validation score is higher than the resident-pool score, while the
+reported errors are lower. This comparison is consistent with a curriculum
+that concentrates residency on difficult clips: the resident pool is not an
+independent uniform sample of the training distribution. Its 89.84\% success
+rate should not be interpreted as the success rate of the entire training
+corpus, nor should the difference be described as validation outperforming
+an IID training sample.
+
+The 98.47\% result supports strong tracking of the selected held-out
+clip/body pairs under the specified threshold. It does not establish
+all-body success for those clips, unseen-body generalization, or an untouched
+test-set score. The thresholded success rate is complemented by position,
+rotation, and smoothness measures because a successful rollout can still
+have visible local errors or jitter.
+
+% Evidence: note/README.note.md, section 76, recorded 2026-09-07.
+% Do not replace the monitoring epoch with last.ckpt's epoch.
+The run record is available at
+\href{https://wandb.ai/yugoamaryl/hhi-protomotions/runs/3mvgad6f}
+{the full-scale W\&B run}. The current table uses the recorded snapshot,
+not a newly executed evaluation.
+\pending{Add frozen-panel validation and independent test results from the
+chosen checkpoint, with per-motion records and explicit coverage.}
+
+\subsection{Corrected architecture comparison}\label{sec:architecture_results}
+
+An earlier evaluator could assign a reference to an environment with the
+wrong morphology. Its correction changed the meaning of the evaluation:
+a rise at the code transition cannot be attributed to instantaneous policy
+learning. The accompanying sampling correction also changed which training
+clips entered the resident pool. These changes must be distinguished from
+an architectural improvement.
+
+The five corrected runs in Table~\ref{tab:ablations} reassess the 150-clip
+comparisons using the matching-asset protocol. Their final results are not
+yet included. Consequently, the selected slot/type architecture is the
+current system choice, not a demonstrated winner over basic attention,
+a temporal MLP, or actor-only adaLN-Zero under the corrected controls.
+Pre-correction curves cannot establish a reliable architecture ranking.
+
+\pending{For A--D, report matched-budget success, position/rotation errors,
+smoothness, parameter counts, and GPU-hours on identical evaluation pairs.
+Add repeated seeds before making claims about consistency.}
+
+\subsection{Reference refinement: quality and policy effects}\label{sec:refinement_results}
+
+Reference refinement has two distinct evaluation targets. The first is
+whether the processed reference has less sliding, penetration, or jitter
+without excessive changes to pose, root trajectory, or cross-shape
+variation. The second is whether a policy trained on those references
+tracks more reliably or smoothly. A favorable reference-only metric does
+not establish the second effect.
+
+The C/E comparison isolates the reference-processing choice at fixed
+architecture and training budget, subject to common final evaluation
+targets. Before/after reference metrics should be aggregated per clip/body
+pair, with distributions and failure cases rather than only a favorable
+mean. Changes in global geometry are expected across bodies; retained
+shape-specific behavior should be assessed through matched clips and
+interpretable rotation or motion-range differences.
+
+\pending{Add the corpus-level reference artifact/fidelity audit and completed
+C/E controller comparison. A full-scale refinement benefit is not inferred
+causally from the single refined full-scale run.}
+
+\subsection{Cross-shape consistency and qualitative evidence}
+
+A useful qualitative comparison places several bodies performing the same
+clip side by side, with reference markers and a shared time axis. Source
+descriptions can identify the action, provided mirrored and cropped captions
+have been checked. Reference-only videos illustrate the generated corpus
+but must not be presented as successful policy rollouts.
+
+For quantitative cross-shape analysis, the same clip should be evaluated
+on an explicit body panel. Report both aggregate accuracy and variation
+across shapes, including the number of clips that succeed on every tested
+body. A rotating one-shape snapshot does not provide this statistic.
+Unseen beta vectors require corresponding new assets and references and
+must be evaluated separately from trained bodies, even if their coefficients
+lie within the same $[-3,3]$ range.
+
+\pending{Insert matched reference/controller visualizations and cross-shape
+results. Unseen-body and joint motion/body generalization remain unmeasured
+in the evidence reported here.}
+
+\subsection{Evidence-based analysis of residual failures}\label{sec:failures}
+
+We do not assume a fixed 10\% failure tail or an intrinsic 80\% learning
+ceiling. The observed failure fraction depends on the evaluated population,
+shape panel, checkpoint, horizon, and threshold. Moreover, the old
+morphology mismatch produced false failures. A residual failure should
+therefore be treated as an observation to explain, not evidence that the
+motion is physically impossible.
+
+The analysis unit is a failed clip/body pair with a reproducible rollout.
+For each pair, retain the source identity, morphology, first threshold
+crossing, tracking-error trajectory, and a synchronized reference/controller
+visualization. Compare it with a successful body variant of the same clip
+where available. Table~\ref{tab:failure_evidence} defines candidate
+explanations and the evidence needed to support them.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Residual-failure analysis framework. Categories are hypotheses until
+supported by measurements; they can overlap and include an unresolved group.}\label{tab:failure_evidence}
+\begin{tabularx}{\linewidth}{@{}p{0.25\linewidth}Y@{}}
+\toprule
+Candidate explanation & Evidence required \\
+\midrule
+Reference artifact &
+Sliding, penetration, abrupt rotation/root changes, or inconsistent contacts
+at the failure time; compare refined and original references. \\
+Missing environmental support &
+Reference/video and checked caption show an object, seat, wall, partner,
+or other support absent from the simulated task. \\
+Morphology-specific difficulty &
+The same clip succeeds on other bodies; compare geometry, clearance,
+joint limits, and reference differences on the failing body. \\
+Controller or optimization limitation &
+Repeated failure despite an apparently valid reference; recovery under
+additional targeted training or an independently tested controller would
+argue against intrinsic infeasibility. \\
+Metric or protocol effect &
+Inspect asset identity, horizon, initialization, and threshold crossings;
+check whether a visually plausible deviation alone changes the binary label. \\
+Unresolved &
+Retain ambiguous and mixed cases without assigning a physical cause. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+A complete report should quantify these categories over all evaluated
+failures, or over a documented stratified sample with appropriate
+denominators, and include representative successes as controls. Repeated
+rollouts and targeted interventions can strengthen an explanation; visual
+inspection alone cannot prove dynamic infeasibility. Capacity limits,
+reference defects, and body-dependent dynamics may coexist.
+\pending{Populate failure frequencies and representative case studies from
+the frozen evaluation records. No causal failure attribution is claimed yet.}

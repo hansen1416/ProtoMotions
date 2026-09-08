@@ -1,0 +1,201 @@
+\section{Experimental Setup}\label{sec:experiments}
+
+\subsection{Development subset and full-scale protocol}
+
+The development corpus contains 150 clips and all 128 body configurations,
+for 19,200 variants. These clips are reserved within the full training split
+and are not a held-out generalization benchmark. Small-scale experiments
+investigate architecture and reference-processing choices with a fixed
+simulation budget. The full-scale run uses the 18,855 training clips in
+Table~\ref{tab:dataset_counts}, with validation membership fixed throughout.
+
+The selected full-scale experiment is slot/type attention trained directly on
+refined references. Its code retains a historical \texttt{stage2} name, but
+this run does not use neutral pretraining followed by shape transfer.
+Table~\ref{tab:training_parameters} records the shared optimization settings
+and the actual environment/batch sizes used after the initial memory-related
+launch adjustments. Run-specific resolved configurations take precedence
+over older launch examples.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Training configuration and budgets. Environment and minibatch counts
+are per GPU. The full-scale frame count is a recorded stopping snapshot,
+not a budget matched to the development runs.}\label{tab:training_parameters}
+\begin{tabularx}{\linewidth}{@{}lYY@{}}
+\toprule
+Setting & Corrected 150-clip runs & Full-scale selected run \\
+\midrule
+Parallel GPUs per policy & 1 & 6 \\
+Environments per GPU & 4,096 & 2,048 \\
+PPO minibatch size per GPU & 16,384 & 8,192 \\
+Rollout length & 32 control steps & 32 control steps \\
+Mini-epochs per update & 1 & 1 \\
+Actor / critic learning rates &
+$2\times10^{-5}$ / $10^{-4}$ & $2\times10^{-5}$ / $10^{-4}$ \\
+Discount / GAE / ratio clip & 0.99 / 0.95 / 0.2 & 0.99 / 0.95 / 0.2 \\
+Gradient norm clip & 50 & 50 \\
+Evaluation cadence & 200 epochs & 256 epochs \\
+Training seed & 0 for current five runs & Recorded in saved run configuration \\
+Reference residency & All 150 clips & 256, later 128 clips per GPU \\
+Training frames & 786,432,000 planned per run & Approximately $11.07\times10^9$ recorded \\
+Status of reported evidence & Comparisons pending & Monitoring at epoch 28,159 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Architecture and refinement controls}\label{sec:ablation_design}
+
+The corrected comparison consists of the five cases in
+Table~\ref{tab:ablations}. Cases A--D use the same refined corpus and temporal
+input categories. They test flat temporal aggregation, attention, slot/type
+embeddings, and actor-only morphology modulation. Case E uses the same
+architecture as C with unrefined references.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Corrected 150-clip comparison. One seed per case is currently running;
+this is an experiment design, not a ranking of completed results.}\label{tab:ablations}
+\begin{tabularx}{\linewidth}{@{}llYY@{}}
+\toprule
+Case & References & Architecture & Comparison purpose \\
+\midrule
+A & Refined & Wide temporal MLP; beta concatenation &
+Temporal MLP baseline. \\
+B & Refined & Basic temporal attention &
+Attention versus flattened temporal input. \\
+C & Refined & Attention with slot/type embeddings &
+Explicit temporal/source identity. \\
+D & Refined & C + actor-only adaLN-Zero &
+Morphology modulation with critic unchanged. \\
+E & Unrefined & Same architecture as C &
+Reference refinement at fixed architecture. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+All five current runs use seed 0, one A40 GPU per policy, the same frame
+budget, and the same evaluation cadence and shape-sampling seed. Morphology
+concatenation into both heads is retained in D; adaLN-Zero is additional
+actor conditioning, not a replacement for the critic or a two-stage schedule.
+
+The models are not asserted to have equal parameter counts. Counts, wall time,
+and GPU-hours must accompany the completed comparison, and repeated training
+seeds are needed before making claims about reliability or statistical
+significance. For C versus E, final controller evaluation must use identical
+clip/shape pairs and a common reference version. Their training-time metrics
+use different targets and are not by themselves a controlled measure of
+refinement benefit. Cross-evaluation against both reference versions can
+separate target fidelity from ease of tracking.
+
+Earlier small-scale runs influenced the choice to begin full-scale slot/type
+training. The corrected reruns were launched later to reassess that choice;
+we do not present them as completed model selection preceding the full run.
+
+\subsection{Morphology-matched evaluation and checkpoint scope}\label{sec:evaluation_protocol}
+
+Each reference is rolled out only in an environment using its exact asset
+identity. A selected reference therefore cannot be assigned to a different
+body simply because an environment slot is available. Multiple rollout
+batches may be needed when several references require the same body.
+
+Routine monitoring selects one variant per clip. With seed $s=42$, stable
+clip identity $c$, panel index $p$, and $N_c$ available variants, the choice is
+\begin{equation}
+    k(c,p) =
+    \left(
+       \operatorname{uint64}_{\mathrm{big}}
+       \bigl(\operatorname{SHA256}(s\!:\!c)_{0:8}\bigr)
+       +p
+    \right)\bmod N_c .
+    \label{eq:shape_panel}
+\end{equation}
+Here $s\!:\!c$ is the UTF-8 string formed as \texttt{seed:clip\_id}.
+For scheduled monitoring, $p$ is the integer quotient of the checkpointed
+epoch and evaluation cadence. This produces deterministic staggered shape
+choices that rotate across evaluations and remain reproducible after resume.
+The validation \emph{clip list} is fixed; the selected \emph{shape panel}
+changes. Thus successive scores are not repeated measurements on an
+identical set of clip/shape pairs.
+
+Evaluation uses the mean action, reference initialization, and no gradient
+tracking. It disables training termination and records errors over the
+valid reference horizon, capped at 600 control steps (20\,s at 30\,Hz).
+Success therefore refers to the evaluated horizon, not necessarily the
+entire duration of a longer source clip.
+
+Final model comparisons should freeze the checkpoint, clip/shape panel,
+reference version, simulator configuration, and seed. Validation is available
+for model selection and has been repeatedly monitored; it is not an untouched
+test set. The independent test manifest remains outside training, and no
+test result is reported in this draft. The downloaded epoch-28,170
+\texttt{last.ckpt} is also distinct from the epoch-28,159 monitoring snapshot
+in Table~\ref{tab:full_results}; a new evaluation of that checkpoint must be
+reported separately.
+
+\subsection{Metrics and aggregation}\label{sec:metrics}
+
+For each evaluated clip/shape pair $i$, define its per-frame mean body
+position error
+\begin{equation}
+    d_{i,t} = \frac{1}{B}\sum_{j=1}^{B}
+                 \|p_{i,t,j}-\hat{p}_{i,t,j}\|_2 .
+\end{equation}
+The configured success indicator is
+\begin{equation}
+    S_i = \mathbf{1}\!\left[
+             \max_{t<T_i}d_{i,t}\leq 0.5\ \mathrm{m}
+          \right],
+    \label{eq:success}
+\end{equation}
+where $T_i$ is the evaluated horizon. This threshold is deliberately distinct
+from the smoother training reward. Passing it does not imply fine-grained
+pose accuracy or biomechanical realism.
+
+We also report time-averaged mean body-position error, mean global
+body-rotation geodesic error, and the time average of the largest body-position
+error within each frame. The last quantity is the logged
+\emph{mean maximum-joint error}; it is not the maximum over the entire dataset.
+Global body-rotation error is not a local joint-angle/DOF error.
+
+Within an evaluator rank, errors are averaged over valid frames per motion
+and then over motions, including failed rollouts. The distributed training
+logger aggregates scalar summaries across ranks; the monitoring table
+retains those logged values rather than reconstructing exact pooled counts.
+Final offline comparisons should aggregate saved per-motion records over
+unique clip/shape pairs, avoiding unequal weighting of partially filled
+batches or duplicate padded rollouts.
+
+Trajectory smoothness uses the implementation's windowed normalized-jerk
+score, with the definition and numerical regularizers in
+Appendix~\ref{app:smoothness}. Lower scores indicate lower jerk under that
+fixed convention. The accompanying high-jerk statistic is the percentage
+of windows in which any body exceeds threshold 6,500; the logger calls it
+a frame percentage, but it is window-based.
+
+Action increments require care. The current evaluator stores raw policy
+actions, before Equation~\eqref{eq:action_mapping}. Their differences are
+policy-output changes, not physical joint-angle changes, even where logger
+field names label them radians or degrees. We omit those mislabeled angular
+values from the physical interpretation and from Table~\ref{tab:full_results}.
+PD-target changes, applied torques, and measured joint motion must be
+computed separately.
+
+\subsection{Generalization axes and compute accounting}
+
+Held-out clips on trained bodies, seen clips on unseen bodies, and held-out
+clips on unseen bodies are different evaluations. The current validation
+snapshot addresses only the first. A single rotating panel does not
+measure all 128 variants of every clip. Future cross-shape comparisons must
+report the actual body identities and number of evaluated pairs.
+
+We retain W\&B logs, resolved configurations, checkpoint epochs, and local
+results for compute accounting. Small-scale development and full-scale
+training costs should be reported separately, including resumed segments and
+failed launches when discussing practical cost. GPU-hours, rather than
+epoch counts alone, quantify this budget.
+\pending{Consolidate per-run parameter counts and GPU-hours from the stored
+logs, and add repeated-seed comparisons. No superior compute-efficiency claim
+is made from the current evidence.}

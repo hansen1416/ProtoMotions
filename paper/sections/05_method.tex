@@ -1,0 +1,237 @@
+\section{Morphology-Conditioned Motion Imitation}\label{sec:method}
+
+\subsection{Task, simulation, and actuation}
+
+For a clip $c$ and body configuration $b$, let
+$\hat{s}_{c,b}(t)$ be the refined reference state and $s_t$ the simulated state
+of the matching asset. We learn a shared policy
+$\pi_\theta(a_t\mid o_t,b)$ that tracks this reference on flat ground.
+The body assigned to an environment is fixed, while its reference motion can
+change on reset. No language input or external scene object is supplied.
+
+Experiments use the \texttt{smpl\_mor} assets in Isaac Gym through
+ProtoMotions~\cite{isaacgym,protomotions}. Simulation runs at 60\,Hz with two
+substeps and control decimation two, giving a 30\,Hz policy rate. The policy
+outputs a raw action $a_t\in\R^D$, where $D=69$. Joint targets are
+\begin{equation}
+    q_t^{\mathrm{target}}
+      = q^{\mathrm{offset}}
+        + q^{\mathrm{scale}}\odot\tanh(a_t),
+    \label{eq:action_mapping}
+\end{equation}
+with offsets and scales derived from the configured joint ranges. These
+targets drive the simulator's built-in position PD controller. The action is
+not a residual added to the reference pose.
+
+PD stiffness, damping, and effort limits are scaled per joint by the mass of
+its associated rigid body relative to that body in the reference asset.
+This is a body-level mass scaling, not a single scale based on total character
+mass, and it does not guarantee dynamically equivalent actuation across
+geometrically different bodies. Base gains and limits are listed in
+Table~\ref{tab:pd_parameters}.
+
+\subsection{Observation design}\label{sec:observations}
+
+The observation combines present state, history, future reference targets,
+a historical action, and explicit morphology information.
+Let $B=24$ denote the number of simulated bodies. The state representation
+contains root height above ground, root-relative body positions excluding
+the root, 6D body rotations, and linear/angular velocities.
+Positions and velocities use a heading-aligned frame, and rotations remove
+the root heading. This removes dependence on arbitrary global heading and
+horizontal origin while retaining height and body configuration.
+
+We include seven historical states at control-step offsets
+$\{1,2,3,4,8,16,32\}$, covering approximately 1.07\,s, and four future
+reference slots at $\{1,2,4,8\}$, covering approximately 0.27\,s.
+Each historical state uses its own root/heading frame.
+Future slots contain target positions relative to the current root,
+heading-aligned target rotations, position differences from the current body
+state, relative rotations $\smash{R_{t,j}^{-1}\hat{R}_{t+k,j}}$, and
+heading-aligned linear/angular velocity differences. Thus relative rotations
+are expressed with respect to the current body rotation, not as another
+heading-frame position feature.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Observation inputs supplied to both actor and critic. Dimensions are
+per slot. Positions/heights use meters, linear velocities m/s, angular
+velocities rad/s, and 6D rotations are dimensionless. Raw actions and
+morphology coefficients are not joint-angle measurements.}\label{tab:observations}
+\begin{tabularx}{\linewidth}{@{}lrlY@{}}
+\toprule
+Input & Dimension & Slots & Representation and path \\
+\midrule
+Current state & $15B-2=358$ & 1 &
+Height; $3(B-1)$ positions; $6B$ rotations; $3B$ linear and $3B$ angular
+velocities. Current-state encoder. \\
+History & $358$ & 7 &
+Same state representation at the seven past offsets. Shared history encoder. \\
+Future reference & $24B=576$ & 4 &
+Target and relative poses ($18B$), plus velocity differences ($6B$).
+Shared future encoder. \\
+Historical action & $D=69$ & 1 &
+A raw previous policy-action vector, before tanh and PD scaling.
+Bypasses attention. \\
+Morphology & $11$ & 1 &
+$[g,\beta_1,\ldots,\beta_{10}]$ from the assigned asset.
+Bypasses attention. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The temporal context exposes both recent changes and more distant motion
+information; the future targets provide a short anticipation window.
+These are design motivations, not established ablation outcomes.
+History is initialized consistently with reference-state resets using
+available historical reference states; single-state initialization is the
+fallback when a trajectory history is unavailable.
+Contact flags, an explicit phase scalar, text, and estimated physical
+feature vectors are not part of the selected observation.
+
+\subsection{Temporal slot/type attention}\label{sec:architecture}
+
+We use three observation encoders: one for the current state, one shared
+across history slots, and one shared across future slots. Each is an MLP
+with two 256-unit ReLU hidden layers and a 256-dimensional token output.
+Inputs use running mean/standard-deviation normalization and a magnitude
+clamp of five.
+
+The resulting 12 tokens comprise one current, seven historical, and four
+future tokens. For slot $i$, the Transformer input is
+\begin{equation}
+    z_i = E_{\tau(i)}(x_i)
+        + e_i^{\mathrm{slot}} + e_{\tau(i)}^{\mathrm{type}},
+    \qquad i=0,\ldots,11,
+    \label{eq:token_embedding}
+\end{equation}
+where $\tau(i)$ identifies the current/history/future source.
+Slot embeddings distinguish the configured temporal offsets, while type
+embeddings distinguish the observation sources. The Transformer has two
+layers, four attention heads, token width 256, and feed-forward width
+1,024~\cite{attention}. Its current-state token supplies the pooled output
+after the configured output projection and activation.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.94\linewidth}
+\small
+\begin{tabularx}{\linewidth}{@{}YcY@{}}
+Current state: $1\times358$ & $\longrightarrow$ &
+Current encoder: $1\times256$ token \\
+Past states: $7\times358$ & $\longrightarrow$ &
+History encoder: $7\times256$ tokens \\
+Future targets: $4\times576$ & $\longrightarrow$ &
+Future encoder: $4\times256$ tokens
+\end{tabularx}
+\begin{center}
+$\downarrow$\\
+12 tokens + learned temporal-slot and source-type embeddings\\
+$\downarrow$\\
+2 Transformer layers, 4 heads, width 256\\
+$\downarrow$\\
+Pool current token: $h_t\in\R^{256}$\\
+$\downarrow$\\
+Concatenate $[h_t,\ a^{\mathrm{hist}}_t,\ g,\boldsymbol{\beta}]$
+and normalize
+\end{center}
+\begin{tabularx}{\linewidth}{@{}YY@{}}
+\textbf{Actor:} six 2,896-unit layers
+$\longrightarrow$ 69 action means
+$\longrightarrow$ tanh/range scaling
+$\longrightarrow$ PD targets. &
+\textbf{Critic:} four 1,024-unit layers
+$\longrightarrow$ scalar state value.
+\end{tabularx}
+\smallskip
+The entire encoder/attention pathway is instantiated separately for actor
+and critic; the drawing summarizes the common design, not shared weights.
+Morphology and action bypass attention into each head. Text is absent.
+\end{minipage}}
+\caption{Observation-to-action data flow of the selected slot/type policy.
+Both networks receive the same input categories but have separate parameters.}\label{fig:network}
+\end{figure}
+
+The final head input is the concatenation of the 256-dimensional attention
+output, the historical raw action, and the 11-dimensional morphology vector.
+This 336-dimensional input also uses running normalization and clamp five.
+Betas are not manually divided by three, embedded as a separate attention
+token, or used for adaLN modulation in the selected model.
+
+Actor and critic have separate token encoders, attention modules, slot/type
+embeddings, and MLP heads. The actor head has six hidden layers of width
+2,896; the critic has four of width 1,024, all with ReLU activations.
+The outputs are a Gaussian action mean and a scalar value, respectively.
+PPO samples actions with fixed diagonal log standard deviation $-2.9$;
+evaluation uses the mean action. Figure~\ref{fig:network} summarizes the flow.
+
+\subsection{Tracking reward, resets, and PPO}\label{sec:learning}
+
+The training reward combines global body tracking and root-height tracking.
+For corresponding simulated and reference body positions $p_j,\hat{p}_j$,
+rotations $R_j,\hat{R}_j$, and velocities $v_j,\hat{v}_j$ and
+$\omega_j,\hat{\omega}_j$, define
+\begin{align}
+    e_p &= \frac{1}{3B}\sum_{j=1}^{B}\|p_j-\hat{p}_j\|_2^2,
+    & e_R &= \frac{1}{B}\sum_{j=1}^{B}
+                  d_{\SO(3)}(R_j,\hat{R}_j)^2, \\
+    e_v &= \frac{1}{3B}\sum_{j=1}^{B}\|v_j-\hat{v}_j\|_2^2,
+    & e_\omega &= \frac{1}{3B}\sum_{j=1}^{B}
+                     \|\omega_j-\hat{\omega}_j\|_2^2, \\
+    e_h &= (h-\hat{h})^2, &&
+\end{align}
+where $d_{\SO(3)}$ is the geodesic rotation angle in radians.
+The coordinate-wise means in the position and velocity errors match the
+implemented reductions. The reward is
+\begin{equation}
+\begin{split}
+    r_t ={}& 0.5\exp(-25e_p) + 0.3\exp(-5e_R)
+             + 0.1\exp(-0.5e_v)\\
+           &+0.2\exp(-0.1e_\omega) + 0.2\exp(-100e_h).
+\end{split}\label{eq:reward}
+\end{equation}
+The weights are not normalized to sum to one. There is no explicit effort,
+action-smoothness, or contact-matching reward in this experiment, and there
+is no source-dependent switch between canonical and HUMOS reward functions.
+
+References are sampled only from variants matching the environment's asset.
+Reference-state initialization starts at frame zero with probability 0.2;
+otherwise it uses a random valid reference time. Training episodes have a
+maximum of 1,000 control steps and use the configured fall termination with
+a 0.15\,m height setting and permitted foot-contact bodies. Tracking-error
+termination is disabled. This training rule is distinct from the evaluation
+failure threshold in Section~\ref{sec:metrics}.
+
+We optimize using PPO~\cite{ppo}, with 32-step rollouts, discount 0.99,
+GAE parameter 0.95, policy-ratio clipping 0.2, and normalized advantages.
+Separate Adam optimizers use learning rates $2\times10^{-5}$ for the actor
+and $10^{-4}$ for the critic. Other configuration values and actual run
+budgets appear in Table~\ref{tab:training_parameters}. Evaluation rollouts
+use deterministic inference without gradient tracking.
+
+\subsection{Direct multi-shape learning and streamed sampling}\label{sec:sampling}
+
+The final approach is direct multi-shape training on refined HUMOS
+references. A small static corpus supports initial development; the
+full-scale experiment streams per-clip files through \texttt{GlobalClipPool}.
+The training manifest is deterministically partitioned across GPU ranks.
+Each rank maintains a bounded resident pool containing all 128 variants
+of its selected clips. Environment-level motion sampling respects the
+assigned morphology.
+
+At each scheduled rebuild, most resident slots are selected by explicit
+top priority, combining estimated clip difficulty and an exploration bonus.
+A fraction 0.2 is reserved for uniform random selection, maintaining rehearsal
+outside the highest-priority set. Difficulty estimates are updated from
+training-pool evaluations with an exponential moving average of rate 0.1
+and a floor of 0.05. The exploration coefficient is 1.0.
+This is a training curriculum, not uniform sampling of the complete corpus.
+
+The resident pool is rebuilt every 256 epochs. The full-scale run initially
+used 256 clips per rank and was resumed with 128 after memory failures; the
+local cache multiplier was reduced to 1.0. These changes affect residency
+and memory demand, not the underlying training split. Validation membership
+is fixed independently of pool rebuilding, and validation evaluation does
+not update training sampling weights. We report resident-pool and validation
+metrics separately because they measure different populations.

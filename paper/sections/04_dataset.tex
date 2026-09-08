@@ -1,0 +1,206 @@
+\section{Multi-Morphology Text-Associated Motion Dataset}\label{sec:dataset}
+
+We construct a derived corpus in which a source clip identity connects a motion
+description, 128 generated motion variants, and their matching simulation
+assets. A \emph{clip} denotes a source segment, including a mirrored segment
+when present; a \emph{variant} denotes that clip on one body configuration.
+These units must not be conflated when reporting dataset size or evaluation
+coverage. Figure~\ref{fig:data_pipeline} shows the construction paths.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.94\linewidth}
+\small
+\begin{tabularx}{\linewidth}{@{}p{0.12\linewidth}Y@{}}
+\textbf{Motion} &
+AMASS $\longrightarrow$ HumanML3D preprocessing and clip extraction
+$\longrightarrow$ HUMOS conditioned on $(g,\boldsymbol{\beta})$
+$\longrightarrow$ MotionLib conversion and reference refinement
+$\longrightarrow$ per-clip motion variants. \\[0.7em]
+\textbf{Body} &
+SMPL with the same $(g,\boldsymbol{\beta})$
+$\longrightarrow$ SMPLSim
+$\longrightarrow$ matching skeleton, collision geometry, mass/inertia,
+and MJCF asset identity. \\[0.7em]
+\textbf{Text} &
+HumanML3D source descriptions
+$\longrightarrow$ clip-ID lookup associated with the generated variants
+(metadata only; not a policy input).
+\end{tabularx}
+
+\smallskip
+The body assets are used for motion conversion, shape-specific forward
+kinematics, ground-clearance correction, and simulation. Refined reference
+motion and matching simulated state feed one shared policy.
+\end{minipage}}
+\caption{Dataset and asset construction. The body parameters are shared across
+the motion and body paths; text follows a separate identity-association path.}\label{fig:data_pipeline}
+\end{figure}
+
+\subsection{Source motion and text provenance}\label{sec:source_data}
+
+We use the AMASS-derived motion portion of HumanML3D~\cite{amass,humanml3d}, with the 18 source collections listed in
+Appendix~\ref{app:preprocessing}. Source SMPL+H sequences are processed at
+20\,Hz, including the Z-up to Y-up coordinate conversion used by the
+HumanML3D/HUMOS preprocessing pipeline. Clip extraction, temporal cropping, and
+mirroring preserve the HumanML3D identities. The preparation also includes
+treadmill/skating cleanup. This subset is not the entirety of AMASS.
+
+The generation pipeline produced 22,459 candidate clip identities, counting
+original and mirrored clips. A subsequent text-based filter excluded 1,508
+clips identified as requiring external objects or environmental support,
+leaving 20,951 identities for the flat-ground imitation task. This filter is a
+task-scope heuristic: it does not prove that every retained reference is
+support-free or dynamically feasible. The retained and excluded ID lists
+provide the audit trail for that decision.
+
+Source descriptions are available through a separate clip-ID lookup and the
+HumanML3D annotation metadata used by HUMOS. A description is associated with
+the variants of its source clip; it is not a new human annotation for each
+generated body. Coverage, segment timing, and semantic fidelity of this
+association have not yet been exhaustively audited. In particular, mirrored
+motions may require left/right wording changes, and simply removing a mirror
+prefix does not establish a correct caption.
+
+\subsection{Body sampling and shape-specific generation}\label{sec:body_generation}
+
+Let a body configuration be $b=(g,\boldsymbol{\beta})$, where $g$ identifies the
+female or male SMPL body-model variant and
+$\boldsymbol{\beta}\in\R^{10}$ contains shape coefficients. We sample
+\begin{equation}
+    \beta_{ij}\sim\mathcal{U}(-3,3),\qquad
+    i=1,\ldots,64,\quad j=1,\ldots,10,
+    \label{eq:shape_sampling}
+\end{equation}
+using NumPy's \texttt{default\_rng(46)}, and cross these 64 vectors with the two
+body-model variants. Thus the corpus contains 128 body configurations, not
+128 independently sampled beta vectors. The actual coefficient arrays and
+stable beta keys identify the bodies; the keys are not content hashes.
+Uniform sampling of model coefficients is a controlled source of variation,
+not a representative sample of human populations.
+
+For each source clip, we provide the processed pose/root motion features and
+the target body parameters to the pretrained HUMOS
+model~\cite{humos}. The local configuration uses root-relative 6D root and
+joint rotations together with translation, with shape and body-model
+conditioning. The generated pose and root sequences are retained for
+conversion. HUMOS is an existing identity-conditioned model; neither its
+training nor a text-to-motion generator is a contribution of this work.
+The checkpoint used in the documented pipeline is identified in
+Appendix~\ref{app:provenance}.
+
+In parallel, SMPL bodies~\cite{smpl} with identical parameters are converted
+to MJCF assets using SMPLSim~\cite{smplsim}. The asset-generation configuration
+uses mass estimation and the configured hand/foot simplifications
+(\texttt{real\_weight}, \texttt{replace\_feet}, \texttt{remove\_toe}, and
+\texttt{freeze\_hand}). The resulting imitation representation contains
+24 rigid bodies and 69 actuated joint coordinates. Collision proxies, joint
+ranges, and estimated masses/inertias belong to each asset. These physical
+parameters are simulation-model estimates, not measurements of corresponding
+human participants.
+
+\subsection{Motion conversion and reference refinement}\label{sec:refinement}
+
+The generated sequences are converted to ProtoMotions' Z-up simulation
+convention and resampled from 20 to 30\,Hz. Forward kinematics (FK) uses the
+matching asset rather than a single neutral skeleton. The packaged
+representation includes global body positions and rotations, local rotations,
+joint positions, linear/angular and joint velocities, and contact labels.
+The earlier corpus already included frame-zero grounding; the newer
+refinement addresses artifacts throughout each sequence.
+
+Refinement is applied independently to each variant in the following order.
+First, stored ankle/toe contacts are validated, or contacts are detected from
+foot position and velocity if usable labels are unavailable. Short gaps are
+closed and very short contact runs are removed. These labels define candidate
+stance intervals; they are not measured ground-reaction forces.
+
+Second, joint rotations are temporally filtered using sign-continuous
+quaternion representations, normalization, and a bounded geodesic correction.
+Contact-transition frames divide the sequence into segments so filtering does
+not average across a change of stance. A transition taper and a limited
+smoothing blend further restrict changes near those boundaries.
+Post-smoothing FK then recomputes the positions used by subsequent corrections.
+
+Third, a conservative root-translation correction reduces horizontal stance
+sliding. For each contact interval, an anchor is formed from the foot's median
+horizontal position. A least-squares correction seeks a common root XY shift
+that brings the active feet closer to their anchors; the shift is temporally
+regularized and capped. Multiple contacts can disagree, so this root-only
+operation does not guarantee exact foot locking and does not solve for new
+joint angles.
+
+Fourth, we evaluate the lowest point of the matching collision geometry at
+every frame. With floor height zero and margin $\epsilon_z$, the required lift is
+\begin{equation}
+    \ell_t^{\mathrm{req}}
+      = \max\!\left(0,\epsilon_z-\min_{x\in\mathcal{C}_b(t)}x_z\right),
+    \label{eq:clearance}
+\end{equation}
+where $\mathcal{C}_b(t)$ denotes the modeled collision geometry for body $b$.
+A smoothed lift envelope is constrained to remain above this requirement.
+This prevents penetration of the checked geometry in the reference sequence;
+it does not establish balanced support, realistic impacts, or freedom from
+self-collision.
+
+Finally, FK and velocities are recomputed from the corrected root and
+rotations, independently within each motion. This avoids inconsistent
+position/velocity tensors and artificial derivatives across clip boundaries.
+The default thresholds, filter windows, and correction bounds are given in
+Table~\ref{tab:refinement_parameters}.
+
+The refinement objective is modest: reduce visible and measurable kinematic
+artifacts while preserving the generated motion. Before/after assessment must
+therefore include both artifact measures (sliding, penetration, and jerk) and
+fidelity measures (rotation/root changes and retained cross-shape variation).
+Improved kinematics alone does not demonstrate improved policy learning or
+dynamic feasibility.
+
+\subsection{Packaging, scale, and deterministic splits}\label{sec:splits}
+
+Each per-clip file contains the 128 variants, their frame counts and sampling
+rates, and the clip/asset identities needed to recover the corresponding body
+parameters. Captions remain a separately associated metadata resource; they
+are not established as a field of every training tensor file. This packaging
+allows the training system to stream clip files without downloading the
+complete corpus at startup.
+
+\begin{table}[t]
+\centering
+\caption{Current corpus and split sizes. Variants are generated combinations,
+not independent captures. Every clip has 128 body configurations.}\label{tab:dataset_counts}
+\begin{tabular}{lrr}
+\toprule
+Partition & Clip identities & Motion variants \\
+\midrule
+Training & 18,855 & 2,413,440 \\
+Validation & 1,048 & 134,144 \\
+Test & 1,048 & 134,144 \\
+\midrule
+Total & 20,951 & 2,681,728 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We use the versioned \texttt{hhi\_stage2\_v1} split with seed 42 and approximate
+90/5/5 proportions (Table~\ref{tab:dataset_counts}). All variants of a clip
+stay together, and original/mirrored partners are assigned as a group.
+The 150 development clips are reserved for training, together with their
+mirror partners. Training accepts explicit training and validation manifests;
+test-manifest membership is not loaded by the training workflow. Split hashes
+and version information accompany the run and checkpoints.
+
+These splits test held-out clip identities on the trained body set. They have
+not been demonstrated to be disjoint by subject or original capture recording:
+different segments can still share a source recording. This distinction
+limits claims about broader motion generalization.
+
+\subsection{Current resource scope}
+
+The current resource combines generated references, matching assets, inherited
+text associations, and reproducible splits. It is not a fully audited
+text-and-motion benchmark release. Caption completeness and alignment,
+body-specific language, licensing and redistribution conditions, and
+shape-conditioned semantic fidelity require further work. Those extensions
+can be developed independently of the reference-conditioned controller
+evaluated here.

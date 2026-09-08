@@ -1,16 +1,54 @@
-\section{Related Work}
-\label{sec:related_work}
+\section{Related Work}\label{sec:related_work}
 
-\paragraph{Physics-based motion tracking.} PHC, PULSE, ExBody2, GMT, and other H2O-style trackers
-learn high-fidelity imitation policies under physical simulation, but all assume a single,
-fixed-morphology character; none address generalization across a body-shape distribution.
+\subsection{Physics-based motion imitation}
 
-\paragraph{Morphology-conditioned RL.} HUMOS \todo{cite} conditions motion generation (via
-shape-conditioned diffusion) on SMPL body shape, producing per-shape-adapted reference motions
-rather than a naively retargeted, shape-invariant one. MorFiC \todo{cite} \todo{one-line summary}.
-Our work builds directly on HUMOS's motion data to supply a shape-\emph{dependent} training signal
-(Section~\ref{sec:method}), but targets a control policy rather than a motion generator.
+DeepMimic demonstrated reference-guided reinforcement learning for simulated
+character skills~\cite{deepmimic}. Perpetual Humanoid Control developed robust
+humanoid imitation for real-time simulated avatars~\cite{phc}. These approaches
+motivate learning a feedback controller rather than directly replaying a
+kinematic trajectory. We implement our experiments in
+ProtoMotions~\cite{protomotions} with Isaac Gym~\cite{isaacgym}, using PPO
+optimization~\cite{ppo}. Our contribution is the multi-morphology data and
+control workflow and its evaluation, rather than a replacement for these
+simulation or learning frameworks.
 
-\paragraph{Mixture-of-experts in actor-critic RL.} \todo{cite prior MoE-in-RL work}. We evaluate
-MoE as an architecture candidate for handling motion diversity (Section~\ref{sec:experiments}) and
-find it does not separate from a capacity-matched dense baseline in our setting.
+\subsection{Morphology-conditioned control and retargeting}
+
+Body-shape variation has already been studied in physics-based control:
+Won and Lee learned controllers that accommodate variation in character
+shape~\cite{won2019}. Morphology conditioning is therefore an established
+idea, and our work should not be interpreted as introducing it. We instead
+examine one controller over a large set of paired motions and bodies, with
+shape identity maintained throughout data generation, simulation, and evaluation.
+
+Kinematic retargeting and dynamic tracking address different requirements.
+SMPL provides a common parameterized body representation~\cite{smpl}, and
+SMPLSim constructs simulation-ready assets from these
+models~\cite{smplsim}. A shared skeleton makes poses comparable, but does not
+make global positions or required actuation independent of shape. Matching a
+reference to its intended simulation asset is consequently part of the task
+definition, not an optional evaluation convenience.
+
+\subsection{Text-motion data, shape-conditioned generation, and refinement}
+
+AMASS consolidates motion capture in a common body-model
+representation~\cite{amass}. HumanML3D associates processed motion segments
+with natural-language descriptions~\cite{humanml3d}. We inherit those source
+identities and descriptions rather than claiming new motion capture or
+shape-specific language annotation.
+
+HUMOS generates identity-conditioned human motion using a cycle-consistent
+learning formulation~\cite{humos}. We use its pretrained model to obtain
+shape-specific references, not as the physics controller and not as a
+text-conditioned policy. The resulting sequences still require conversion to
+the simulator's skeleton and coordinate conventions, and their feasibility
+must be assessed in that simulator. Our refinement is a deliberately limited
+kinematic post-process; it is not a new generative model or a full dynamic
+trajectory optimizer.
+
+The controller uses standard Transformer operations~\cite{attention}.
+Learned slot and type embeddings identify temporal positions and observation
+sources. An ablation also investigates actor-only morphology modulation with
+adaLN-Zero, adapting the zero-initialized conditioning design used in
+Diffusion Transformers~\cite{dit}. That experiment tests a conditioning
+mechanism, not diffusion-based action generation.

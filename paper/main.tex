@@ -1,35 +1,49 @@
 \documentclass[11pt]{article}
 
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
-\usepackage{booktabs}
-\usepackage{hyperref}
+\usepackage{booktabs,array,tabularx}
 \usepackage{xcolor}
-\usepackage[margin=1in]{geometry}
+\usepackage[hidelinks]{hyperref}
+\urlstyle{same}
 
-% Inline TODO/status markers for in-progress sections.
-\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\pending}[1]{\par\smallskip\noindent
+  \textit{Pending evidence. #1}\par\smallskip}
+\newcommand{\SO}{\mathrm{SO}}
+\newcommand{\R}{\mathbb{R}}
 
-\title{Morphology-Conditioned Physics-Based Motion Imitation Across 128 Body Shapes}
+\title{Morphology-Conditioned Physics-Based Motion Imitation\\
+Across 128 Body Shapes}
 \author{}
-\date{\today}
+\date{Working draft --- September 2026}
+
+% Source-only manuscript update. Compile from paper/; no generated figures are required.
+% Technical-report mapping: abstract = summary; introduction = contributions;
+% dataset = provenance/scope; method = implementation; setup = metric definitions;
+% results = evidence; discussion = limitations; appendix = reproducibility.
+% Evidence cutoff: 2026-09-08. Monitoring values come from README.note.md, section 76.
+% Corrected ablations, final test evaluation and physical analysis remain incomplete.
+% Visual rationale: two native LaTeX schematics explain shared identities and data flow;
+% tables support exact configuration/result lookup. A single snapshot cannot support
+% a learning-curve plot or a causal architecture/refinement comparison.
 
 \begin{document}
-
 \maketitle
-
 \input{sections/01_abstract}
+
 \input{sections/02_introduction}
 \input{sections/03_related_work}
-\input{sections/04_method}
-\input{sections/05_experiments}
-\input{sections/06_evaluation}
-\input{sections/07_discussion}
-\input{sections/08_conclusion}
+\input{sections/04_dataset}
+\input{sections/05_method}
+\input{sections/06_experimental_setup}
+\input{sections/07_results_and_failure_analysis}
+\input{sections/08_physical_analysis}
+\input{sections/09_discussion}
+\input{sections/10_conclusion}
 
-% \bibliographystyle{plain}
-% \bibliography{refs}
-
+\appendix
+\input{sections/11_reproducibility}
+\input{references}
 \end{document}

@@ -1,4 +1,9 @@
-# Paper Outline (current, 2026-08-25)
+# Paper Outline (historical, 2026-08-25)
+
+**Superseded for current drafting:** see [Paper Structure and Keypoints
+(2026-09-08)](README.paper-structure-and-keypoints.md), including the dataset contribution.
+The outline below preserves earlier framing and pre-correction findings as history, not current
+method or evaluation claims.
 
 Supersedes `README.paper.md` (Kimodo-era, archived — that pipeline was dropped 2026-06-22) and
 `README.prelim-report.md` / `README.eval-plan.md` (1024-clip pilot, June 27 — kept as historical
