@@ -6292,3 +6292,36 @@ high-priority clips. The holdout result is therefore the better generalization i
 the resident score measures the active hard curriculum. Both evaluations use one deterministic,
 rotating body shape per clip. The separate epoch-28,170 validation run and untouched test split
 remain outside this summary; no test-set result is claimed yet.
+
+## 77. Corrected 150-Motion Ablations Launched (2026-09-08)
+
+Five independent trainings are confirmed running on one RunPod machine with five A40 GPUs.
+The earlier 150-motion comparisons also used the mismatched evaluator; these fresh runs use
+the morphology-matched evaluation from §75 to reassess architecture and refinement effects.
+
+| GPU | Case | Architecture | HUMOS targets |
+|---|---|---|---|
+| 0 | A | Wide MLP with history/lookahead and beta concatenation | Refined |
+| 1 | B | Basic temporal attention | Refined |
+| 2 | C | Attention + slot/type embeddings | Refined |
+| 3 | D | Slot/type + actor-only AdaLN-Zero | Refined |
+| 4 | E | Same slot/type architecture as C | Unrefined |
+
+**Shared setup:** 150 clips × 128 shapes (19,200 motions), training seed `0`, `4096` environments,
+batch size `16384`, one GPU per run, and `786432000` training frames (6,000 epochs). Evaluation
+runs every 200 epochs with the common rotating shape-panel seed `42`. Data files are
+`/workspace/motion_cache/small150_128shape_refined.pt` (A–D) and `small150_128shape.pt` (E).
+
+**Launch:** explicit overrides select exactly five jobs, replacing the launcher's six-job default.
+
+```bash
+ABLATION_GPUS=0,1,2,3,4 \
+ABLATION_RUNS="A:0 B:0 C:0 D:0 E:0" \
+nohup bash tools/train_150_evalfix_ablation.sh \
+  > /tmp/hhi_150_evalfix_launcher.log 2>&1 &
+```
+
+W&B: `yugoamaryl/hhi-protomotions`, group `hhi_150_evalfix_comparison`, run names
+`hhi_150_evalfix_{A..E}_seed0`. Per-run logs: `/tmp/hhi_150_evalfix/`. Only seed 0 is running;
+repeat seeds and results are pending. Final C/E comparisons require common evaluation references,
+since their training-time metrics use different target versions.
