@@ -29,12 +29,16 @@ import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = "train_150_evalfix_ablation.sh"
+UNREFINED_LAUNCHER = "train_150_evalfix_unrefined.sh"
 EXPERIMENTS = {
     "A": "mlp_wide_discover_historical_lookahead",
     "B": "mlp_wide_discover_attention",
     "C": "mlp_wide_discover_attention_slot_type",
     "D": "mlp_wide_discover_attention_adaln",
     "E": "mlp_wide_discover_attention_slot_type",
+    "F": "mlp_wide_discover_historical_lookahead",
+    "G": "mlp_wide_discover_attention",
+    "H": "mlp_wide_discover_attention_adaln",
 }
 FAKE_TRAINER = r'''
 import json
@@ -49,6 +53,8 @@ event = {
     "gpu": os.environ["CUDA_VISIBLE_DEVICES"],
     "port": os.environ["MASTER_PORT"],
     "pid": os.getpid(),
+    "motion_file": args[args.index("--motion-file") + 1],
+    "experiment": args[args.index("--experiment-path") + 1],
 }
 def emit(kind):
     event["kind"] = kind
@@ -74,7 +80,8 @@ class AblationLauncherTests(unittest.TestCase):
         for directory in ("tools", "bin", "motions", "examples/experiments/mimic"):
             (self.root / directory).mkdir(parents=True)
         self.script = self.root / "tools" / LAUNCHER
-        shutil.copy2(REPO_ROOT / "tools" / LAUNCHER, self.script)
+        for launcher in (LAUNCHER, UNREFINED_LAUNCHER):
+            shutil.copy2(REPO_ROOT / "tools" / launcher, self.root / "tools" / launcher)
         for experiment in set(EXPERIMENTS.values()):
             (self.root / "examples/experiments/mimic" / (experiment + ".py")).touch()
         for name in ("small150_128shape.pt", "small150_128shape_refined.pt"):
@@ -95,11 +102,11 @@ class AblationLauncherTests(unittest.TestCase):
             MOCK_EVENTS=str(self.events_file),
         )
 
-    def run_launcher(self, *flags, extra_env=None):
+    def run_launcher(self, *flags, extra_env=None, launcher=LAUNCHER):
         env = dict(self.env)
         env.update(extra_env or {})
         return subprocess.run(
-            ["bash", str(self.script), *flags],
+            ["bash", str(self.root / "tools" / launcher), *flags],
             env=env, text=True, capture_output=True, timeout=15,
         )
 
@@ -131,6 +138,137 @@ class AblationLauncherTests(unittest.TestCase):
             self.assertEqual(Path(args[args.index("--motion-file") + 1]).name, expected_motion)
         self.assertFalse((self.root / "results").exists())
         self.assertFalse((self.root / "logs").exists())
+
+    def test_unrefined_default_three_commands_match_counterparts(self):
+        result = self.run_launcher("--dry-run", launcher=UNREFINED_LAUNCHER)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 3)
+        for gpu, (line, case) in enumerate(zip(lines, "FGH")):
+            args = shlex.split(line)
+            self.assertIn("CUDA_VISIBLE_DEVICES=" + str(gpu), args)
+            self.assertIn("MASTER_PORT=" + str(29700 + gpu), args)
+            expected_flags = {
+                "--experiment-name": "hhi_150_evalfix_unrefined_" + case + "_seed0",
+                "--experiment-path": "examples/experiments/mimic/" + EXPERIMENTS[case] + ".py",
+                "--motion-file": str(self.root / "motions" / "small150_128shape.pt"),
+                "--num-envs": "4096",
+                "--batch-size": "16384",
+                "--ngpu": "1",
+                "--seed": "0",
+                "--training-max-steps": "786432000",
+                "--wandb-project": "hhi-protomotions",
+                "--wandb-entity": "yugoamaryl",
+                "--wandb-group": "hhi_150_evalfix_comparison",
+            }
+            for flag, value in expected_flags.items():
+                self.assertEqual(args[args.index(flag) + 1], value)
+            self.assertIn("--use-wandb", args)
+            self.assertIn("agent.evaluator.eval_one_shape_per_motion=True", args)
+            self.assertIn("agent.evaluator.eval_shape_sampling_seed=42", args)
+            self.assertIn("agent.evaluator.eval_metrics_every=200", args)
+        self.assertFalse((self.root / "results").exists())
+        self.assertFalse((self.root / "logs").exists())
+
+    def test_unrefined_requires_only_raw_data_and_launches_three_jobs(self):
+        (self.root / "motions" / "small150_128shape_refined.pt").unlink()
+        result = self.run_launcher(launcher=UNREFINED_LAUNCHER)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        starts = [event for event in self.events() if event["kind"] == "start"]
+        self.assertEqual(len(starts), 3)
+        self.assertEqual({event["name"] for event in starts}, {
+            "hhi_150_evalfix_unrefined_" + case + "_seed0" for case in "FGH"
+        })
+        for event in starts:
+            self.assertEqual(Path(event["motion_file"]).name, "small150_128shape.pt")
+        self.assertEqual(len(list((self.root / "logs").glob("*.log"))), 3)
+
+    def test_unrefined_missing_raw_data_fails_before_jobs_start(self):
+        (self.root / "motions" / "small150_128shape.pt").unlink()
+        result = self.run_launcher(launcher=UNREFINED_LAUNCHER)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Motion file missing", result.stderr)
+        self.assertEqual(self.events(), [])
+        self.assertFalse((self.root / "results").exists())
+
+    def test_unrefined_custom_gpus_and_all_seeds_queue_without_overlap(self):
+        result = self.run_launcher(
+            "--all-seeds", launcher=UNREFINED_LAUNCHER,
+            extra_env={"ABLATION_GPUS": "2,5"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        active, started, peak = set(), set(), 0
+        ports = {"2": "29700", "5": "29701"}
+        for event in self.events():
+            gpu = event["gpu"]
+            self.assertEqual(event["port"], ports[gpu])
+            if event["kind"] == "start":
+                self.assertNotIn(gpu, active)
+                active.add(gpu)
+                started.add(event["name"])
+                peak = max(peak, len(active))
+            else:
+                self.assertIn(gpu, active)
+                active.remove(gpu)
+        self.assertFalse(active)
+        self.assertEqual(peak, 2)
+        self.assertEqual(started, {
+            "hhi_150_evalfix_unrefined_" + case + "_seed" + str(seed)
+            for case in "FGH" for seed in (0, 1)
+        })
+
+    def test_unrefined_failure_stops_only_its_queue(self):
+        result = self.run_launcher(
+            "--all-seeds", launcher=UNREFINED_LAUNCHER,
+            extra_env={"MOCK_FAIL_SUFFIX": "F_seed0"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        starts = {event["name"] for event in self.events() if event["kind"] == "start"}
+        self.assertNotIn("hhi_150_evalfix_unrefined_F_seed1", starts)
+        self.assertEqual(len(starts), 5)
+        self.assertIn("DONE case=G seed=1", result.stdout)
+        self.assertIn("DONE case=H seed=1", result.stdout)
+
+    def test_unrefined_rejects_inherited_refined_or_invalid_selections(self):
+        for selection in ("A:0 B:0 D:0", "E:0", "I:0", "F:00", "F:0 F:0"):
+            with self.subTest(selection=selection):
+                result = self.run_launcher(
+                    "--dry-run", launcher=UNREFINED_LAUNCHER,
+                    extra_env={"ABLATION_RUNS": selection},
+                )
+                self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "results").exists())
+
+    def test_unrefined_explicit_selection_and_prefix_override_defaults(self):
+        result = self.run_launcher(
+            "--all-seeds", "--dry-run", launcher=UNREFINED_LAUNCHER,
+            extra_env={
+                "ABLATION_RUNS": "H:3 F:2",
+                "ABLATION_GPUS": "4",
+                "ABLATION_PREFIX": "custom_unrefined",
+                "ABLATION_PORT_BASE": "29800",
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 2)
+        for line, case, seed in zip(lines, "HF", (3, 2)):
+            args = shlex.split(line)
+            self.assertIn("CUDA_VISIBLE_DEVICES=4", args)
+            self.assertIn("MASTER_PORT=29800", args)
+            self.assertEqual(args[args.index("--seed") + 1], str(seed))
+            self.assertEqual(
+                args[args.index("--experiment-name") + 1],
+                "custom_unrefined_" + case + "_seed" + str(seed),
+            )
+
+    def test_shared_launcher_refined_only_selection_does_not_require_raw_data(self):
+        (self.root / "motions" / "small150_128shape.pt").unlink()
+        result = self.run_launcher(extra_env={"ABLATION_RUNS": "A:0", "ABLATION_GPUS": "0"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        starts = [event for event in self.events() if event["kind"] == "start"]
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(Path(starts[0]["motion_file"]).name, "small150_128shape_refined.pt")
 
     def test_ten_runs_overlap_across_gpus_but_never_on_one_gpu(self):
         result = self.run_launcher("--all-seeds")

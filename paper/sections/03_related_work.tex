@@ -6,7 +6,16 @@ DeepMimic demonstrated reference-guided reinforcement learning for simulated
 character skills~\cite{deepmimic}. Perpetual Humanoid Control developed robust
 humanoid imitation for real-time simulated avatars~\cite{phc}. These approaches
 motivate learning a feedback controller rather than directly replaying a
-kinematic trajectory. We implement our experiments in
+kinematic trajectory. Subsequent single-body trackers scaled this
+feedback-control approach in coverage and deployability: PULSE distills a
+low-dimensional, high-coverage motion representation for general humanoid
+control~\cite{pulse}; OmniH2O and ExBody2 target dexterous, deployable
+whole-body teleoperation and expressive control on physical
+humanoids~\cite{omnih2o,exbody2}; GMT uses a motion mixture-of-experts to
+track a broad motion distribution with one policy~\cite{gmt}. Each of these
+fixes the body and scales the motion distribution; we instead fix the
+tracking task and scale the body, holding 128 configurations under one
+policy. We implement our experiments in
 ProtoMotions~\cite{protomotions} with Isaac Gym~\cite{isaacgym}, using PPO
 optimization~\cite{ppo}. Our contribution is the multi-morphology data and
 control workflow and its evaluation, rather than a replacement for these

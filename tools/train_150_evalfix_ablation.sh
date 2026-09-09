@@ -11,6 +11,8 @@ Usage: bash tools/train_150_evalfix_ablation.sh [--dry-run] [--all-seeds]
 
 Conditions: A=temporal MLP, B=attention, C=slot/type, D=slot/type+AdaLN,
             E=slot/type with unrefined HUMOS. A-D use refined HUMOS.
+Additional unrefined conditions: F=temporal MLP, G=attention, H=slot/type+AdaLN.
+Use train_150_evalfix_unrefined.sh to launch F/G/H on three GPUs.
 Default six jobs: A:0 B:0 C:0 D:0 E:0 C:1, on GPUs 0 through 5 respectively.
 --all-seeds adds A:1 B:1 D:1 E:1 to complete the original ten-run comparison.
 Additional jobs queue round-robin by GPU, never concurrently on the same GPU.
@@ -37,8 +39,9 @@ Defaults give 6,000 epochs per run (4096 envs x 32 steps x 6000 epochs).
 Keep settings identical when resuming: saved configs override training CLI flags.
 Use a new ABLATION_PREFIX for a fresh comparison with changed settings.
 Dry-run prints the selected commands without requiring GPUs/data or creating files.
-E's training-time evaluation uses raw targets; the final C/E paper comparison
-needs a separate evaluation against common reference motions.
+Only the motion files needed by the selected conditions must be available.
+E-H's training-time evaluation uses raw targets; final refined/unrefined
+comparisons need a separate evaluation against common reference motions.
 USAGE
 }
 
@@ -80,7 +83,7 @@ for gpu in "${gpu_ids[@]}"; do
 done
 (( ${#run_specs[@]} > 0 )) || fail 'At least one CASE:SEED pair is required.'
 for run_spec in "${run_specs[@]}"; do
-    [[ "$run_spec" =~ ^[A-E]:(0|[1-9][0-9]*)$ ]] || fail "Invalid CASE:SEED pair: $run_spec"
+    [[ "$run_spec" =~ ^[A-H]:(0|[1-9][0-9]*)$ ]] || fail "Invalid CASE:SEED pair: $run_spec"
     [[ -z "${seen_runs[$run_spec]:-}" ]] || fail "Run $run_spec was supplied twice."
     seen_runs[$run_spec]=1
 done
@@ -98,15 +101,30 @@ declare -A experiments=(
     [C]=mlp_wide_discover_attention_slot_type
     [D]=mlp_wide_discover_attention_adaln
     [E]=mlp_wide_discover_attention_slot_type
+    [F]=mlp_wide_discover_historical_lookahead
+    [G]=mlp_wide_discover_attention
+    [H]=mlp_wide_discover_attention_adaln
 )
 refined_motion="${motion_dir}/small150_128shape_refined.pt"
 raw_motion="${motion_dir}/small150_128shape.pt"
+declare -A motion_files=(
+    [A]="$refined_motion"
+    [B]="$refined_motion"
+    [C]="$refined_motion"
+    [D]="$refined_motion"
+    [E]="$raw_motion"
+    [F]="$raw_motion"
+    [G]="$raw_motion"
+    [H]="$raw_motion"
+)
 
 if ! "$dry_run"; then
     for dependency in "$python_bin" nvidia-smi flock setsid; do
         command -v "$dependency" >/dev/null || fail "Required command not found: $dependency"
     done
-    for motion_file in "$refined_motion" "$raw_motion"; do
+    for run_spec in "${run_specs[@]}"; do
+        case_id="${run_spec%%:*}"
+        motion_file="${motion_files[$case_id]}"
         [[ -r "$motion_file" && -s "$motion_file" ]] || fail "Motion file missing, empty or unreadable: $motion_file"
     done
     for gpu in "${gpu_ids[@]}"; do
@@ -146,8 +164,7 @@ run_lane() {
         case_id="${run_spec%%:*}"
         seed="${run_spec#*:}"
         experiment="examples/experiments/mimic/${experiments[$case_id]}.py"
-        motion_file="$refined_motion"
-        [[ "$case_id" != E ]] || motion_file="$raw_motion"
+        motion_file="${motion_files[$case_id]}"
         [[ -f "$experiment" ]] || fail "Experiment not found: $experiment"
         run_name="${run_prefix}_${case_id}_seed${seed}"
         log_file="${log_dir}/${run_name}.log"
