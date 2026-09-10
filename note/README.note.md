@@ -6390,3 +6390,48 @@ on any own-target metric.
 refined references** -- case C's design and data. Architecture is settled by the grid above; the
 dataset half is pending the cross-eval. Single seed, one run per cell; these are development
 results, not statistical rankings.
+
+## 79. Final Held-Out Test-Split Evaluation (2026-09-10)
+
+One-shot reveal of the untouched `hhi_stage2_v1` test split (1,048 clips, hash `41b77af3...`),
+run with the new `protomotions/evaluate_test_split.py` gate on the full-scale run's
+[`hhi_wide_stage2_discover_attention_slot_type_refined`](https://wandb.ai/yugoamaryl/hhi-protomotions/runs/3mvgad6f)
+`last.ckpt` (epoch 28,170). `--num-envs 128 --clip-batch-size 128`; complete in ~37 min
+(15:07-15:45 UTC), 9/9 batches, 1,048/1,048 clips. The gate's integrity checks passed: test
+manifest SHA-256 matches `split_metadata.json`, clip count matches, zero overlap with
+train/validation. One deterministic rotating body shape per clip (panel index 110); all 128 shapes
+are touched across the split. Every test clip is the standard 6.63 s / 198-frame HumanML3D crop,
+so nothing reached the horizon cap.
+
+Compared against the standalone epoch-28,170 **validation** run (same script, same checkpoint,
+same panel index -- a direct comparison):
+
+| Metric | Validation (1,048) | **Test (1,048)** |
+|---|---:|---:|
+| Success rate | 98.47% | **99.14%** |
+| Failure rate (gt_error > 0.5) | 1.53% (16 clips) | **0.86% (9 clips)** |
+| Mean body-position error (gt) | 0.0699 m | **0.0676 m** |
+| Mean body-rotation error (gr) | 0.1738 rad | **0.1723 rad** |
+| Mean maximum-joint position error | 0.1419 m | **0.1393 m** |
+| Normalized jerk | 1,154.3 | **1,050.9** |
+| High-jerk frames | 27.46% | **25.33%** |
+| Worst single clip (gt_error max) | 3.79 m | **1.67 m** |
+
+**Test is slightly better than validation on every metric.** This is the desired outcome for a
+held-out reveal: validation was monitored throughout development, test never was, and there is no
+sign of validation overfitting. The ~0.7 pp success gap is within the variance expected between
+two random 5% partitions.
+
+**The 9 failures** are all 6.6 s clips and all genuine tracking losses, not near-misses
+(normalized jerk 1,200-6,800, high-jerk frames 22-95%). Structure: three base motions fail on
+both orientations -- `002939`/`M002939`, `009453`/`M009453`, `012727`/`M012727` (6 of the 9),
+each on a different body shape -- plus three singletons `M010467`, `M010249`, `M013267`. Only the
+top three are severe (gt_error max 1.67 / 1.22 / 0.87 m); the other six are marginal, just over
+the 0.5 m threshold (gt_error max 0.50-0.78 m).
+
+Results files: `results/hhi_wide_stage2_discover_attention_slot_type_refined/eval_test_final.json`
+and `..._per_motion.jsonl`. Minor script issue: the summary JSON's `batches` array has null
+per-batch fields (`clip_count`, `success_rate`); aggregate metrics and the per-motion JSONL are
+complete and correct, so the result stands. Caveats unchanged: one rotating shape per clip (not
+all-128-shape coverage), trained body set only (in-distribution betas, no unseen bodies). This is
+now the final test number and should not be iterated against.
