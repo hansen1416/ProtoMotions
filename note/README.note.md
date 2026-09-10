@@ -6328,17 +6328,65 @@ since their training-time metrics use different target versions.
 
 ## 78. Corrected Unrefined Ablations and Dataset/Architecture Decision (2026-09-10)
 
-Three matching unrefined-reference runs were added to the corrected 150-motion comparison. At the latest W&B summaries, F is complete and G/H are still running.
+Three matching unrefined-reference runs (F/G/H) were added to the corrected 150-motion comparison,
+completing a 4-architecture x 2-reference-version grid (slot/type-on-unrefined already existed as E).
+All eight runs are finished at the full 6,000-epoch budget.
 
-| Run | Architecture | References | Status | Success rate | Normalized jerk |
-|---|---|---|---|---:|---:|
-| A (`axz18w3b`) | Temporal MLP | Refined | finished | 96.67% | 1,639.7 |
-| B (`hiqobxgg`) | Basic attention | Refined | finished | 94.67% | 3,472.0 |
-| C (`5u3gybgq`) | Slot/type attention | Refined | finished | **97.33%** | **1,584.9** |
-| D (`k1zp68h6`) | Slot/type + actor AdaLN-Zero | Refined | finished | 95.33% | 3,000.9 |
-| E (`5sms5090`) | Slot/type attention | Unrefined | finished | 96.67% | **1,321.3** |
-| F (`d34wpdkq`) | Temporal MLP | Unrefined | finished | 96.00% | 2,822.2 |
-| G (`a1s9derd`) | Basic attention | Unrefined | nearly finished | 97.33% | 3,092.3 |
-| H (`0zxt95fg`) | Slot/type + actor AdaLN-Zero | Unrefined | nearly finished | 98.00% | 2,836.7 |
+Values below are the **mean +/- sd of each run's last 8 scheduled evaluations** (epochs ~4,600-6,000),
+not a single final snapshot -- individual eval points swing by 2-4 pp of success rate and 100-300
+in jerk, so single snapshots are misleading (e.g. G's final-epoch snapshot alone reads 95.3% success
+/ 2,976 jerk, but its last-8 window is 97.8% / 3,117). All figures are training-time evaluation,
+one selected body shape per clip, seed 42; each run trained and evaluated against its own reference
+version.
 
-The provisional choice for full-scale training remains **slot/type attention without AdaLN-Zero, trained on refined references** (case C's design and data choice). Basic attention and AdaLN have substantially worse jerk. E is the smoothest run, but refined and unrefined runs were trained against different references, so its apparent refinement effect is not causal. Final dataset selection requires evaluating the checkpoints on identical clip/shape pairs and a common reference version after G/H finish. These are single-seed development results, not statistical architecture rankings.
+| Run | Architecture | Refs | Success | gt_err | gr_err | Jerk | HighJerk% | GPU-h |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| A (`axz18w3b`) | Temporal MLP | Refined | 97.5 +/- 0.8 | 0.109 | 0.207 | 1,729 | 33.3 | 15.8 |
+| B (`hiqobxgg`) | Basic attention | Refined | 97.5 +/- 1.4 | 0.098 | 0.228 | 3,455 | 40.4 | 23.5 |
+| C (`5u3gybgq`) | Slot/type attention | Refined | **98.1 +/- 0.6** | 0.097 | 0.226 | **1,757** | 34.2 | 23.8 |
+| D (`k1zp68h6`) | Slot/type + actor AdaLN-Zero | Refined | 97.1 +/- 1.2 | **0.090** | 0.220 | 3,145 | 38.9 | 23.9 |
+| E (`5sms5090`) | Slot/type attention | Unrefined | 97.9 +/- 0.6 | 0.102 | 0.219 | **1,422** | 29.6 | 23.9 |
+| F (`d34wpdkq`) | Temporal MLP | Unrefined | 96.2 +/- 1.6 | 0.115 | 0.212 | 2,927 | 36.6 | 14.4 |
+| G (`a1s9derd`) | Basic attention | Unrefined | 97.8 +/- 1.2 | 0.098 | 0.219 | 3,117 | 34.9 | 21.5 |
+| H (`0zxt95fg`) | Slot/type + actor AdaLN-Zero | Unrefined | 97.5 +/- 0.9 | 0.091 | 0.207 | 2,956 | 34.0 | 22.4 |
+
+**Success rate does not discriminate.** All eight conditions sit at 96-98% with last-8 sd of
+0.6-1.6 pp; the spreads overlap. Jerk (and high-jerk-frame %) is the one metric that separates
+the runs cleanly and consistently.
+
+**Architecture: slot/type attention without AdaLN-Zero is confirmed as the choice.** The clean
+comparison is A/B/C/D, all trained and scored against the same refined targets:
+- C has the top success rate (98.1%), near-best position error (0.097; only D is lower, by ~1 sd),
+  and low jerk (1,757).
+- Actor-only AdaLN-Zero (D) buys a ~0.007 position-error improvement -- within noise at one seed --
+  while raising jerk ~1.8x (3,145 vs 1,757) and high-jerk frames +4.8 pp. Bad trade.
+- Basic attention (B) has D's jerk problem (3,455, worst high-jerk at 40%) with none of the
+  position-error benefit.
+- Temporal MLP (A) matches C on jerk and has the best rotation error (0.207), but clearly worse
+  position error (0.109 vs 0.097). It is ~34% cheaper to train (15.8 vs 23.8 GPU-h) despite being
+  the largest model by parameter count (65.9M vs C's 51.2M) -- the cost gap is attention-stack
+  overhead, not capacity.
+- The unrefined group reproduces the same ranking shape: slot/type (E) has by far the lowest jerk
+  of E/F/G/H; adding AdaLN (H) or removing slot/type (G) roughly doubles it.
+
+**Dataset: refined references kept as the provisional choice, but not causally confirmed.** On
+own-target metrics -- the only ones available now -- there is no consistent refined advantage:
+- Temporal MLP: refined clearly helps (A jerk 1,729 vs F 2,927).
+- Attention / slot-type / AdaLN: a wash or unrefined is marginally smoother (E jerk 1,422 vs
+  C 1,757 at tied success; G vs B; H vs D).
+
+This is the confounded comparison: E/G/H are scored against their own unrefined references, which
+may be easier to track smoothly precisely because they are not foot-locked -- a policy chasing a
+foot-skating target can slide smoothly. Lower jerk against an unrefined reference is not evidence
+of better physical motion. The disambiguating experiment is the common-reference cross-evaluation
+drafted in `README.runpod.md`: evaluate the C and E checkpoints (ideally all eight) on identical
+clip/shape pairs against the **refined** reference set. Decision rule: if E-on-refined-target
+matches or beats C-on-refined-target, drop the refinement pass at full scale and save the pipeline
+cost; otherwise keep refined. Refined remains the working choice because it is the
+physically-motivated one (foot-skate / penetration reduction in the target) and it costs nothing
+on any own-target metric.
+
+**Provisional full-scale choice (unchanged): slot/type attention without AdaLN-Zero, trained on
+refined references** -- case C's design and data. Architecture is settled by the grid above; the
+dataset half is pending the cross-eval. Single seed, one run per cell; these are development
+results, not statistical rankings.
