@@ -37,27 +37,30 @@ $2\times10^{-5}$ / $10^{-4}$ & $2\times10^{-5}$ / $10^{-4}$ \\
 Discount / GAE / ratio clip & 0.99 / 0.95 / 0.2 & 0.99 / 0.95 / 0.2 \\
 Gradient norm clip & 50 & 50 \\
 Evaluation cadence & 200 epochs & 256 epochs \\
-Training seed & 0 for current five runs & Recorded in saved run configuration \\
+Training seed & 0 (all eight runs) & Recorded in saved run configuration \\
 Reference residency & All 150 clips & 256, later 128 clips per GPU \\
-Training frames & 786,432,000 planned per run & Approximately $11.07\times10^9$ recorded \\
-Status of reported evidence & Comparisons pending & Monitoring at epoch 28,159 \\
+Training frames & 786,432,000 per run (6,000 epochs) & Approximately $11.07\times10^9$ recorded \\
+Status of reported evidence & Completed, Table~\ref{tab:ablation_results} & Epoch-28,170 checkpoint, Table~\ref{tab:test_results} \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \subsection{Architecture and refinement controls}\label{sec:ablation_design}
 
-The corrected comparison consists of the five cases in
-Table~\ref{tab:ablations}. Cases A--D use the same refined corpus and temporal
-input categories. They test flat temporal aggregation, attention, slot/type
-embeddings, and actor-only morphology modulation. Case E uses the same
-architecture as C with unrefined references.
+The corrected comparison is a four-architecture by two-reference-version grid,
+Table~\ref{tab:ablations}. The four architectures are a wide flat temporal
+MLP, basic temporal attention, attention with slot/type embeddings, and that
+last model plus actor-only adaLN-Zero. Each is trained once on refined
+references (A--D) and once on unrefined references (E--H); slot/type on
+unrefined references is labelled E rather than a separate letter for
+historical reasons. All eight runs use one seed, a single A40, the same
+6,000-epoch budget, evaluation cadence, and shape-sampling seed.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Corrected 150-clip comparison. One seed per case is currently running;
-this is an experiment design, not a ranking of completed results.}\label{tab:ablations}
+\caption{Corrected 150-clip grid: four architectures $\times$ two reference
+versions, one seed each. Results are in Table~\ref{tab:ablation_results}.}\label{tab:ablations}
 \begin{tabularx}{\linewidth}{@{}llYY@{}}
 \toprule
 Case & References & Architecture & Comparison purpose \\
@@ -70,25 +73,33 @@ C & Refined & Attention with slot/type embeddings &
 Explicit temporal/source identity. \\
 D & Refined & C + actor-only adaLN-Zero &
 Morphology modulation with critic unchanged. \\
-E & Unrefined & Same architecture as C &
-Reference refinement at fixed architecture. \\
+E & Unrefined & As C &
+Reference version at fixed architecture (slot/type). \\
+F & Unrefined & As A &
+Reference version at fixed architecture (temporal MLP). \\
+G & Unrefined & As B &
+Reference version at fixed architecture (attention). \\
+H & Unrefined & As D &
+Reference version at fixed architecture (slot/type + adaLN). \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-All five current runs use seed 0, one A40 GPU per policy, the same frame
-budget, and the same evaluation cadence and shape-sampling seed. Morphology
-concatenation into both heads is retained in D; adaLN-Zero is additional
+All eight runs use seed 0 and one A40 GPU per policy. Morphology
+concatenation into both heads is retained in D and H; adaLN-Zero is additional
 actor conditioning, not a replacement for the critic or a two-stage schedule.
 
-The models are not asserted to have equal parameter counts. Counts, wall time,
-and GPU-hours must accompany the completed comparison, and repeated training
-seeds are needed before making claims about reliability or statistical
-significance. For C versus E, final controller evaluation must use identical
-clip/shape pairs and a common reference version. Their training-time metrics
-use different targets and are not by themselves a controlled measure of
-refinement benefit. Cross-evaluation against both reference versions can
-separate target fidelity from ease of tracking.
+The models do not have equal parameter counts (Table~\ref{tab:compute_accounting}).
+The grid is single-seed; the architecture ordering in
+Table~\ref{tab:ablation_results} rests on the jerk difference, which recurs
+under both reference versions, and not on the success-rate column, which is
+treated as non-discriminating. The refined and unrefined pairs (A/F, B/G, C/E, D/H) are each
+evaluated against their own reference version, so they measure whether refined
+training costs policy quality, not whether it causally improves accuracy; the
+refinement argument is completed by the offline reference-artifact audit in
+Section~\ref{sec:refinement_results} rather than by a common-reference
+controller re-evaluation. A causal comparison would require scoring
+refined- and unrefined-trained checkpoints on one shared reference version.
 
 Earlier small-scale runs influenced the choice to begin full-scale slot/type
 training. The corrected reruns were launched later to reassess that choice;
@@ -189,7 +200,11 @@ Held-out clips on trained bodies, seen clips on unseen bodies, and held-out
 clips on unseen bodies are different evaluations. The current validation
 snapshot addresses only the first. A single rotating panel does not
 measure all 128 variants of every clip. Future cross-shape comparisons must
-report the actual body identities and number of evaluated pairs.
+report the actual body identities and number of evaluated pairs. The planned
+unseen-morphology evaluation in Section~\ref{sec:unseen_morphology} targets
+the third axis directly, on shapes drawn from the trained coefficient range
+but excluded from the 128 training configurations, with results stratified by
+distance to the nearest training morphology.
 
 We retain W\&B logs, resolved configurations, checkpoint epochs, and local
 results for compute accounting. Small-scale development and full-scale
@@ -198,49 +213,49 @@ failed launches when discussing practical cost. GPU-hours, rather than
 epoch counts alone, quantify this budget.
 
 Table~\ref{tab:compute_accounting} reports parameter counts and single-A40
-wall-clock cost for the five corrected 150-clip runs, all completed at the
-recorded 6,000-epoch budget. Parameter counts are computed analytically from
+wall-clock cost for the eight corrected 150-clip runs, all completed at the
+6,000-epoch budget. Parameter counts are computed analytically from
 each run's resolved model configuration (encoder, transformer or flat-MLP,
 and head widths), not read from a stored checkpoint file, since every linear
 layer in this codebase is instantiated with \texttt{nn.LazyLinear} and has no
-fixed parameter count outside a materialized model.
+fixed parameter count outside a materialized model. Parameter count is set by
+the architecture only, so the refined/unrefined pairs share a count
+(A/F, B/G, C/E, D/H).
 
 \begin{table}[t]
 \centering
 \small
-\caption{Parameter counts and single-GPU wall-clock cost for the five
-corrected 150-clip runs (seed 0, one A40 each, 6,000 epochs completed).
-Actor and critic are separate networks with independent parameters; C and E
-share an architecture and therefore a parameter count.}\label{tab:compute_accounting}
-\begin{tabularx}{\linewidth}{@{}lrrrY@{}}
+\caption{Parameter counts and single-GPU wall-clock cost for the eight
+corrected 150-clip runs (seed 0, one A40 each, 6,000 epochs). Actor and
+critic are separate networks with independent parameters.}\label{tab:compute_accounting}
+\begin{tabularx}{\linewidth}{@{}llrrrY@{}}
 \toprule
-Case & Actor params & Critic params & Total params & GPU-hours \\
+Case & Arch & Actor params & Critic params & Total params & GPU-h \\
 \midrule
-A & 57,349,557 & 8,524,801 & 65,874,358 & 15.8 \\
-B & 45,430,197 & 5,800,705 & 51,230,902 & 23.5 \\
-C & 45,434,037 & 5,804,545 & 51,238,582 & 23.7 \\
-D & 46,256,053 & 5,804,545 & 52,060,598 & 23.9 \\
-E & 45,434,037 & 5,804,545 & 51,238,582 & 23.9 \\
+A / F & temporal MLP        & 57,349,557 & 8,524,801 & 65,874,358 & 15.8 / 14.4 \\
+B / G & attention           & 45,430,197 & 5,800,705 & 51,230,902 & 23.5 / 21.5 \\
+C / E & slot/type           & 45,434,037 & 5,804,545 & 51,238,582 & 23.7 / 23.9 \\
+D / H & slot/type + adaLN   & 46,256,053 & 5,804,545 & 52,060,598 & 23.9 / 22.4 \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-Two consequences run against a naive intuition. First, A has the most total
-parameters of any case, not the fewest: its actor's first layer reads the
-full raw concatenation of every observation category (5,248 dimensions)
-directly, which alone costs more parameters than B/C/D/E's three token
-encoders and transformer combined. The attention-based cases compress that
-same information to a 256-dimensional token per source before the shared
-final head, trading parameters for the added transformer computation.
-Second, despite having more parameters, A is the fastest case by a wide
-margin (15.8 vs.\ 23.5--23.9 GPU-hours) -- parameter count does not predict
-wall-clock cost here, since the attention cases pay for multiple sequential
-module calls (three encoders, then a transformer stack) rather than one
-large matrix multiplication chain. D's actor-only adaLN-Zero conditioning
-adds a small but non-negligible cost over C/E (roughly 822,000 actor
-parameters from the per-layer modulation networks and morphology encoder),
-consistent with, but not sufficient by itself to explain, the jerk
-difference discussed in Section~\ref{sec:results}.
+Two consequences run against a naive intuition. First, the temporal MLP has
+the most total parameters of any architecture, not the fewest: its actor's
+first layer reads the full raw concatenation of every observation category
+(5,248 dimensions) directly, which alone costs more parameters than the
+attention models' three token encoders and transformer combined. The
+attention models compress that same information to a 256-dimensional token
+per source before the shared final head, trading parameters for the added
+transformer computation. Second, despite having more parameters, the temporal
+MLP is the fastest to train by a wide margin (15.8/14.4 vs.\ 21.5--23.9
+GPU-hours) -- parameter count does not predict wall-clock cost here, since the
+attention models pay for multiple sequential module calls (three encoders,
+then a transformer stack) rather than one large matrix multiplication chain.
+Actor-only adaLN-Zero adds a small but non-negligible cost over slot/type
+(roughly 822,000 actor parameters from the per-layer modulation networks and
+morphology encoder), consistent with, but not sufficient by itself to
+explain, the jerk difference in Section~\ref{sec:architecture_results}.
 
 The full-scale selected run shares C and E's architecture exactly (same
 encoder, transformer, and head widths;
@@ -249,11 +264,10 @@ these constants unchanged from the 150-clip experiment file), so its
 parameter count is also 51,238,582.
 Its own GPU-hours are not included here: it ran on six GPUs with resumed
 segments and a changed resident-pool size after a memory-related failure,
-which is not a single comparable wall-clock number in the way the five
+which is not a single comparable wall-clock number in the way the eight
 matched single-GPU development runs are.
-\pending{Add repeated-seed parameter/compute comparisons, and a resumed-run
-GPU-hour accounting for the full-scale training (including the failed
-launch before the resident-pool-size correction). No superior
-compute-efficiency claim is made from the current evidence -- A's lower
-wall-clock cost is not yet weighed against its lower success rate and
-higher gt\_error relative to C in Table~\ref{tab:ablations}.}
+\pending{Add a resumed-run GPU-hour accounting for the full-scale training,
+including the failed launch before the resident-pool-size correction. No
+superior compute-efficiency claim is made from the current evidence -- the
+temporal MLP's lower wall-clock cost is not weighed against its higher
+position error relative to slot/type in Table~\ref{tab:ablation_results}.}

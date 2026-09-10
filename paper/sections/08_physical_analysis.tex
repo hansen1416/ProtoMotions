@@ -1,9 +1,36 @@
 \section{Physical Analysis}\label{sec:physics}
 
-\noindent\textit{Placeholder.}
-This section is reserved for paired comparisons of the same motion across
-body configurations, including joint torques, contact forces, and related
-mechanical quantities. Measurements, normalization choices, and simulator
-instrumentation must be validated before drawing physical conclusions.
-No mechanics results or claims about human biomechanics are included in
-the present draft.
+\noindent\textit{Planned analysis; no results in this draft.}
+
+This section will examine how body morphology changes the physical control
+demand of a motion, using the simulator's instrumented quantities and not
+claims about human biomechanics. The question is not whether body mass or
+size correlates with joint torque, which is partly expected from mechanics,
+but whether the effect of morphology on control demand \emph{depends on the
+motion being performed}.
+
+The planned procedure holds the motion fixed and varies the body. For a
+matched set of clips evaluated across many of the 128 configurations, we
+record per-joint torque, joint power, an aggregate control-effort measure,
+and jerk from the simulator during deterministic rollouts. Clips are then
+grouped by their inherited text descriptions into coarse semantic classes
+(for example walking, running, jumping, kicking, dancing, sitting), and we
+compare the cross-morphology variation of each quantity between classes.
+
+The hypothesis under test is that morphological variation produces
+motion-dependent changes in control demand, with highly dynamic motions
+(running, jumping, kicking) more sensitive to body shape than slow or
+quasi-static motions (standing, sitting) -- that is, body morphology and
+motion characteristics interact in setting control demand, rather than
+morphology acting as a motion-independent scaling. A concise result would
+state that relationship together with per-class distributions, not a single
+correlation coefficient.
+
+Joint-torque and contact-force readouts, their normalization across bodies
+of different mass and size, and the simulator instrumentation must be
+validated before any of these quantities are reported.
+\pending{Define the matched clip set and the semantic grouping, validate the
+torque, power, effort, and jerk instrumentation and its cross-body
+normalization, and report the morphology $\times$ motion-class interaction
+with per-class distributions. No mechanical or biomechanical claim is made
+in this draft.}

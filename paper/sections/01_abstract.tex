@@ -12,11 +12,16 @@ changes. We train one morphology-conditioned policy directly on the refined
 multi-shape references, using temporal slot/type attention and a streamed
 training pool. Deterministic, clip-grouped splits and morphology-matched
 evaluation distinguish held-out motion tracking from training-pool monitoring.
-A recorded full-scale validation evaluation reports 98.47\% success on 1,048
-held-out clips, with one selected body configuration per clip and a capped
-evaluation horizon; this is not an all-shape or unseen-body test result.
-Corrected small-scale architecture and refinement comparisons are in progress.
-The draft establishes the dataset and controller procedures and an
-evidence-based framework for residual failure analysis; physical analysis is
-reserved for subsequent measurements.
+Offline evaluation of the selected checkpoint reports 98.47\% success on the
+1,048-clip validation split and 99.14\% on the independent 1,048-clip test
+split, each with one selected body configuration per clip and a capped
+horizon; these are trained-body, one-shape-per-clip results, not all-shape or
+unseen-body tests. A corrected eight-run grid of four temporal architectures
+crossed with refined and unrefined references, on a 150-clip development set,
+selects temporal slot/type attention without adaLN-Zero. Residual failures on
+both splits are analysed against inherited captions and concentrate on
+ground-contact transitions and whole-body acrobatics. An unseen-morphology
+generalisation study within the trained coefficient range, and an analysis of
+how body shape and motion type jointly set control demand, are specified but
+not yet run.
 \end{abstract}

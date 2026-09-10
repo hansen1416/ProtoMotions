@@ -5,6 +5,10 @@
 \usepackage{graphicx}
 \usepackage{booktabs,array,tabularx}
 \usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepgfplotslibrary{groupplots}
+\usepgfplotslibrary{statistics}
 \usepackage[hidelinks]{hyperref}
 \urlstyle{same}
 
@@ -19,15 +23,14 @@ Across 128 Body Shapes}
 \author{}
 \date{Working draft --- September 2026}
 
-% Source-only manuscript update. Compile from paper/; no generated figures are required.
+% Source-only manuscript update. Compile from paper/; figures are native pgfplots (no image files).
 % Technical-report mapping: abstract = summary; introduction = contributions;
 % dataset = provenance/scope; method = implementation; setup = metric definitions;
 % results = evidence; discussion = limitations; appendix = reproducibility.
-% Evidence cutoff: 2026-09-08. Monitoring values come from README.note.md, section 76.
-% Corrected ablations, final test evaluation and physical analysis remain incomplete.
-% Visual rationale: two native LaTeX schematics explain shared identities and data flow;
-% tables support exact configuration/result lookup. A single snapshot cannot support
-% a learning-curve plot or a causal architecture/refinement comparison.
+% Evidence cutoff: 2026-09-10. Full-scale values from README.note.md sections 76 and 79;
+% 150-clip grid from section 78.
+% Unseen-morphology evaluation, cross-shape panel evaluation, repeated seeds, and the
+% physical (morphology x motion) analysis remain incomplete.
 
 \begin{document}
 \maketitle

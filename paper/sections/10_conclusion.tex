@@ -8,9 +8,13 @@ conservative reference refinement, and deterministic clip-grouped splits.
 The controller uses temporal slot/type attention with morphology information
 in both actor and critic and is trained directly across body configurations.
 
-A recorded full-scale validation snapshot demonstrates high tracking success
-for the selected held-out clip/body pairs under the corrected evaluation
-protocol. It does not settle architecture comparisons, all-shape coverage,
-unseen-body generalization, or physical interpretation. Corrected ablations,
-independent test evaluation, and evidence-based failure analysis are the
-next empirical steps; paired mechanics analysis remains explicitly deferred.
+Offline evaluation of the selected checkpoint gives 98.47\% success on
+validation and 99.14\% on the untouched test split for the one-shape-per-clip
+trained-body protocol, and the eight-run development grid selects slot/type
+attention without adaLN-Zero. Residual failures on both splits are dominated
+by ground-contact transitions and whole-body acrobatics. These results do not
+establish all-shape coverage or unseen-body generalization. Two studies are
+specified but not run: an unseen-morphology evaluation over body shapes
+inside the trained coefficient range, and an analysis of how morphology and
+motion type jointly set physical control demand -- whether dynamic motions
+are more shape-sensitive than quasi-static ones.

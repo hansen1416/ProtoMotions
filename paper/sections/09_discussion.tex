@@ -28,8 +28,11 @@ mirrored variants stay together, but the current split is not demonstrated
 to be subject- or source-recording-disjoint. Validation reuses the trained
 body set and has been monitored during development. Its rotating panel
 covers only one shape per clip at a time, and long clips have a capped
-evaluation horizon. Fixed-pair test evaluation and unseen-body experiments
-remain necessary for broader claims.
+evaluation horizon. Fixed-pair test evaluation and the unseen-morphology
+experiment in Section~\ref{sec:unseen_morphology} remain necessary for
+broader claims, and any morphology-generalization statement is confined to
+body shapes inside the trained coefficient range rather than arbitrary
+bodies.
 
 The success threshold is permissive relative to fine-grained pose accuracy.
 A high success rate should be read together with continuous errors,
@@ -39,10 +42,15 @@ standalone certificate of physical plausibility. Raw policy-action
 increments must not be interpreted as joint-angle or torque measurements.
 
 Cost constraints motivated small-scale development and streamed full-scale
-training. They also limited repeated seeds and introduced memory-related
-resumes and configuration changes. These costs and changes should be
-reported transparently; they do not by themselves establish better
-compute efficiency than another method.
+training, and introduced memory-related resumes and configuration changes on
+the full-scale run. The 150-clip grid is single-seed: the architecture
+conclusion is drawn from the jerk difference, which is a large effect that
+recurs across both reference versions, and not from the success-rate
+differences, which are within run-to-run noise and are reported as
+non-discriminating. Seed repeats would sharpen the latter but are not
+expected to change the former. These costs and choices should be reported
+transparently; they do not by themselves establish better compute efficiency
+than another method.
 
 We explored neutral-body pretraining followed by multi-shape transfer and
 mixed canonical/HUMOS source-weighted rewards during development, but did

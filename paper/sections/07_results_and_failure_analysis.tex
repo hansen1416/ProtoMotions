@@ -39,6 +39,54 @@ rate should not be interpreted as the success rate of the entire training
 corpus, nor should the difference be described as validation outperforming
 an IID training sample.
 
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\linewidth, height=5.4cm,
+  xlabel={Training epoch}, ylabel={Success rate},
+  xmin=0, xmax=28500, ymin=0.2, ymax=1.0,
+  legend pos=south east, legend cell align=left, legend style={font=\small},
+  tick label style={font=\small}, label style={font=\small},
+  grid=both, grid style={gray!18},
+]
+\addplot[thick, blue] coordinates {
+(255,0.319)(1023,0.378)(1791,0.580)(2303,0.669)(2815,0.708)(3327,0.745)
+(3839,0.767)(4351,0.766)(4863,0.765)(5375,0.800)(5887,0.786)(6399,0.806)
+(6911,0.810)(7423,0.803)(7935,0.791)(8447,0.794)(8959,0.796)(9471,0.805)
+(9983,0.801)(10495,0.803)(11007,0.803)(11519,0.822)(12031,0.808)(12543,0.797)
+(13055,0.815)(13567,0.804)(14079,0.834)(14591,0.833)(15103,0.792)(15615,0.810)
+(16127,0.816)(16639,0.807)(16895,0.784)(16950,0.965)(17407,0.981)(17919,0.980)
+(18431,0.978)(18943,0.981)(19455,0.983)(19967,0.980)(20991,0.978)(21503,0.985)
+(22527,0.982)(23039,0.983)(23551,0.977)(24575,0.979)(25599,0.978)(26111,0.982)
+(27135,0.983)(27647,0.981)(28159,0.985)
+};
+\addlegendentry{validation holdout}
+\addplot[semithick, orange!80!black, dashed] coordinates {
+(255,0.245)(1279,0.490)(2047,0.663)(2815,0.589)(3583,0.719)(4351,0.708)
+(5119,0.787)(5887,0.810)(6655,0.800)(7423,0.797)(8191,0.796)(8959,0.775)
+(9727,0.793)(10495,0.710)(11263,0.764)(12031,0.733)(12799,0.776)(13567,0.754)
+(14335,0.809)(15103,0.813)(15871,0.797)(16639,0.806)(17151,0.895)(17919,0.862)
+(18687,0.892)(19455,0.939)(20223,0.887)(20991,0.964)(21759,0.913)(22527,0.904)
+(23295,0.952)(24063,0.996)(24831,0.996)(25599,0.925)(26367,0.816)(27135,0.874)
+(27903,0.871)
+};
+\addlegendentry{hard resident pool}
+\draw[gray, densely dotted] (axis cs:16920,0.2) -- (axis cs:16920,1.0);
+\node[anchor=south, font=\scriptsize, gray, align=center]
+  at (axis cs:16920,0.24) {evaluation-protocol\\correction ($\sim$ep.\ 16.9k)};
+\end{axis}
+\end{tikzpicture}
+\caption{Scheduled success rate over training for the full-scale slot/type
+run (\texttt{3mvgad6f}). The step near epoch 16.9k is the morphology-matched
+evaluation correction plus its sampling change, not an instantaneous learning
+event; pre-correction points use the earlier, sometimes mismatched
+reference-to-asset assignment and are not comparable to the post-correction
+curve. After the correction the holdout success rate climbs from about
+0.96 to a stable 0.98--0.985. The resident-pool curve is noisier because
+residency is continually re-concentrated on hard clips.}\label{fig:learning_curve}
+\end{figure}
+
 The 98.47\% result supports strong tracking of the selected held-out
 clip/body pairs under the specified threshold. It does not establish
 all-body success for those clips, unseen-body generalization, or an untouched
@@ -52,8 +100,55 @@ The run record is available at
 \href{https://wandb.ai/yugoamaryl/hhi-protomotions/runs/3mvgad6f}
 {the full-scale W\&B run}. The current table uses the recorded snapshot,
 not a newly executed evaluation.
-\pending{Add frozen-panel validation and independent test results from the
-chosen checkpoint, with per-motion records and explicit coverage.}
+
+\subsection{Standalone validation and held-out test evaluation}\label{sec:test_results}
+
+The epoch-28,170 checkpoint was re-evaluated offline with a standalone
+streaming evaluator, once on the validation split and once on the
+independent test split. Both runs use the same protocol as training-time
+monitoring -- one deterministically selected body shape per clip, an
+environment with that exact asset, the mean action, and a capped horizon --
+and write a per-motion record for every clip. The test manifest is loaded
+only by this standalone evaluator; its SHA-256 and clip count are checked
+against the split metadata, and its disjointness from train and validation is
+verified before evaluation. All test clips are the standard 6.6\,s HumanML3D
+crop, so none reach the horizon cap. The test split is evaluated once; its
+number is not iterated against.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Offline evaluation of the epoch-28,170 checkpoint on the 1,048-clip
+validation and 1,048-clip test splits of \texttt{hhi\_stage2\_v1}, one
+selected trained body per clip (rotating shape panel index 110). Same
+standalone evaluator for both.}\label{tab:test_results}
+\begin{tabular}{lrr}
+\toprule
+Metric & Validation & Test \\
+\midrule
+Success rate (\%) $\uparrow$ & 98.47 & \textbf{99.14} \\
+Failure rate (gt err $>0.5$) (\%) $\downarrow$ & 1.53 & \textbf{0.86} \\
+Mean body-position error (m) $\downarrow$ & 0.0699 & \textbf{0.0676} \\
+Mean global body-rotation error (rad) $\downarrow$ & 0.1738 & \textbf{0.1723} \\
+Mean maximum-joint position error (m) $\downarrow$ & 0.1419 & \textbf{0.1393} \\
+Normalized jerk $\downarrow$ & 1,154.3 & \textbf{1,050.9} \\
+High-jerk frames (\%) $\downarrow$ & 27.46 & \textbf{25.33} \\
+Worst single clip, gt err max (m) & 3.79 & \textbf{1.67} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Test performance is marginally better than validation on every metric
+(Table~\ref{tab:test_results}). This is the expected outcome for a held-out
+reveal: validation was monitored during development while test was not, and
+the roughly 0.7-point success gap is within the variation expected between
+two random 5\% partitions of the same corpus. The result does not establish
+all-body coverage for these clips, unseen-body generalization, or any claim
+outside the rotating one-shape-per-clip protocol.
+
+\pending{Add a frozen shape-panel repeat and explicit all-panel coverage for
+a subset. Per-motion records for both splits are retained but not yet
+released.}
 
 \subsection{Corrected architecture comparison}\label{sec:architecture_results}
 
@@ -64,37 +159,209 @@ learning. The accompanying sampling correction also changed which training
 clips entered the resident pool. These changes must be distinguished from
 an architectural improvement.
 
-The five corrected runs in Table~\ref{tab:ablations} reassess the 150-clip
-comparisons using the matching-asset protocol. Their final results are not
-yet included. Consequently, the selected slot/type architecture is the
-current system choice, not a demonstrated winner over basic attention,
-a temporal MLP, or actor-only adaLN-Zero under the corrected controls.
-Pre-correction curves cannot establish a reliable architecture ranking.
+The eight corrected runs in Table~\ref{tab:ablations} reassess the 150-clip
+comparisons using the matching-asset protocol, each for the full 6,000-epoch
+budget with one training seed. Table~\ref{tab:ablation_results} reports the
+mean and standard deviation of each run's last eight scheduled evaluations
+(epochs approximately 4,600--6,000); single evaluation points swing by two to
+four percentage points of success rate and by 100--300 in jerk, so a single
+final snapshot is not a stable summary.
 
-\pending{For A--D, report matched-budget success, position/rotation errors,
-smoothness, parameter counts, and GPU-hours on identical evaluation pairs.
-Add repeated seeds before making claims about consistency.}
+\begin{table}[t]
+\centering
+\small
+\caption{Corrected 150-clip comparison, last-8-evaluation mean $\pm$ standard
+deviation. Refined-data cases (A--D) are scored against refined references and
+unrefined-data cases (E--H) against unrefined references; the two halves are
+not a controlled cross-comparison (Section~\ref{sec:refinement_results}).
+Parameter counts and GPU-hours are from Table~\ref{tab:compute_accounting}.
+Single seed per case.}\label{tab:ablation_results}
+\begin{tabularx}{\linewidth}{@{}llYrrrr@{}}
+\toprule
+Case & Architecture / data & Success (\%) & gt err & gr err & Jerk & HJ\% \\
+\midrule
+A & temporal MLP, refined        & 97.5 $\pm$ 0.8 & 0.109 & 0.207 & 1{,}729 & 33.3 \\
+B & attention, refined           & 97.5 $\pm$ 1.4 & 0.098 & 0.228 & 3{,}455 & 40.4 \\
+C & slot/type, refined           & \textbf{98.1 $\pm$ 0.6} & 0.097 & 0.226 & \textbf{1{,}757} & 34.2 \\
+D & slot/type + AdaLN, refined   & 97.1 $\pm$ 1.2 & \textbf{0.090} & 0.220 & 3{,}145 & 38.9 \\
+E & slot/type, unrefined         & 97.9 $\pm$ 0.6 & 0.102 & 0.219 & 1{,}422 & 29.6 \\
+F & temporal MLP, unrefined      & 96.2 $\pm$ 1.6 & 0.115 & 0.212 & 2{,}927 & 36.6 \\
+G & attention, unrefined         & 97.8 $\pm$ 1.2 & 0.098 & 0.219 & 3{,}117 & 34.9 \\
+H & slot/type + AdaLN, unrefined & 97.5 $\pm$ 0.9 & 0.091 & 0.207 & 2{,}956 & 34.0 \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
-\subsection{Reference refinement: quality and policy effects}\label{sec:refinement_results}
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\linewidth, height=4.8cm,
+  ybar, bar width=13pt,
+  symbolic x coords={A/F, B/G, C/E, D/H},
+  xtick=data, ymin=0, ymax=3800,
+  ylabel={Normalized jerk}, xlabel={Architecture (refined / unrefined)},
+  legend style={at={(0.5,1.02)}, anchor=south, legend columns=2, font=\small},
+  tick label style={font=\small}, label style={font=\small},
+  nodes near coords, nodes near coords style={font=\scriptsize},
+  grid=none,
+]
+\addplot[fill=blue!55] coordinates {(A/F,1729)(B/G,3455)(C/E,1757)(D/H,3145)};
+\addplot[fill=orange!70] coordinates {(A/F,2927)(B/G,3117)(C/E,1422)(D/H,2956)};
+\legend{refined, unrefined}
+\end{axis}
+\end{tikzpicture}
+\caption{Normalized jerk (last-8-evaluation mean) for the eight 150-clip
+runs, grouped by architecture. Basic attention (B/G) and slot/type +
+adaLN-Zero (D/H) roughly double the jerk of the plain temporal MLP (A/F) and
+of slot/type without adaLN-Zero (C/E), on both reference versions. Success
+rate is 96--98\% for all eight (Table~\ref{tab:ablation_results}) and does
+not distinguish them.}\label{fig:ablation_jerk}
+\end{figure}
 
-Reference refinement has two distinct evaluation targets. The first is
-whether the processed reference has less sliding, penetration, or jitter
-without excessive changes to pose, root trajectory, or cross-shape
-variation. The second is whether a policy trained on those references
-tracks more reliably or smoothly. A favorable reference-only metric does
-not establish the second effect.
+Success rate does not separate the runs: all eight sit between 96 and 98\%
+with last-8 standard deviations of 0.6--1.6 points, and the intervals
+overlap. Jerk, and the high-jerk-window percentage that tracks it, is the one
+axis that separates them consistently (Figure~\ref{fig:ablation_jerk}). On the clean within-data comparison
+(A--D, identical refined targets), the slot/type run (C) has the highest
+success rate and low jerk; basic attention (B) and actor-only adaLN-Zero (D)
+both roughly double the jerk of C, and D's slightly lower position error is
+within one standard deviation while its jerk and high-jerk fraction are
+clearly worse. The temporal MLP (A) matches C on jerk but has clearly higher
+position error, and is the largest model by parameter count despite training
+fastest (Table~\ref{tab:compute_accounting}). The unrefined group (E--H)
+reproduces the same ordering: slot/type (E) has the lowest jerk of the four,
+and adding adaLN-Zero (H) or removing the slot/type embeddings (G) roughly
+doubles it.
 
-The C/E comparison isolates the reference-processing choice at fixed
-architecture and training budget, subject to common final evaluation
-targets. Before/after reference metrics should be aggregated per clip/body
-pair, with distributions and failure cases rather than only a favorable
-mean. Changes in global geometry are expected across bodies; retained
-shape-specific behavior should be assessed through matched clips and
-interpretable rotation or motion-range differences.
+These are single-seed development results and the pre-correction 150-clip
+curves are not comparable to them. The load-bearing signal is the jerk
+difference, which is a factor-of-two effect and appears in the same ordering
+under both reference versions -- basic attention and adaLN-Zero high, plain
+MLP and slot/type low -- so it is a within-experiment replication rather than
+one lucky run; the success-rate column, by contrast, is treated as
+non-discriminating. Within those limits the grid supports the selected
+configuration, slot/type attention without adaLN-Zero, as the best-balanced
+choice rather than merely the incumbent.
 
-\pending{Add the corpus-level reference artifact/fidelity audit and completed
-C/E controller comparison. A full-scale refinement benefit is not inferred
-causally from the single refined full-scale run.}
+\pending{Report the explicit-panel cross-shape numbers for the selected
+configuration. Seed repeats would tighten the success-rate column but are not
+expected to move the jerk-based ordering.}
+
+\subsection{Reference refinement: quality and policy cost}\label{sec:refinement_results}
+
+Refinement is justified on a deliberately narrow basis: it removes
+measurable artifacts from the reference motion itself, and training on the
+refined references does not cost policy quality. We do not claim a causal
+accuracy benefit from refined training, which the present evidence cannot
+establish. The two parts of the argument are evaluated separately.
+
+The reference-level part is an offline before/after audit on the packaged
+motion tensors, with no simulation, over all 19,200 references of the 150-clip
+development set (150 clips $\times$ 128 body configurations).
+Table~\ref{tab:refine_audit} reports the artifact measures -- stance-foot
+horizontal speed during detected contact, the fraction of frames whose lowest
+body centre is below the floor, and reference-domain position jerk -- and the
+fidelity measures -- per-body geodesic rotation change, root horizontal
+displacement, and the cross-shape variance of per-shape knee-flexion range,
+which must be preserved rather than flattened.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Reference-refinement audit over all 19,200 development references.
+Artifact rows: corpus mean before and after, and the fraction of individual
+motions that improve; the per-motion distributions are in
+Figure~\ref{fig:refine_dist}. Fidelity rows: corpus mean of the
+refined-vs-unrefined difference. Jerk is the raw mean third-difference of body
+positions, not the windowed evaluator score.}\label{tab:refine_audit}
+\begin{tabularx}{\linewidth}{@{}Yrrr@{}}
+\toprule
+& Unref.\ mean & Refined mean & Motions improved \\
+\midrule
+Stance-foot speed (m/s) $\downarrow$ & 0.055 & 0.038 & 96\% \\
+Frames below floor (\%) $\downarrow$ & 39.6 & 3.3 & 45\% \\
+Frames within 2\,cm of floor (\%) $\downarrow$ & 49.8 & 33.6 & --- \\
+Position jerk (m/s$^3$) & 45.2 & 60.7 & 21\% \\
+\midrule
+Per-body rotation change (deg) & \multicolumn{3}{c}{0.12} \\
+Root horizontal displacement (m) & \multicolumn{3}{c}{0.008} \\
+Cross-shape var., knee-flexion range (ratio r/u) & \multicolumn{3}{c}{0.94} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+  group style={group size=2 by 1, horizontal sep=1.4cm},
+  width=0.44\linewidth, height=4.6cm,
+  boxplot/draw direction=y, xtick={1,2}, xticklabels={unref., refined},
+  tick label style={font=\small}, label style={font=\small},
+]
+\nextgroupplot[ylabel={stance-foot speed (m/s)}, ymin=0, ymax=0.14]
+\addplot+[boxplot prepared={lower whisker=0.0174, lower quartile=0.0294,
+  median=0.0430, upper quartile=0.0695, upper whisker=0.1228}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.0078, lower quartile=0.0151,
+  median=0.0237, upper quartile=0.0476, upper whisker=0.1157}] coordinates {};
+\nextgroupplot[ylabel={position jerk (m/s$^3$)}, ymin=0, ymax=170]
+\addplot+[boxplot prepared={lower whisker=6.5, lower quartile=14.0,
+  median=30.4, upper quartile=61.6, upper whisker=133.5}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=5.7, lower quartile=20.8,
+  median=49.2, upper quartile=86.7, upper whisker=161.6}] coordinates {};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Per-motion distributions (box: quartiles; whiskers: 5th--95th
+percentile) over the 19,200 development references. Foot-skate drops across
+almost the whole distribution; position jerk rises across almost the whole
+distribution.}\label{fig:refine_dist}
+\end{figure}
+
+Refinement removes most ground penetration and about a third of the
+stance-foot sliding, while changing joint rotations by a tenth of a degree
+and the root path by millimetres, and leaving the cross-shape spread of
+per-shape knee kinematics essentially intact (variance ratio 0.94). The
+per-motion distributions (Figure~\ref{fig:refine_dist}) show these are not
+mean-only effects: stance-foot speed falls for 96\% of individual motions,
+across the full range rather than a few outliers, although the worst-sliding
+5\% of clips are barely improved. Penetration in the raw references is
+bimodal -- a large fraction of clips sit entirely below the floor, a
+whole-clip vertical mis-registration rather than per-frame jitter, which the
+clearance correction removes; clips that were already grounded stay grounded,
+so only 45\% of motions register a change. The cost is a roughly one-third
+increase in reference-domain position jerk that is broad rather than
+tail-driven (79\% of motions get jerkier, and the per-shape medians move
+together, 45.5 to 60.5), introduced by the per-window root-translation
+correction and the per-frame ground-clearance lift. This also explains the
+earlier observation that the unrefined slot/type run (E) shows lower
+policy-side jerk than the refined one (C): the refined \emph{reference} itself
+carries more position jerk, so a policy that tracks it faithfully inherits
+more, and the E--C gap reflects the target, not a smoother policy from
+unrefined training.
+
+The policy-cost part reuses the architecture-matched refined and unrefined
+training pairs from Table~\ref{tab:ablations} (A/F, B/G, C/E, D/H). Each run
+is evaluated against its own reference version, so these pairs are not a
+controlled measurement of a refined-trained policy being more accurate; they
+show only whether refined training loses anything. Across the four pairs the
+differences are small and mostly within single-seed noise: the refined run
+has the lower mean position error in three of four pairs, success rate is
+within half a percentage point either way in three pairs and clearly higher
+for the refined run in the temporal-MLP pair, and the jerk difference has
+inconsistent sign once the reference-jerk offset above is taken into account.
+
+Refined references are therefore used for the full-scale run because they
+remove most ground penetration and much of the foot sliding, with negligible
+change to joint angles or root trajectory and no loss of cross-shape
+variation, and at no measurable policy-accuracy cost. The added
+reference-domain jerk is a known trade-off. A stronger, causal claim would
+require evaluating refined- and unrefined-trained checkpoints on one common
+reference version.
+
+\pending{Add per-clip and per-shape distributions for
+Table~\ref{tab:refine_audit} rather than corpus means. No causal full-scale
+refinement benefit is claimed.}
 
 \subsection{Cross-shape consistency and qualitative evidence}
 
@@ -112,9 +379,37 @@ Unseen beta vectors require corresponding new assets and references and
 must be evaluated separately from trained bodies, even if their coefficients
 lie within the same $[-3,3]$ range.
 
-\pending{Insert matched reference/controller visualizations and cross-shape
-results. Unseen-body and joint motion/body generalization remain unmeasured
-in the evidence reported here.}
+\subsubsection{Planned unseen-morphology evaluation}\label{sec:unseen_morphology}
+
+Training fixes 128 body configurations sampled inside
+$\boldsymbol{\beta}\in[-3,3]^{10}$ (Section~\ref{sec:body_generation}).
+To test whether the controller has learned morphology-conditioned control
+rather than memorized those 128 configurations, we plan a held-out-body
+evaluation on approximately 20{,}000 motion clips whose body shapes are
+\emph{not} among the 128 training combinations but lie within the same
+coefficient range. New MJCF assets and HUMOS references are generated for
+these shapes exactly as in Section~\ref{sec:body_generation}, and rollouts
+follow the Section~\ref{sec:metrics} protocol.
+
+The primary readout is success rate. A value that stays near the trained-body
+level would indicate that conditioning, not enumeration, drives the behavior;
+a large drop would indicate memorization of the training morphologies. The
+sharper analysis plots each component error and the success indicator against
+the Euclidean distance from the evaluated $\boldsymbol{\beta}$ to its nearest
+training morphology in coefficient space. Performance that stays
+approximately flat as this distance grows is the strong form of the claim;
+a monotone decline with distance would bound generalization to a
+neighborhood of the training set. Any resulting statement is scoped to
+\emph{generalization to unseen morphologies within the trained coefficient
+range}, not to arbitrary body shapes, and unseen bodies are never mixed into
+the trained-body success numbers.
+
+\pending{Generate the held-out-shape assets and references, run the
+distance-stratified evaluation, and report success and component errors as a
+function of distance to the nearest training morphology, with the trained-body
+and unseen-body populations kept separate. Insert matched reference/controller
+visualizations and the explicit-panel cross-shape results. Joint-space
+generalization remains unmeasured in the evidence reported here.}
 
 \subsection{Evidence-based analysis of residual failures}\label{sec:failures}
 
@@ -169,5 +464,42 @@ denominators, and include representative successes as controls. Repeated
 rollouts and targeted interventions can strengthen an explanation; visual
 inspection alone cannot prove dynamic infeasibility. Capacity limits,
 reference defects, and body-dependent dynamics may coexist.
-\pending{Populate failure frequencies and representative case studies from
-the frozen evaluation records. No causal failure attribution is claimed yet.}
+
+\subsubsection{Failures on the validation and test splits}
+
+Joining the 9 test failures and 16 validation failures
+(Table~\ref{tab:test_results}) to their inherited HumanML3D captions gives a
+consistent picture across both splits. Every failed clip is a recognizably
+hard motion; none is an unexplained failure of an ordinary movement. Two
+motion families account for most of the 25:
+
+\begin{itemize}
+\item \emph{Transitions to and from the ground} -- getting up from lying or
+prone, belly crawling, push-up postures, sit-to-stand-to-floor: 6 of 9 test
+failures and 5 of 16 validation failures.
+\item \emph{Whole-body dynamic rotation} -- cartwheels, a running
+somersault: 2 of 9 test and 4 of 16 validation.
+\end{itemize}
+
+The remainder are turning or side-stepping locomotion (5 validation), one
+clip whose caption describes a hand-held sparring stick that the flat-ground
+task does not simulate (validation \texttt{M006386}, the single clear
+missing-support case), one abrupt run-to-stop, and one test clip
+(\texttt{M013267}) whose peak position error is exactly at the 0.5\,m
+threshold and whose caption is garbled, which we treat as a metric-boundary
+case rather than a tracking failure. Several base motions fail on both their
+original and mirrored orientation, each on a different body shape (three base
+motions in test, about six in validation), which is consistent with a
+skill-class difficulty that interacts with morphology rather than with a
+single unlucky clip. The ground-transition and acrobatic clusters coincide
+with the historically hard skill classes seen throughout the development
+lineage, which points to a controller or optimization limitation on those
+classes; the acrobatic failures also carry very high policy-side jerk, and
+since the corpus-level audit in Section~\ref{sec:refinement_results} shows
+refinement raises reference jerk on average, a reference artifact on those
+specific clips remains a live possibility pending a per-clip check.
+
+\pending{Cross-check the acrobatic-cluster references against the refinement
+audit, and confirm the both-orientation failures against successful shapes of
+the same clip on an explicit panel. No single causal attribution is claimed
+for the mixed cluster.}

@@ -6435,3 +6435,59 @@ per-batch fields (`clip_count`, `success_rate`); aggregate metrics and the per-m
 complete and correct, so the result stands. Caveats unchanged: one rotating shape per clip (not
 all-128-shape coverage), trained body set only (in-distribution betas, no unseen bodies). This is
 now the final test number and should not be iterated against.
+
+## 80. Offline Reference-Refinement Audit (2026-09-10)
+
+Ran the offline before/after audit on all 19,200 development references (150 clips x 128 body
+configurations), comparing `small150_128shape.pt` (unrefined) against `small150_128shape_refined.pt`.
+Pure tensor analysis, no simulation. Script: `scratchpad/refine_audit.py`. Foot bodies verified
+via contact rate (indices 3/4/7/8 = L/R ankle+toe, 62-68% contact vs <=0.1% elsewhere); dt = 1/30.
+
+| Metric | Unrefined | Refined | Change |
+|---|---:|---:|---:|
+| Stance-foot horizontal speed during contact (m/s) | 0.0547 | 0.0385 | **-30%** |
+| Frames with min body-centre z < 0 (%) | 39.6 | 3.3 | **-92%** |
+| Frames with min body-centre z < 2 cm (%) | 49.8 | 33.6 | -33% |
+| Position jerk, mean L2 of 3rd finite diff (m/s^3) | 45.2 | 60.7 | **+34%** |
+| Per-body rotation geodesic change (deg) | - | 0.12 | negligible |
+| Root horizontal displacement (m) | - | 0.008 | negligible |
+| Cross-shape var(knee-flexion range), ratio refined/unrefined | - | 0.94 | preserved |
+
+**Reading.** Refinement does what it was designed to: it removes ~92% of clear ground penetration
+and ~30% of stance-foot sliding, while touching joint rotations by a tenth of a degree, moving the
+root path by millimetres, and leaving the cross-shape spread of per-shape knee kinematics
+essentially intact (variance ratio 0.94 -- the shape signal is not homogenised). The one cost is a
+~34% rise in reference-domain position jerk, introduced by the per-window root-translation
+correction and the per-frame ground-clearance lift (the Savitzky-Golay `dps` smoothing pulls the
+other way but does not dominate once the root is re-corrected).
+
+**Per-motion distributions** (arrays saved to `scratchpad/refine_audit_permotion.npz`; N=19,200):
+
+| Metric | Unref median [IQR] | Refined median [IQR] | Motions improved |
+|---|---|---|---|
+| stance-foot speed | 0.043 [0.029--0.070] | 0.024 [0.015--0.048] | **96%** |
+| frac frames below floor | 0 [0--1.0] | 0 [0--0] | 45% |
+| position jerk | 30.4 [14.0--61.6] | 49.2 [20.8--86.7] | 21% |
+
+- Foot-skate falls for **96% of motions**, across the whole distribution -- but the worst-sliding 5%
+  (p95 0.123 -> 0.116) are barely helped; those are the fast/dynamic clips.
+- Penetration in the raw data is **bimodal**: median 0 but p75/p95 = 1.0, i.e. a large fraction of
+  raw HUMOS references sit *entirely* below the floor (whole-clip vertical mis-registration, not
+  per-frame jitter). Refinement fixes those (p95 1.0 -> 0.205); already-grounded clips stay grounded,
+  hence only 45% "improve".
+- Jerk rises for **79% of motions** -- broad, not tail-driven. Per-shape medians move together
+  (45.5 -> 60.5; per-shape range stays tight 36-57 -> 51-74), so jerk is a clip property and
+  refinement raises it roughly uniformly across body shapes. Per-clip jerk spans 3.9-237 (unref) /
+  3.4-246 (refined) -- huge clip-to-clip variation vs negligible shape-to-shape.
+
+**This resolves the §78 puzzle.** The unrefined slot/type run (E) showed lower policy-side jerk
+than the refined one (C). That is now explained by the target, not the policy: the refined
+*reference* itself carries ~34% more position jerk, so a policy tracking it faithfully inherits
+more. The E-vs-C jerk gap is not evidence that unrefined training produces smoother policies.
+
+**Decision.** Keep refined references for full-scale training. Justification is now the narrow,
+supported one: large penetration/foot-skate reduction at negligible fidelity cost and no measurable
+policy-accuracy cost (the §78 grid's A/F, B/G, C/E, D/H own-target pairs), with the
+added reference jerk noted as a known trade-off. No common-reference cross-eval was run; a causal
+"refined-trained policy is more accurate" claim is explicitly not made. Written into paper §7.3
+(Table `tab:refine_audit`).

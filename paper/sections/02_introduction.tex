@@ -45,15 +45,19 @@ This draft makes three contributions:
     observations, matching simulation assets, reference refinement, and
     memory-bounded motion streaming.
     \item An empirical protocol separating architecture, reference quality,
-    and evaluation correctness, together with a preliminary full-scale
-    held-out monitoring result. The controlled ablation outcomes and
-    residual-failure findings remain to be completed.
+    and evaluation correctness: an eight-run architecture/reference grid on a
+    150-clip development set, a full-scale validation and independent test
+    evaluation of the selected checkpoint, and a caption-grounded analysis of
+    the residual failures.
 \end{enumerate}
 
-The recorded validation snapshot reaches 98.47\% success under the protocol in
-Section~\ref{sec:evaluation_protocol}. This result concerns held-out clip
+The selected checkpoint reaches 98.47\% success on validation and 99.14\% on
+the untouched test split under the protocol in
+Section~\ref{sec:evaluation_protocol}. These results concern held-out clip
 identities on trained body configurations, with one body evaluated per clip;
-it does not establish success for every shape or for unseen bodies.
-Section~\ref{sec:results} distinguishes this evidence from pending comparisons.
-A subsequent mechanics study is explicitly left as a placeholder in
-Section~\ref{sec:physics}.
+they do not establish success for every shape or for unseen bodies.
+Section~\ref{sec:results} also specifies, without results, an evaluation on
+body shapes drawn from the trained coefficient range but excluded from the
+128 training configurations (Section~\ref{sec:unseen_morphology}), and a
+study of how morphology and motion type jointly shape physical control demand
+(Section~\ref{sec:physics}).
