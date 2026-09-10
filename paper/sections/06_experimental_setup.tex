@@ -108,9 +108,10 @@ we do not present them as completed model selection preceding the full run.
 \subsection{Morphology-matched evaluation and checkpoint scope}\label{sec:evaluation_protocol}
 
 Each reference is rolled out only in an environment using its exact asset
-identity. A selected reference therefore cannot be assigned to a different
-body simply because an environment slot is available. Multiple rollout
-batches may be needed when several references require the same body.
+identity (Figure~\ref{fig:evaluation_protocol}). A selected reference
+therefore cannot be assigned to a different body simply because an
+environment slot is available. Multiple rollout batches may be needed when
+several references require the same body.
 
 Routine monitoring selects one variant per clip. With seed $s=42$, stable
 clip identity $c$, panel index $p$, and $N_c$ available variants, the choice is
