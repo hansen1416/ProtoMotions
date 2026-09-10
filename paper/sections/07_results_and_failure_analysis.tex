@@ -132,7 +132,7 @@ Mean body-position error (m) $\downarrow$ & 0.0699 & \textbf{0.0676} \\
 Mean global body-rotation error (rad) $\downarrow$ & 0.1738 & \textbf{0.1723} \\
 Mean maximum-joint position error (m) $\downarrow$ & 0.1419 & \textbf{0.1393} \\
 Normalized jerk $\downarrow$ & 1,154.3 & \textbf{1,050.9} \\
-High-jerk frames (\%) $\downarrow$ & 27.46 & \textbf{25.33} \\
+High-jerk windows (\%) $\downarrow$ & 27.46 & \textbf{25.33} \\
 Worst single clip, gt err max (m) & 3.79 & \textbf{1.67} \\
 \bottomrule
 \end{tabular}
@@ -149,6 +149,27 @@ outside the rotating one-shape-per-clip protocol.
 \pending{Add a frozen shape-panel repeat and explicit all-panel coverage for
 a subset. Per-motion records for both splits are retained but not yet
 released.}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[>=latex, node distance=0.35cm, every node/.style={font=\small}]
+\node[draw, rounded corners, fill=green!10, align=center, minimum width=2.35cm, minimum height=0.78cm] (success) {successful\\tracking};
+\node[draw, rounded corners, fill=red!10, align=center, minimum width=2.35cm, minimum height=0.78cm, right=0.45cm of success] (root) {root drift\\or height error};
+\node[draw, rounded corners, fill=orange!12, align=center, minimum width=2.35cm, minimum height=0.78cm, right=0.45cm of root] (joint) {joint/pose\\mismatch};
+\node[draw, rounded corners, fill=yellow!18, align=center, minimum width=2.35cm, minimum height=0.78cm, below=0.55cm of root] (contact) {contact or\\foot failure};
+\node[draw, rounded corners, fill=blue!10, align=center, minimum width=2.35cm, minimum height=0.78cm, right=0.45cm of contact] (dynamic) {fast/dynamic\\motion};
+\draw[->, thick] (success) -- (root);
+\draw[->, thick] (success) -- (joint);
+\draw[->, thick] (success) |- (contact);
+\draw[->, thick] (success) |- (dynamic);
+\node[below=0.35cm of contact, align=center, text width=8cm] {Failure analysis uses per-motion records and rendered rollouts; categories are diagnostic hypotheses, not additional success labels.};
+\end{tikzpicture}
+\caption{Failure-analysis taxonomy for the held-out evaluation. The useful
+unit is the individual clip/body rollout: aggregate success is accompanied by
+per-motion error traces and visual inspection to distinguish drift, local pose
+mismatch, contact failures, and difficult dynamic motion.}
+\label{fig:failure_taxonomy}
+\end{figure}
 
 \subsection{Corrected architecture comparison}\label{sec:architecture_results}
 
@@ -170,8 +191,9 @@ final snapshot is not a stable summary.
 \begin{table}[t]
 \centering
 \small
-\caption{Corrected 150-clip comparison, last-8-evaluation mean $\pm$ standard
-deviation. Refined-data cases (A--D) are scored against refined references and
+\caption{Latest corrected evaluation-fix ablations on the 150-clip development
+set. Values are the last-eight-evaluation mean $\pm$ standard deviation.
+Refined-data cases (A--D) are scored against refined references and
 unrefined-data cases (E--H) against unrefined references; the two halves are
 not a controlled cross-comparison (Section~\ref{sec:refinement_results}).
 Parameter counts and GPU-hours are from Table~\ref{tab:compute_accounting}.
@@ -331,9 +353,13 @@ whole-clip vertical mis-registration rather than per-frame jitter, which the
 clearance correction removes; clips that were already grounded stay grounded,
 so only 45\% of motions register a change. The cost is a roughly one-third
 increase in reference-domain position jerk that is broad rather than
-tail-driven (79\% of motions get jerkier, and the per-shape medians move
-together, 45.5 to 60.5), introduced by the per-window root-translation
-correction and the per-frame ground-clearance lift. This also explains the
+tail-driven: 79\% of motions get jerkier, and the effect is a clip property,
+not a shape property. Grouped by clip (150), the median jerk moves 30.8 to
+50.9 and the range spans 3.9--237 (unrefined) versus 3.4--246 (refined);
+grouped by body shape (128), the medians move 45.5 to 60.5 within a tight
+36--57 versus 51--74 band, so refinement raises jerk almost uniformly across
+morphologies. It is introduced by the per-window root-translation correction
+and the per-frame ground-clearance lift. This also explains the
 earlier observation that the unrefined slot/type run (E) shows lower
 policy-side jerk than the refined one (C): the refined \emph{reference} itself
 carries more position jerk, so a policy that tracks it faithfully inherits
@@ -359,9 +385,8 @@ reference-domain jerk is a known trade-off. A stronger, causal claim would
 require evaluating refined- and unrefined-trained checkpoints on one common
 reference version.
 
-\pending{Add per-clip and per-shape distributions for
-Table~\ref{tab:refine_audit} rather than corpus means. No causal full-scale
-refinement benefit is claimed.}
+\pending{No causal full-scale refinement benefit is claimed; a stronger claim
+would need a common-reference re-evaluation of the C and E checkpoints.}
 
 \subsection{Cross-shape consistency and qualitative evidence}
 

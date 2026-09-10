@@ -2,10 +2,14 @@
 
 The current evidence supports the feasibility of combining shape-specific
 references, matching simulation assets, and one shared controller at the
-scale of the constructed corpus. It does not yet identify the best
-architecture or establish a causal learning benefit from refinement.
-Those conclusions depend on the corrected comparisons, not on the
-pre-correction development curves.
+scale of the constructed corpus. The corrected 150-clip grid selects
+slot/type attention without adaLN-Zero, on the basis of a large, replicated
+jerk difference rather than the non-discriminating success-rate column, and
+this ordering is single-seed. The refinement audit shows the processed
+references have substantially less penetration and foot sliding at negligible
+fidelity cost, but no causal learning benefit from refined training is
+claimed: the refined and unrefined runs track different targets and were not
+cross-evaluated on a common reference.
 
 The dataset is derived from existing motion capture, captions, body models,
 and HUMOS generation. The 2,681,728 variants represent combinations of

@@ -13,8 +13,9 @@ control~\cite{pulse}; OmniH2O and ExBody2 target dexterous, deployable
 whole-body teleoperation and expressive control on physical
 humanoids~\cite{omnih2o,exbody2}; GMT uses a motion mixture-of-experts to
 track a broad motion distribution with one policy~\cite{gmt}. Each of these
-fixes the body and scales the motion distribution; we instead fix the
-tracking task and scale the body, holding 128 configurations under one
+typically targets a fixed robot platform or morphology while scaling the
+motion distribution; we instead fix the tracking task and scale the body,
+holding 128 configurations under one
 policy. We implement our experiments in
 ProtoMotions~\cite{protomotions} with Isaac Gym~\cite{isaacgym}, using PPO
 optimization~\cite{ppo}. Our contribution is the multi-morphology data and
@@ -24,11 +25,16 @@ simulation or learning frameworks.
 \subsection{Morphology-conditioned control and retargeting}
 
 Body-shape variation has already been studied in physics-based control:
-Won and Lee learned controllers that accommodate variation in character
-shape~\cite{won2019}. Morphology conditioning is therefore an established
-idea, and our work should not be interpreted as introducing it. We instead
-examine one controller over a large set of paired motions and bodies, with
-shape identity maintained throughout data generation, simulation, and evaluation.
+Won and Lee learned a parametric controller that accommodates variation in
+character height, weight, and proportions~\cite{won2019}. A separate line of
+work learns policies that transfer across changes in agent \emph{topology} --
+limb count and skeletal structure -- through shared modular
+sub-policies~\cite{smp2020}, which is a different axis from the continuous
+anthropometric variation studied here. Morphology conditioning is therefore
+an established idea, and our work should not be interpreted as introducing it.
+We instead examine one controller over a large set of paired motions and
+bodies, with shape identity maintained throughout data generation,
+simulation, and evaluation.
 
 Kinematic retargeting and dynamic tracking address different requirements.
 SMPL provides a common parameterized body representation~\cite{smpl}, and

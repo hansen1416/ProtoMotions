@@ -112,10 +112,10 @@ are included. Checkpoint/run split provenance refers to these artifacts,
 not just a verbal 90/5/5 ratio.
 
 The documented HUMOS configuration selects
-\path{logs/humos/q6zbv2tu/checkpoints/latest-epoch=1599.ckpt}.
-Exact HUMOS and asset-generation revisions and checkpoint checksums must
-be archived with the final dataset specification. A checkpoint path identifies
-the local workflow but is not a substitute for an immutable checksum.
+\path{logs/humos/q6zbv2tu/checkpoints/latest-epoch=1599.ckpt}. The immutable
+HUMOS checkpoint checksum and the SMPLSim / asset-generation revision hashes
+are to be archived with the dataset release; a checkpoint path identifies the
+local workflow but is not a substitute for a checksum.
 
 The principal implementation entry points are:
 \begin{itemize}
@@ -126,13 +126,16 @@ The principal implementation entry points are:
     \path{examples/experiments/mimic/mlp_wide_stage2_discover_attention_slot_type.py},
     inheriting the common attention experiment and enabling slot/type embeddings.
     \item Corrected development comparison:
-    \path{tools/train_150_evalfix_ablation.sh}, cases A--E with seed 0.
+    \path{tools/train_150_evalfix_ablation.sh} (cases A--E) and
+    \path{tools/train_150_evalfix_unrefined.sh} (cases F--H), seed 0.
     \item Motion residency and evaluation:
     \path{protomotions/components/global_clip_pool.py} and
     \path{protomotions/agents/evaluators/mimic_evaluator.py}.
-    \item Standalone validation:
-    \path{protomotions/evaluate_validation_split.py}. Its output must record
-    the selected checkpoint, split, reference version, and shape panel.
+    \item Standalone split evaluation:
+    \path{evaluate_validation_split.py} and \path{evaluate_test_split.py}
+    under \path{protomotions/}. Each output records the checkpoint, split,
+    reference version, and shape panel; the test evaluator additionally
+    checks the test-manifest hash, count, and disjointness before running.
 \end{itemize}
 
 For each final experiment, retain the resolved configuration, code revision,
@@ -144,7 +147,7 @@ The main full-scale W\&B identifier is \texttt{3mvgad6f}; the corrected
 small-scale group is \texttt{hhi\_150\_evalfix\_comparison}.
 The evaluation/sampling correction is recorded in commit \texttt{3685247}.
 
-\pending{Complete the immutable external-model/asset provenance, parameter
-counts, GPU-hour accounting, final per-pair evaluation exports, and caption
-coverage/alignment audit before treating this draft as a finalized benchmark
-report.}
+\pending{Two items remain before a finalized benchmark report: the immutable
+HUMOS/SMPLSim checksums (to be archived with the dataset release) and the
+release of the retained per-motion evaluation records for the validation and
+test splits.}

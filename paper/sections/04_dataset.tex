@@ -37,6 +37,32 @@ motion and matching simulated state feed one shared policy.
 the motion and body paths; text follows a separate identity-association path.}\label{fig:data_pipeline}
 \end{figure}
 
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[>=latex, node distance=0.7cm]
+\node[draw, rounded corners, fill=blue!8, minimum width=2.4cm, minimum height=0.8cm]
+  (source) {20,951 clip identities};
+\node[draw, rounded corners, fill=green!10, right=of source, minimum width=2.4cm, minimum height=0.8cm]
+  (variants) {$\times$ 128 bodies};
+\node[draw, rounded corners, fill=orange!12, right=of variants, minimum width=2.4cm, minimum height=0.8cm]
+  (total) {2,681,728 variants};
+\draw[->, thick] (source) -- (variants);
+\draw[->, thick] (variants) -- (total);
+\node[draw, rounded corners, below=0.75cm of variants, minimum width=2.1cm, minimum height=0.65cm]
+  (train) {18,855 train};
+\node[draw, rounded corners, right=0.35cm of train, minimum width=1.8cm, minimum height=0.65cm]
+  (val) {1,048 val};
+\node[draw, rounded corners, right=0.35cm of val, minimum width=1.8cm, minimum height=0.65cm]
+  (test) {1,048 test};
+\draw[->, thick] (source.south) |- (train.north);
+\draw[->, thick] (source.south) |- (val.north);
+\draw[->, thick] (source.south) |- (test.north);
+\end{tikzpicture}
+\caption{Scale and split structure of the derived corpus. Splitting is by clip
+identity, so all 128 body variants of a clip remain in the same partition.}
+\label{fig:dataset_scale}
+\end{figure}
+
 \subsection{Source motion and text provenance}\label{sec:source_data}
 
 We use the AMASS-derived motion portion of HumanML3D~\cite{amass,humanml3d}, with the 18 source collections listed in
@@ -57,10 +83,14 @@ provide the audit trail for that decision.
 Source descriptions are available through a separate clip-ID lookup and the
 HumanML3D annotation metadata used by HUMOS. A description is associated with
 the variants of its source clip; it is not a new human annotation for each
-generated body. Coverage, segment timing, and semantic fidelity of this
-association have not yet been exhaustively audited. In particular, mirrored
-motions may require left/right wording changes, and simply removing a mirror
-prefix does not establish a correct caption.
+generated body. A coarse coverage check against a single-caption-per-clip
+lookup finds a caption for all 20,951 clip identities, but semantic fidelity
+is not established. Of the 9,579 mirrored identities, 22\% carry a caption
+byte-identical to their un-mirrored source, and 40\% contain an explicit
+left/right or clockwise term that mirroring inverts; simply removing a mirror
+prefix therefore does not establish a correct caption. Segment timing and
+multi-annotation coverage against the full HumanML3D annotation set are not
+audited here.
 
 \subsection{Body sampling and shape-specific generation}\label{sec:body_generation}
 

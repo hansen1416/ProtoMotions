@@ -140,11 +140,33 @@ entire duration of a longer source clip.
 Final model comparisons should freeze the checkpoint, clip/shape panel,
 reference version, simulator configuration, and seed. Validation is available
 for model selection and has been repeatedly monitored; it is not an untouched
-test set. The independent test manifest remains outside training, and no
-test result is reported in this draft. The downloaded epoch-28,170
-\texttt{last.ckpt} is also distinct from the epoch-28,159 monitoring snapshot
-in Table~\ref{tab:full_results}; a new evaluation of that checkpoint must be
-reported separately.
+test set. The independent test manifest remains outside training and model
+selection; its one-time evaluation is reported in
+Section~\ref{sec:test_results}. The downloaded epoch-28,170
+\texttt{last.ckpt} is distinct from the epoch-28,159 monitoring snapshot
+in Table~\ref{tab:full_results}; the standalone validation and test results
+therefore refer explicitly to the downloaded checkpoint.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[>=latex, node distance=0.35cm, every node/.style={font=\small}]
+\node[draw, rounded corners, fill=blue!8, align=center, minimum width=2.05cm, minimum height=0.72cm] (clip) {clip identity\\+ manifest};
+\node[draw, rounded corners, fill=green!10, right=of clip, align=center, minimum width=2.15cm, minimum height=0.72cm] (pick) {SHA-256\\shape pick};
+\node[draw, rounded corners, fill=orange!12, right=of pick, align=center, minimum width=2.15cm, minimum height=0.72cm] (asset) {matching\\SMPLSim asset};
+\node[draw, rounded corners, fill=purple!10, right=of asset, align=center, minimum width=1.9cm, minimum height=0.72cm] (roll) {mean-action\\rollout};
+\node[draw, rounded corners, fill=gray!12, right=of roll, align=center, minimum width=1.75cm, minimum height=0.72cm] (metrics) {per-motion\\metrics};
+\draw[->, thick] (clip) -- (pick);
+\draw[->, thick] (pick) -- (asset);
+\draw[->, thick] (asset) -- (roll);
+\draw[->, thick] (roll) -- (metrics);
+\node[below=0.32cm of pick, align=center] {one body per clip\\(rotating panel)};
+\node[below=0.32cm of roll, align=center] {no gradients\\capped horizon};
+\end{tikzpicture}
+\caption{Standalone evaluation protocol. The clip list is fixed, while a
+reproducible hash-and-panel rule selects one body variant per clip; the
+selected reference and simulation asset therefore always match.}
+\label{fig:evaluation_protocol}
+\end{figure}
 
 \subsection{Metrics and aggregation}\label{sec:metrics}
 
@@ -261,13 +283,19 @@ The full-scale selected run shares C and E's architecture exactly (same
 encoder, transformer, and head widths;
 \texttt{mlp\_wide\_stage2\_discover\_attention\_slot\_type.py} inherits
 these constants unchanged from the 150-clip experiment file), so its
-parameter count is also 51,238,582.
-Its own GPU-hours are not included here: it ran on six GPUs with resumed
-segments and a changed resident-pool size after a memory-related failure,
-which is not a single comparable wall-clock number in the way the eight
-matched single-GPU development runs are.
-\pending{Add a resumed-run GPU-hour accounting for the full-scale training,
-including the failed launch before the resident-pool-size correction. No
-superior compute-efficiency claim is made from the current evidence -- the
-temporal MLP's lower wall-clock cost is not weighed against its higher
-position error relative to slot/type in Table~\ref{tab:ablation_results}.}
+parameter count is also 51,238,582. It ran on six A40 GPUs
+(\texttt{ddp}, 32-bit, 2,048 environments and an 8,192 minibatch per GPU) for
+roughly 28,170 epochs. The logged rank-0 wall time is about 77\,h, of which
+one interruption near epoch 760 accounts for about 3\,h, giving on the order
+of 450 GPU-hours; the run is not directly comparable to the eight matched
+single-GPU development runs. An early restart after a memory-related failure
+resumed from the last checkpoint with the resident pool reduced from 256 to
+128 clips per rank and the local cache multiplier set to 1.0; because
+configs are reloaded from the pickle on resume, the frozen configuration
+still records the pre-restart pool size of 256. The earlier failed launch was
+logged into the same run and is not separately quantifiable.
+\pending{Break the full-scale GPU-hours out by pre- and post-restart segment
+if the launcher logs are recovered. No superior compute-efficiency claim is
+made from the current evidence -- the temporal MLP's lower wall-clock cost is
+not weighed against its higher position error relative to slot/type in
+Table~\ref{tab:ablation_results}.}
