@@ -196,6 +196,64 @@ results for compute accounting. Small-scale development and full-scale
 training costs should be reported separately, including resumed segments and
 failed launches when discussing practical cost. GPU-hours, rather than
 epoch counts alone, quantify this budget.
-\pending{Consolidate per-run parameter counts and GPU-hours from the stored
-logs, and add repeated-seed comparisons. No superior compute-efficiency claim
-is made from the current evidence.}
+
+Table~\ref{tab:compute_accounting} reports parameter counts and single-A40
+wall-clock cost for the five corrected 150-clip runs, all completed at the
+recorded 6,000-epoch budget. Parameter counts are computed analytically from
+each run's resolved model configuration (encoder, transformer or flat-MLP,
+and head widths), not read from a stored checkpoint file, since every linear
+layer in this codebase is instantiated with \texttt{nn.LazyLinear} and has no
+fixed parameter count outside a materialized model.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Parameter counts and single-GPU wall-clock cost for the five
+corrected 150-clip runs (seed 0, one A40 each, 6,000 epochs completed).
+Actor and critic are separate networks with independent parameters; C and E
+share an architecture and therefore a parameter count.}\label{tab:compute_accounting}
+\begin{tabularx}{\linewidth}{@{}lrrrY@{}}
+\toprule
+Case & Actor params & Critic params & Total params & GPU-hours \\
+\midrule
+A & 57,349,557 & 8,524,801 & 65,874,358 & 15.8 \\
+B & 45,430,197 & 5,800,705 & 51,230,902 & 23.5 \\
+C & 45,434,037 & 5,804,545 & 51,238,582 & 23.7 \\
+D & 46,256,053 & 5,804,545 & 52,060,598 & 23.9 \\
+E & 45,434,037 & 5,804,545 & 51,238,582 & 23.9 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Two consequences run against a naive intuition. First, A has the most total
+parameters of any case, not the fewest: its actor's first layer reads the
+full raw concatenation of every observation category (5,248 dimensions)
+directly, which alone costs more parameters than B/C/D/E's three token
+encoders and transformer combined. The attention-based cases compress that
+same information to a 256-dimensional token per source before the shared
+final head, trading parameters for the added transformer computation.
+Second, despite having more parameters, A is the fastest case by a wide
+margin (15.8 vs.\ 23.5--23.9 GPU-hours) -- parameter count does not predict
+wall-clock cost here, since the attention cases pay for multiple sequential
+module calls (three encoders, then a transformer stack) rather than one
+large matrix multiplication chain. D's actor-only adaLN-Zero conditioning
+adds a small but non-negligible cost over C/E (roughly 822,000 actor
+parameters from the per-layer modulation networks and morphology encoder),
+consistent with, but not sufficient by itself to explain, the jerk
+difference discussed in Section~\ref{sec:results}.
+
+The full-scale selected run shares C and E's architecture exactly (same
+encoder, transformer, and head widths;
+\texttt{mlp\_wide\_stage2\_discover\_attention\_slot\_type.py} inherits
+these constants unchanged from the 150-clip experiment file), so its
+parameter count is also 51,238,582.
+Its own GPU-hours are not included here: it ran on six GPUs with resumed
+segments and a changed resident-pool size after a memory-related failure,
+which is not a single comparable wall-clock number in the way the five
+matched single-GPU development runs are.
+\pending{Add repeated-seed parameter/compute comparisons, and a resumed-run
+GPU-hour accounting for the full-scale training (including the failed
+launch before the resident-pool-size correction). No superior
+compute-efficiency claim is made from the current evidence -- A's lower
+wall-clock cost is not yet weighed against its lower success rate and
+higher gt\_error relative to C in Table~\ref{tab:ablations}.}

@@ -6325,3 +6325,20 @@ W&B: `yugoamaryl/hhi-protomotions`, group `hhi_150_evalfix_comparison`, run name
 `hhi_150_evalfix_{A..E}_seed0`. Per-run logs: `/tmp/hhi_150_evalfix/`. Only seed 0 is running;
 repeat seeds and results are pending. Final C/E comparisons require common evaluation references,
 since their training-time metrics use different target versions.
+
+## 78. Corrected Unrefined Ablations and Dataset/Architecture Decision (2026-09-10)
+
+Three matching unrefined-reference runs were added to the corrected 150-motion comparison. At the latest W&B summaries, F is complete and G/H are still running.
+
+| Run | Architecture | References | Status | Success rate | Normalized jerk |
+|---|---|---|---|---:|---:|
+| A (`axz18w3b`) | Temporal MLP | Refined | finished | 96.67% | 1,639.7 |
+| B (`hiqobxgg`) | Basic attention | Refined | finished | 94.67% | 3,472.0 |
+| C (`5u3gybgq`) | Slot/type attention | Refined | finished | **97.33%** | **1,584.9** |
+| D (`k1zp68h6`) | Slot/type + actor AdaLN-Zero | Refined | finished | 95.33% | 3,000.9 |
+| E (`5sms5090`) | Slot/type attention | Unrefined | finished | 96.67% | **1,321.3** |
+| F (`d34wpdkq`) | Temporal MLP | Unrefined | finished | 96.00% | 2,822.2 |
+| G (`a1s9derd`) | Basic attention | Unrefined | nearly finished | 97.33% | 3,092.3 |
+| H (`0zxt95fg`) | Slot/type + actor AdaLN-Zero | Unrefined | nearly finished | 98.00% | 2,836.7 |
+
+The provisional choice for full-scale training remains **slot/type attention without AdaLN-Zero, trained on refined references** (case C's design and data choice). Basic attention and AdaLN have substantially worse jerk. E is the smoothest run, but refined and unrefined runs were trained against different references, so its apparent refinement effect is not causal. Final dataset selection requires evaluating the checkpoints on identical clip/shape pairs and a common reference version after G/H finish. These are single-seed development results, not statistical architecture rankings.
