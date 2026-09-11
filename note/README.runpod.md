@@ -1,6 +1,6 @@
 cd /workspace && git clone -b feature/hhi https://github.com/hansen1416/ProtoMotions.git && cd ProtoMotions
 
-pip install gdown && apt update && apt install curl zip -y && curl https://rclone.org/install.sh | bash
+apt update && apt install curl zip -y && curl https://rclone.org/install.sh | bash
 
 <!-- 1024-raw.zip -->
 gdown 14IYbHhMxKARQ9nnEitJXyHwGGP0SFKHG
@@ -856,3 +856,5 @@ sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 
 codex resume 019ff1f9-8219-7931-a78c-8625ce2d843e
+
+

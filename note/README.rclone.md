@@ -130,8 +130,8 @@ python protomotions/record_video_mor.py \
     --compact-spawn-spacing 2.0 \
     --output results/hhi_wide_150motion_128shape_discover/visualize_videos/M002028_policy_8shapes.mp4
 
-rclone copy r2:proto-data/hard_clips_discover_lineage/ /workspace/small_motion_cache/ \
---transfers=4 --multi-thread-streams=16 --multi-thread-chunk-size=128M \
+rclone copy humos_datasets_subset.tar.gz r2:proto-data/humos/ \
+--transfers=1 --multi-thread-streams=16 --multi-thread-chunk-size=128M \
 --s3-no-check-bucket --progress
 
 claude --resume 6babb982-763f-498c-80f1-70f8913dfa54
