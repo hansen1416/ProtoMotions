@@ -91,7 +91,9 @@ The 98.47\% result supports strong tracking of the selected held-out
 clip/body pairs under the specified threshold, though it speaks only to
 those pairs: all-body success, unseen-body generalization, and an untouched
 test-set score are evaluated separately below and in
-Section~\ref{sec:unseen_morphology}. Because a successful rollout can still
+Section~\ref{sec:unseen_morphology}. Figure~\ref{fig:learning_curve} shows
+this success rate over the course of training, before and after the
+evaluation-protocol correction described above. Because a successful rollout can still
 have visible local errors or jitter, we complement the thresholded success
 rate with position, rotation, and smoothness measures throughout.
 
