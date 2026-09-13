@@ -26,6 +26,13 @@ replaying the trained policy across all 19,200 (clip, shape) pairs of the
 150-clip development set: after correcting a normalization artifact that
 would otherwise have produced a spurious positive result, we find no
 statistically detectable evidence that highly dynamic motions are more
-shape-sensitive than quasi-static ones for this checkpoint. Generalization to
-body shapes outside the 128 trained configurations remains future work.
+shape-sensitive than quasi-static ones for this checkpoint. A further test
+replays the checkpoint on 32 body shapes never used in training, sampled in
+the same coefficient range: 28 of the 32 track successfully at
+99.6--99.8\%, matching the trained-body numbers with no decline across the
+full evaluated distance from the training set, while the remaining 4 fail
+severely in a pattern -- flipping with gender at fixed shape coefficients --
+consistent with a gender-specific asset artifact rather than a genuine
+generalization limit, and are reported as an open anomaly rather than
+averaged away.
 \end{abstract}

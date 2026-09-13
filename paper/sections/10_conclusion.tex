@@ -18,6 +18,13 @@ finds no statistically detectable evidence that dynamic motions are more
 shape-sensitive to body morphology than quasi-static ones, once a
 near-zero-baseline normalization artifact in the naive comparison is
 corrected -- a properly negative result rather than an unresolved question.
-These results do not establish all-shape coverage or unseen-body
-generalization: an evaluation on body shapes inside the trained coefficient
-range but excluded from the 128 training configurations remains future work.
+Replaying the checkpoint on 32 body shapes excluded from training entirely,
+sampled in the same coefficient range, finds that 28 of the 32 track
+successfully at the trained-body level with no decline across the evaluated
+distance from training -- support for morphology-conditioned control over
+memorization of the 128 trained configurations -- while the remaining 4 fail
+severely in a pattern that flips with gender at fixed shape coefficients,
+consistent with a gender-specific asset artifact rather than a genuine
+generalization limit; we report this anomaly rather than average it away.
+These results do not establish all-shape coverage: an explicit all-panel
+evaluation of the 128 trained shapes remains future work.

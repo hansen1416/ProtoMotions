@@ -221,14 +221,14 @@ computed separately.
 \subsection{Generalization axes and compute accounting}
 
 Held-out clips on trained bodies, seen clips on unseen bodies, and held-out
-clips on unseen bodies are different evaluations. The current validation
-snapshot addresses only the first. A single rotating panel does not
-measure all 128 variants of every clip. Future cross-shape comparisons must
-report the actual body identities and number of evaluated pairs. The planned
-unseen-morphology evaluation in Section~\ref{sec:unseen_morphology} targets
-the third axis directly, on shapes drawn from the trained coefficient range
-but excluded from the 128 training configurations, with results stratified by
-distance to the nearest training morphology.
+clips on unseen bodies are different evaluations. The main validation and
+test tables address only the first. A single rotating panel does not
+measure all 128 variants of every clip, and future cross-shape comparisons
+must report the actual body identities and number of evaluated pairs. The
+unseen-morphology evaluation in Section~\ref{sec:unseen_morphology} covers
+the other two axes directly, on shapes drawn from the trained coefficient
+range but excluded from the 128 training configurations, with results
+stratified by distance to the nearest trained morphology.
 
 We retain W\&B logs, resolved configurations, checkpoint epochs, and local
 results for compute accounting. Small-scale development and full-scale

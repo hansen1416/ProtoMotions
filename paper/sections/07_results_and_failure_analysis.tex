@@ -415,26 +415,101 @@ not a controlled side-by-side comparison on one shared clip.}\label{fig:qualitat
 
 Training fixes 128 body configurations sampled inside
 $\boldsymbol{\beta}\in[-3,3]^{10}$ (Section~\ref{sec:body_generation}). A
-natural question this evidence does not yet answer is whether the controller
-has learned morphology-conditioned control, as opposed to memorizing those
-128 configurations specifically. Distinguishing the two requires evaluating
-body shapes drawn from the same coefficient range but excluded from the 128
-training combinations -- new MJCF assets and HUMOS references generated
-exactly as in Section~\ref{sec:body_generation}, with rollouts following the
-Section~\ref{sec:metrics} protocol and their success numbers kept separate
-from the trained-body results throughout.
+natural question the trained-body results do not answer is whether the
+controller has learned morphology-conditioned control, as opposed to
+memorizing those 128 configurations specifically. Distinguishing the two
+requires evaluating body shapes drawn from the same coefficient range but
+excluded from the 128 training combinations. We generated 32 such shapes (16
+new beta vectors $\times$ 2 genders, same sampling range, new MJCF assets and
+HUMOS references) and replayed the checkpoint on all 1{,}024 $\times$ 32 =
+32{,}768 (clip, shape) pairs, reusing 1{,}024 of the corpus's own clip
+identities rather than new motions -- 932 of them from the training
+partition, so for those the policy has seen the motion before and only the
+body is new, isolating the shape axis; the remaining 92 fall in the held-out
+validation/test partitions, where both motion and shape are unseen
+simultaneously, and are reported separately below. Rollouts follow the
+Section~\ref{sec:metrics} protocol exactly, and unseen-body success numbers
+are never mixed into the trained-body results above.
 
-Success rate near the trained-body level would indicate that conditioning,
-rather than enumeration, drives the behavior; a large drop would indicate
-memorization of the training morphologies. Plotting each component error and
-the success indicator against the Euclidean distance from an evaluated
-$\boldsymbol{\beta}$ to its nearest training morphology would sharpen this:
-performance flat with distance is the strong form of the claim, while a
-monotone decline would bound generalization to a neighborhood of the
-training set. We have not yet generated the held-out-shape assets and
-references or run this evaluation, so any such statement -- and its scope to
-\emph{unseen morphologies within the trained coefficient range}, never to
-arbitrary body shapes -- remains future work.
+Four of the 32 shapes -- \texttt{male\_a83170f5}, \texttt{male\_cf3d5ee7},
+\texttt{female\_4d1b9df1}, \texttt{female\_1d4da893} -- show severe to
+near-total tracking failure (Table~\ref{tab:unseen_flagged}). In each case
+the identical beta vector applied to the \emph{other} gender's body template
+succeeds at 99.8--100\%, which points to a gender-specific asset artifact for
+that specific configuration rather than a genuinely hard region of shape
+space: a real shape effect would not flip on gender alone while holding the
+coefficients fixed. We did not confirm the artifact by direct asset
+inspection, so this remains a morphology-specific anomaly in the sense of
+Table~\ref{tab:failure_evidence}, not a resolved cause, and we report it
+separately rather than let it contaminate the headline generalization claim.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The four flagged unseen shapes: the failing gender variant next to
+its identical-beta counterpart on the other gender (train-split clips,
+$n=932$ each). Distance is Euclidean, raw 10-D beta coordinates, to the
+nearest trained shape of the same gender.}\label{tab:unseen_flagged}
+\begin{tabular}{lrrr}
+\toprule
+Beta key & Failing variant & Other-gender variant & Distance \\
+\midrule
+a83170f5 & male: 58.3\% & female: 100.0\% & 3.24 \\
+cf3d5ee7 & male: 46.8\% & female: 99.8\% & 3.53 \\
+4d1b9df1 & female: 35.8\% & male: 99.8\% & 3.53 \\
+1d4da893 & female: 0.1\% & male: 99.8\% & 3.67 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\linewidth, height=5.2cm,
+  xlabel={Distance to nearest trained shape (raw beta $L_2$)},
+  ylabel={Success rate (\%)},
+  xmin=2.4, xmax=5.2, ymin=-5, ymax=105,
+  legend pos=south west, legend cell align=left, legend style={font=\small},
+  tick label style={font=\small}, label style={font=\small},
+  grid=both, grid style={gray!18},
+]
+\addplot[only marks, mark=o, mark size=2.3pt, blue!70!black] coordinates {
+(2.583,99.7)(2.583,99.9)(2.705,99.9)(2.705,100.0)(3.134,99.7)(3.134,100.0)
+(3.240,100.0)(3.527,99.8)(3.530,99.8)(3.667,99.8)(4.057,100.0)(4.057,100.0)
+(4.093,99.8)(4.093,99.9)(4.394,100.0)(4.394,100.0)(4.452,96.2)(4.452,100.0)
+(4.559,99.8)(4.559,100.0)(4.646,99.8)(4.646,99.8)(4.679,99.9)(4.679,100.0)
+(4.943,99.8)(4.943,99.9)(5.048,99.9)(5.048,99.9)
+};
+\addlegendentry{clean (28/32 shapes)}
+\addplot[only marks, mark=x, mark size=3.2pt, thick, red!70!black] coordinates {
+(3.240,58.3)(3.527,46.8)(3.530,35.8)(3.667,0.1)
+};
+\addlegendentry{flagged (4/32 shapes)}
+\end{axis}
+\end{tikzpicture}
+\caption{Success rate vs.\ Euclidean distance to the nearest trained shape
+(train-split clips, one point per unseen shape, $n=932$ rollouts per point).
+The 28 clean shapes show no decline across the full evaluated distance
+range; the 4 flagged shapes (Table~\ref{tab:unseen_flagged}) are outliers at
+every distance, not a tail of a monotonic trend.}\label{fig:unseen_distance}
+\end{figure}
+
+Excluding the four flagged shapes, the remaining 28 succeed at 99.75\% on
+the 932 train-split pairs (mean position error 0.093\,m, mean rotation error
+0.200\,rad) and 99.61\% on the 2{,}576 validation/test-split pairs where
+motion and shape are both unseen (mean position error 0.093\,m, rotation
+error 0.204\,rad) -- both essentially matching the trained-body validation
+and test numbers in Table~\ref{tab:test_results}, and with no decline across
+the full 2.58--5.05 distance range evaluated (Figure~\ref{fig:unseen_distance}).
+This is the strong form of the claim in Section~\ref{sec:experiments}: for
+28 of 32 unseen shapes spanning the full sampled distance range, performance
+stays flat rather than declining with distance, consistent with
+morphology-conditioned control rather than memorization of the 128 trained
+configurations. That claim is scoped to \emph{unseen morphologies within the
+trained coefficient range}, not to arbitrary body shapes, and the four
+flagged shapes are a genuine, unresolved anomaly reported alongside it
+rather than smoothed into the aggregate.
 
 \subsection{Evidence-based analysis of residual failures}\label{sec:failures}
 

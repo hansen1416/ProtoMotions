@@ -43,11 +43,13 @@ mirrored variants stay together, but the current split is not demonstrated
 to be subject- or source-recording-disjoint. Validation reuses the trained
 body set and has been monitored during development. Its rotating panel
 covers only one shape per clip at a time, and long clips have a capped
-evaluation horizon. Fixed-pair test evaluation and the unseen-morphology
-experiment in Section~\ref{sec:unseen_morphology} remain necessary for
-broader claims, and any morphology-generalization statement is confined to
-body shapes inside the trained coefficient range rather than arbitrary
-bodies.
+evaluation horizon. The unseen-morphology test in
+Section~\ref{sec:unseen_morphology} supports morphology conditioning over
+memorization for 28 of 32 held-out shapes, but the remaining 4 are a
+genuine, unresolved anomaly, and an explicit all-panel evaluation of the 128
+trained shapes remains future work. Any morphology-generalization statement
+is confined to body shapes inside the trained coefficient range rather than
+arbitrary bodies.
 
 The success threshold is permissive relative to fine-grained pose accuracy.
 A high success rate should be read together with continuous errors,

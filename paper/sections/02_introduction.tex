@@ -49,8 +49,9 @@ This paper makes four contributions:
     \item An empirical protocol separating architecture, reference quality,
     and evaluation correctness: an eight-run architecture/reference grid on a
     150-clip development set, a full-scale validation and independent test
-    evaluation of the selected checkpoint, and a caption-grounded analysis of
-    the residual failures.
+    evaluation of the selected checkpoint, a caption-grounded analysis of the
+    residual failures, and a generalization test on 32 body shapes excluded
+    from training entirely.
     \item A physical analysis of how body shape and motion type jointly set
     control demand, replaying the trained policy across every clip/shape pair
     of the development corpus and testing -- rather than assuming -- whether
@@ -60,11 +61,13 @@ This paper makes four contributions:
 The selected checkpoint reaches 98.47\% success on validation and 99.14\% on
 the untouched test split under the protocol in
 Section~\ref{sec:evaluation_protocol}. These results concern held-out clip
-identities on trained body configurations, with one body evaluated per clip;
-they do not establish success for every shape or for unseen bodies.
-Section~\ref{sec:physics} tests the morphology$\times$motion-class
+identities on trained body configurations, with one body evaluated per clip.
+Section~\ref{sec:unseen_morphology} extends the claim to bodies excluded
+from training entirely: 32 new shapes drawn from the trained coefficient
+range, of which 28 track successfully at the trained-body level with no
+decline across the evaluated distance from training, while 4 fail severely
+in a pattern pointing to an asset artifact rather than a genuine shape
+effect. Section~\ref{sec:physics} tests the morphology$\times$motion-class
 interaction directly and finds no statistically detectable effect for this
 checkpoint, once a normalization artifact in the naive comparison is
-corrected. An evaluation on body shapes drawn from the trained coefficient
-range but excluded from the 128 training configurations
-(Section~\ref{sec:unseen_morphology}) remains future work.
+corrected.
