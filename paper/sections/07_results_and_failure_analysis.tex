@@ -389,12 +389,27 @@ A useful qualitative comparison places several bodies performing the same
 clip side by side, with reference markers and a shared time axis; source
 descriptions can identify the action once mirrored and cropped captions have
 been checked, and reference-only videos illustrate the generated corpus
-without standing in for successful policy rollouts. Quantitative cross-shape
-analysis instead requires the same clip evaluated on an explicit body panel,
-reporting both aggregate accuracy and variation across shapes -- including
-the number of clips that succeed on every tested body, a statistic the
-rotating one-shape snapshot used above cannot provide. This explicit-panel
-evaluation, and the unseen-morphology study below, remain future work.
+without standing in for successful policy rollouts. Figure~\ref{fig:qualitative_multibody}
+shows a single frame from a recorded simulation video: several of the
+trained body configurations executing the controller side by side, rendered
+as the simulator's collision-geometry capsules rather than SMPL surface
+mesh. Quantitative cross-shape analysis instead requires the same clip
+evaluated on an explicit body panel, reporting both aggregate accuracy and
+variation across shapes -- including the number of clips that succeed on
+every tested body, a statistic the rotating one-shape snapshot used above
+cannot provide. This explicit-panel evaluation, and the unseen-morphology
+study below, remain future work.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.75\linewidth]{figures/qualitative_multibody.png}
+\caption{A frame from a recorded simulation video, showing several of the
+128 trained body configurations executing the controller simultaneously in
+parallel environments. Bodies are rendered as the simulator's
+collision-geometry capsules (Section~\ref{sec:body_generation}), not the
+SMPL surface mesh; this illustrates simultaneous multi-body execution and is
+not a controlled side-by-side comparison on one shared clip.}\label{fig:qualitative_multibody}
+\end{figure}
 
 \subsubsection{Unseen-morphology generalization}\label{sec:unseen_morphology}
 
