@@ -1,0 +1,302 @@
+\section{Experimental Setup}\label{sec:experiments}
+
+\subsection{Development subset and full-scale protocol}
+
+The development corpus contains 150 clips and all 128 body configurations,
+for 19,200 variants. These clips are reserved within the full training split
+and are not a held-out generalization benchmark. Small-scale experiments
+investigate architecture and reference-processing choices with a fixed
+simulation budget. The full-scale run uses the 18,855 training clips in
+Table~\ref{tab:dataset_counts}, with validation membership fixed throughout.
+
+The selected full-scale experiment is slot/type attention trained directly on
+refined references. Its code retains a historical \texttt{stage2} name, but
+this run does not use neutral pretraining followed by shape transfer.
+Table~\ref{tab:training_parameters} records the shared optimization settings
+and the actual environment/batch sizes used after the initial memory-related
+launch adjustments. Run-specific resolved configurations take precedence
+over older launch examples.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Training configuration and budgets. Environment and minibatch counts
+are per GPU. The full-scale frame count is a recorded stopping snapshot,
+not a budget matched to the development runs.}\label{tab:training_parameters}
+\begin{tabularx}{\linewidth}{@{}lYY@{}}
+\toprule
+Setting & Corrected 150-clip runs & Full-scale selected run \\
+\midrule
+Parallel GPUs per policy & 1 & 6 \\
+Environments per GPU & 4,096 & 2,048 \\
+PPO minibatch size per GPU & 16,384 & 8,192 \\
+Rollout length & 32 control steps & 32 control steps \\
+Mini-epochs per update & 1 & 1 \\
+Actor / critic learning rates &
+$2\times10^{-5}$ / $10^{-4}$ & $2\times10^{-5}$ / $10^{-4}$ \\
+Discount / GAE / ratio clip & 0.99 / 0.95 / 0.2 & 0.99 / 0.95 / 0.2 \\
+Gradient norm clip & 50 & 50 \\
+Evaluation cadence & 200 epochs & 256 epochs \\
+Training seed & 0 (all eight runs) & Recorded in saved run configuration \\
+Reference residency & All 150 clips & 256, later 128 clips per GPU \\
+Training frames & 786,432,000 per run (6,000 epochs) & Approximately $11.07\times10^9$ recorded \\
+Status of reported evidence & Completed, Table~\ref{tab:ablation_results} & Epoch-28,170 checkpoint, Table~\ref{tab:test_results} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Architecture and refinement controls}\label{sec:ablation_design}
+
+The corrected comparison is a four-architecture by two-reference-version grid,
+Table~\ref{tab:ablations}. The four architectures are a wide flat temporal
+MLP, basic temporal attention, attention with slot/type embeddings, and that
+last model plus actor-only adaLN-Zero. Each is trained once on refined
+references (A--D) and once on unrefined references (E--H); slot/type on
+unrefined references is labelled E rather than a separate letter for
+historical reasons. All eight runs use one seed, a single A40, the same
+6,000-epoch budget, evaluation cadence, and shape-sampling seed.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Corrected 150-clip grid: four architectures $\times$ two reference
+versions, one seed each. Results are in Table~\ref{tab:ablation_results}.}\label{tab:ablations}
+\begin{tabularx}{\linewidth}{@{}llYY@{}}
+\toprule
+Case & References & Architecture & Comparison purpose \\
+\midrule
+A & Refined & Wide temporal MLP; beta concatenation &
+Temporal MLP baseline. \\
+B & Refined & Basic temporal attention &
+Attention versus flattened temporal input. \\
+C & Refined & Attention with slot/type embeddings &
+Explicit temporal/source identity. \\
+D & Refined & C + actor-only adaLN-Zero &
+Morphology modulation with critic unchanged. \\
+E & Unrefined & As C &
+Reference version at fixed architecture (slot/type). \\
+F & Unrefined & As A &
+Reference version at fixed architecture (temporal MLP). \\
+G & Unrefined & As B &
+Reference version at fixed architecture (attention). \\
+H & Unrefined & As D &
+Reference version at fixed architecture (slot/type + adaLN). \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+All eight runs use seed 0 and one A40 GPU per policy. Morphology
+concatenation into both heads is retained in D and H; adaLN-Zero is additional
+actor conditioning, not a replacement for the critic or a two-stage schedule.
+
+The models do not have equal parameter counts (Table~\ref{tab:compute_accounting}).
+The grid is single-seed; the architecture ordering in
+Table~\ref{tab:ablation_results} rests on the jerk difference, which recurs
+under both reference versions, and not on the success-rate column, which is
+treated as non-discriminating. The refined and unrefined pairs (A/F, B/G, C/E, D/H) are each
+evaluated against their own reference version, so they measure whether refined
+training costs policy quality, not whether it causally improves accuracy; the
+refinement argument is completed by the offline reference-artifact audit in
+Section~\ref{sec:refinement_results} rather than by a common-reference
+controller re-evaluation. A causal comparison would require scoring
+refined- and unrefined-trained checkpoints on one shared reference version.
+
+Earlier small-scale runs influenced the choice to begin full-scale slot/type
+training. The corrected reruns were launched later to reassess that choice;
+we do not present them as completed model selection preceding the full run.
+
+\subsection{Morphology-matched evaluation and checkpoint scope}\label{sec:evaluation_protocol}
+
+Each reference is rolled out only in an environment using its exact asset
+identity (Figure~\ref{fig:evaluation_protocol}). A selected reference
+therefore cannot be assigned to a different body simply because an
+environment slot is available. Multiple rollout batches may be needed when
+several references require the same body.
+
+Routine monitoring selects one variant per clip. With seed $s=42$, stable
+clip identity $c$, panel index $p$, and $N_c$ available variants, the choice is
+\begin{equation}
+    k(c,p) =
+    \left(
+       \operatorname{uint64}_{\mathrm{big}}
+       \bigl(\operatorname{SHA256}(s\!:\!c)_{0:8}\bigr)
+       +p
+    \right)\bmod N_c .
+    \label{eq:shape_panel}
+\end{equation}
+Here $s\!:\!c$ is the UTF-8 string formed as \texttt{seed:clip\_id}.
+For scheduled monitoring, $p$ is the integer quotient of the checkpointed
+epoch and evaluation cadence. This produces deterministic staggered shape
+choices that rotate across evaluations and remain reproducible after resume.
+The validation \emph{clip list} is fixed; the selected \emph{shape panel}
+changes. Thus successive scores are not repeated measurements on an
+identical set of clip/shape pairs.
+
+Evaluation uses the mean action, reference initialization, and no gradient
+tracking. It disables training termination and records errors over the
+valid reference horizon, capped at 600 control steps (20\,s at 30\,Hz).
+Success therefore refers to the evaluated horizon, not necessarily the
+entire duration of a longer source clip.
+
+Final model comparisons should freeze the checkpoint, clip/shape panel,
+reference version, simulator configuration, and seed. Validation is available
+for model selection and has been repeatedly monitored; it is not an untouched
+test set. The independent test manifest remains outside training and model
+selection; its one-time evaluation is reported in
+Section~\ref{sec:test_results}. The downloaded epoch-28,170
+\texttt{last.ckpt} is distinct from the epoch-28,159 monitoring snapshot
+in Table~\ref{tab:full_results}; the standalone validation and test results
+therefore refer explicitly to the downloaded checkpoint.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[>=latex, node distance=0.35cm, every node/.style={font=\small}]
+\node[draw, rounded corners, fill=blue!8, align=center, minimum width=2.05cm, minimum height=0.72cm] (clip) {clip identity\\+ manifest};
+\node[draw, rounded corners, fill=green!10, right=of clip, align=center, minimum width=2.15cm, minimum height=0.72cm] (pick) {SHA-256\\shape pick};
+\node[draw, rounded corners, fill=orange!12, right=of pick, align=center, minimum width=2.15cm, minimum height=0.72cm] (asset) {matching\\SMPLSim asset};
+\node[draw, rounded corners, fill=purple!10, right=of asset, align=center, minimum width=1.9cm, minimum height=0.72cm] (roll) {mean-action\\rollout};
+\node[draw, rounded corners, fill=gray!12, right=of roll, align=center, minimum width=1.75cm, minimum height=0.72cm] (metrics) {per-motion\\metrics};
+\draw[->, thick] (clip) -- (pick);
+\draw[->, thick] (pick) -- (asset);
+\draw[->, thick] (asset) -- (roll);
+\draw[->, thick] (roll) -- (metrics);
+\node[below=0.32cm of pick, align=center] {one body per clip\\(rotating panel)};
+\node[below=0.32cm of roll, align=center] {no gradients\\capped horizon};
+\end{tikzpicture}
+\caption{Standalone evaluation protocol. The clip list is fixed, while a
+reproducible hash-and-panel rule selects one body variant per clip; the
+selected reference and simulation asset therefore always match.}
+\label{fig:evaluation_protocol}
+\end{figure}
+
+\subsection{Metrics and aggregation}\label{sec:metrics}
+
+For each evaluated clip/shape pair $i$, define its per-frame mean body
+position error
+\begin{equation}
+    d_{i,t} = \frac{1}{B}\sum_{j=1}^{B}
+                 \|p_{i,t,j}-\hat{p}_{i,t,j}\|_2 .
+\end{equation}
+The configured success indicator is
+\begin{equation}
+    S_i = \mathbf{1}\!\left[
+             \max_{t<T_i}d_{i,t}\leq 0.5\ \mathrm{m}
+          \right],
+    \label{eq:success}
+\end{equation}
+where $T_i$ is the evaluated horizon. This threshold is deliberately distinct
+from the smoother training reward. Passing it does not imply fine-grained
+pose accuracy or biomechanical realism.
+
+We also report time-averaged mean body-position error, mean global
+body-rotation geodesic error, and the time average of the largest body-position
+error within each frame -- the logged \emph{mean maximum-joint error}, a
+per-frame worst-body statistic averaged over time rather than a single
+dataset-wide maximum. Global body-rotation error is a whole-body geodesic
+measure, not a local joint-angle/DOF error.
+
+Within an evaluator rank, errors are averaged over valid frames per motion
+and then over motions, including failed rollouts. The distributed training
+logger aggregates scalar summaries across ranks; the monitoring table
+retains those logged values rather than reconstructing exact pooled counts.
+Final offline comparisons should aggregate saved per-motion records over
+unique clip/shape pairs, avoiding unequal weighting of partially filled
+batches or duplicate padded rollouts.
+
+Trajectory smoothness uses the implementation's windowed normalized-jerk
+score, with the definition and numerical regularizers in
+Appendix~\ref{app:smoothness}. Lower scores indicate lower jerk under that
+fixed convention. The accompanying high-jerk statistic is the percentage
+of windows in which any body exceeds threshold 6,500; the logger calls it
+a frame percentage, but it is window-based.
+
+Action increments require care. The current evaluator stores raw policy
+actions, before Equation~\eqref{eq:action_mapping}. Their differences are
+policy-output changes, not physical joint-angle changes, even where logger
+field names label them radians or degrees. We omit those mislabeled angular
+values from the physical interpretation and from Table~\ref{tab:full_results}.
+PD-target changes, applied torques, and measured joint motion must be
+computed separately.
+
+\subsection{Generalization axes and compute accounting}
+
+Held-out clips on trained bodies, seen clips on unseen bodies, and held-out
+clips on unseen bodies are different evaluations. The current validation
+snapshot addresses only the first. A single rotating panel does not
+measure all 128 variants of every clip. Future cross-shape comparisons must
+report the actual body identities and number of evaluated pairs. The planned
+unseen-morphology evaluation in Section~\ref{sec:unseen_morphology} targets
+the third axis directly, on shapes drawn from the trained coefficient range
+but excluded from the 128 training configurations, with results stratified by
+distance to the nearest training morphology.
+
+We retain W\&B logs, resolved configurations, checkpoint epochs, and local
+results for compute accounting. Small-scale development and full-scale
+training costs should be reported separately, including resumed segments and
+failed launches when discussing practical cost. GPU-hours, rather than
+epoch counts alone, quantify this budget.
+
+Table~\ref{tab:compute_accounting} reports parameter counts and single-A40
+wall-clock cost for the eight corrected 150-clip runs, all completed at the
+6,000-epoch budget. Parameter counts are computed analytically from
+each run's resolved model configuration (encoder, transformer or flat-MLP,
+and head widths), not read from a stored checkpoint file, since every linear
+layer in this codebase is instantiated with \texttt{nn.LazyLinear} and has no
+fixed parameter count outside a materialized model. Parameter count is set by
+the architecture only, so the refined/unrefined pairs share a count
+(A/F, B/G, C/E, D/H).
+
+\begin{table}[t]
+\centering
+\small
+\caption{Parameter counts and single-GPU wall-clock cost for the eight
+corrected 150-clip runs (seed 0, one A40 each, 6,000 epochs). Actor and
+critic are separate networks with independent parameters.}\label{tab:compute_accounting}
+\begin{tabularx}{\linewidth}{@{}llrrrY@{}}
+\toprule
+Case & Arch & Actor params & Critic params & Total params & GPU-h \\
+\midrule
+A / F & temporal MLP        & 57,349,557 & 8,524,801 & 65,874,358 & 15.8 / 14.4 \\
+B / G & attention           & 45,430,197 & 5,800,705 & 51,230,902 & 23.5 / 21.5 \\
+C / E & slot/type           & 45,434,037 & 5,804,545 & 51,238,582 & 23.7 / 23.9 \\
+D / H & slot/type + adaLN   & 46,256,053 & 5,804,545 & 52,060,598 & 23.9 / 22.4 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Two consequences run against a naive intuition. First, the temporal MLP has
+the most total parameters of any architecture, not the fewest: its actor's
+first layer reads the full raw concatenation of every observation category
+(5,248 dimensions) directly, which alone costs more parameters than the
+attention models' three token encoders and transformer combined. The
+attention models compress that same information to a 256-dimensional token
+per source before the shared final head, trading parameters for the added
+transformer computation. Second, despite having more parameters, the temporal
+MLP is the fastest to train by a wide margin (15.8/14.4 vs.\ 21.5--23.9
+GPU-hours) -- parameter count does not predict wall-clock cost here, since the
+attention models pay for multiple sequential module calls (three encoders,
+then a transformer stack) rather than one large matrix multiplication chain.
+Actor-only adaLN-Zero adds a small but non-negligible cost over slot/type
+(roughly 822,000 actor parameters from the per-layer modulation networks and
+morphology encoder), consistent with, but not sufficient by itself to
+explain, the jerk difference in Section~\ref{sec:architecture_results}.
+
+The full-scale selected run shares C and E's architecture exactly (same
+encoder, transformer, and head widths --
+\path{mlp_wide_stage2_discover_attention_slot_type.py} inherits these
+constants unchanged from the 150-clip experiment file), so its parameter
+count is also 51,238,582. It ran on six A40 GPUs (\texttt{ddp}, 32-bit,
+2,048 environments and an 8,192 minibatch per GPU) for roughly 28,170
+epochs. The logged rank-0 wall time is about 77\,h, of which one interruption
+near epoch 760 accounts for about 3\,h, giving on the order of 450 GPU-hours;
+this run is not directly comparable to the eight matched single-GPU
+development runs. An early restart after a memory-related failure resumed
+from the last checkpoint with the resident pool reduced from 256 to 128
+clips per rank and the local cache multiplier set to 1.0; because configs
+are reloaded from the pickle on resume, the frozen configuration still
+records the pre-restart pool size of 256, and the earlier failed launch,
+logged into the same run, is not separately quantifiable pending recovery of
+the launcher logs. We draw no compute-efficiency claim from this accounting:
+the temporal MLP's lower wall-clock cost in Table~\ref{tab:compute_accounting}
+is not weighed here against its higher position error relative to slot/type
+in Table~\ref{tab:ablation_results}.

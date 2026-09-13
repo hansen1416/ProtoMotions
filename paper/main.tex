@@ -1,0 +1,51 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs,array,tabularx}
+\usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usetikzlibrary{positioning}
+\usepgfplotslibrary{groupplots}
+\usepgfplotslibrary{statistics}
+\usepackage[hidelinks]{hyperref}
+\urlstyle{same}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\SO}{\mathrm{SO}}
+\newcommand{\R}{\mathbb{R}}
+
+\title{Morphology-Conditioned Physics-Based Motion Imitation\\
+Across 128 Body Shapes}
+\author{}
+\date{}
+
+% Compile from paper/; figures are native pgfplots (no image files).
+% Technical-report mapping: abstract = summary; introduction = contributions;
+% dataset = provenance/scope; method = implementation; setup = metric definitions;
+% results = evidence; discussion = limitations; appendix = reproducibility.
+% Evidence cutoff: 2026-09-13. Full-scale values from README.note.md sections 76 and 79;
+% 150-clip grid from section 78; physical analysis from section 78 continuation.
+% Unseen-morphology evaluation and repeated-seed cross-shape panel evaluation remain
+% future work (Section 6.5.1).
+
+\begin{document}
+\maketitle
+\input{sections/01_abstract}
+
+\input{sections/02_introduction}
+\input{sections/03_related_work}
+\input{sections/04_dataset}
+\input{sections/05_method}
+\input{sections/06_experimental_setup}
+\input{sections/07_results_and_failure_analysis}
+\input{sections/08_physical_analysis}
+\input{sections/09_discussion}
+\input{sections/10_conclusion}
+
+\appendix
+\input{sections/11_reproducibility}
+\input{references}
+\end{document}

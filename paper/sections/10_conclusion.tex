@@ -1,0 +1,23 @@
+\section{Conclusion}\label{sec:conclusion}
+
+We have described a text-associated multi-morphology motion corpus and a
+physics-based imitation system that preserves the correspondence between
+source clips, generated references, and simulated bodies. The construction
+combines AMASS/HumanML3D provenance, HUMOS generation, SMPLSim assets,
+conservative reference refinement, and deterministic clip-grouped splits.
+The controller uses temporal slot/type attention with morphology information
+in both actor and critic and is trained directly across body configurations.
+
+Offline evaluation of the selected checkpoint gives 98.47\% success on
+validation and 99.14\% on the untouched test split for the one-shape-per-clip
+trained-body protocol, and the eight-run development grid selects slot/type
+attention without adaLN-Zero. Residual failures on both splits are dominated
+by ground-contact transitions and whole-body acrobatics. Replaying this
+checkpoint across all 19,200 (clip, shape) pairs of the development corpus
+finds no statistically detectable evidence that dynamic motions are more
+shape-sensitive to body morphology than quasi-static ones, once a
+near-zero-baseline normalization artifact in the naive comparison is
+corrected -- a properly negative result rather than an unresolved question.
+These results do not establish all-shape coverage or unseen-body
+generalization: an evaluation on body shapes inside the trained coefficient
+range but excluded from the 128 training configurations remains future work.

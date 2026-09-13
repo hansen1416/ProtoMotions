@@ -1,0 +1,76 @@
+\section{Discussion and Limitations}\label{sec:discussion}
+
+The current evidence supports the feasibility of combining shape-specific
+references, matching simulation assets, and one shared controller at the
+scale of the constructed corpus. The corrected 150-clip grid selects
+slot/type attention without adaLN-Zero, on the basis of a large, replicated
+jerk difference rather than the non-discriminating success-rate column, and
+this ordering is single-seed. The refinement audit shows the processed
+references have substantially less penetration and foot sliding at negligible
+fidelity cost, but we stop short of a causal learning benefit from refined
+training: the refined and unrefined runs track different targets and were
+not cross-evaluated on a common reference.
+
+The physical analysis in Section~\ref{sec:physics} adds a cautionary result
+about the choice of spread statistic itself. A coefficient-of-variation
+comparison, an otherwise natural way to normalize cross-shape variability by
+each clip's own baseline demand, produced a highly significant difference in
+exactly the direction opposite the hypothesis, because it divides by a small
+number for quasi-static clips. Only a clip-level test on absolute,
+unit-preserving residuals revealed this as an artifact rather than a real
+effect. We surface this as a methodological point for similar cross-body
+comparisons, independent of whether the underlying interaction hypothesis
+holds for other checkpoints or corpora.
+
+The dataset is derived from existing motion capture, captions, body models,
+and HUMOS generation. The 2,681,728 variants represent combinations of
+20,951 clip identities and 128 configurations, not equally many independent
+human examples. Mirrored clips are also not independent captures.
+Caption alignment, left/right semantics, body-specific wording, and
+redistribution permissions require further auditing before a benchmark
+release or language-grounded performance claim.
+
+Refinement changes kinematics rather than solving the complete equations
+of motion. Ground clearance of collision proxies does not guarantee
+balanced support, plausible contact forces, or realistic joint torques.
+Similarly, estimated asset masses and mass-scaled actuators are modeling
+choices rather than a calibrated description of human physiology. The
+flat-ground task excludes much environmental interaction, and text-based
+filtering cannot ensure that every remaining clip satisfies that scope.
+
+Generalization is limited by the split and evaluation design. Original and
+mirrored variants stay together, but the current split is not demonstrated
+to be subject- or source-recording-disjoint. Validation reuses the trained
+body set and has been monitored during development. Its rotating panel
+covers only one shape per clip at a time, and long clips have a capped
+evaluation horizon. Fixed-pair test evaluation and the unseen-morphology
+experiment in Section~\ref{sec:unseen_morphology} remain necessary for
+broader claims, and any morphology-generalization statement is confined to
+body shapes inside the trained coefficient range rather than arbitrary
+bodies.
+
+The success threshold is permissive relative to fine-grained pose accuracy.
+A high success rate should be read together with continuous errors,
+smoothness, and qualitative rollouts. The logged normalized-jerk measure
+also has implementation-specific windows and regularizers; it is not a
+standalone certificate of physical plausibility. Raw policy-action
+increments must not be interpreted as joint-angle or torque measurements.
+
+Cost constraints motivated small-scale development and streamed full-scale
+training, and introduced memory-related resumes and configuration changes on
+the full-scale run. The 150-clip grid is single-seed: the architecture
+conclusion is drawn from the jerk difference, which is a large effect that
+recurs across both reference versions, and not from the success-rate
+differences, which are within run-to-run noise and are reported as
+non-discriminating. Seed repeats would sharpen the latter but are not
+expected to change the former. These costs and choices should be reported
+transparently; they do not by themselves establish better compute efficiency
+than another method.
+
+We explored neutral-body pretraining followed by multi-shape transfer and
+mixed canonical/HUMOS source-weighted rewards during development, but did
+not retain either as the main approach. Their historical measurements are
+not used as controlled negative results, particularly where the earlier
+evaluation protocol differed. The present method is direct multi-shape
+training. Future work may revisit these alternatives after the current
+comparisons and dataset audits are complete.

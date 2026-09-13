@@ -1,0 +1,31 @@
+\begin{abstract}
+Physics-based motion imitation must accommodate both the diversity of human
+movement and differences in body geometry and dynamics. We construct a
+text-associated, multi-morphology motion corpus from AMASS-derived HumanML3D
+clips using HUMOS, pairing shape-specific reference motions with matching
+SMPL-based simulation assets. The corpus contains 20,951 clip identities,
+including mirrored clips, across 128 body configurations, yielding 2,681,728
+generated variants. Source captions remain associated metadata rather than
+controller inputs. A contact-aware kinematic refinement procedure reduces
+reference artifacts while retaining explicit limits on pose and root
+changes. We train one morphology-conditioned policy directly on the refined
+multi-shape references, using temporal slot/type attention and a streamed
+training pool. Deterministic, clip-grouped splits and morphology-matched
+evaluation distinguish held-out motion tracking from training-pool monitoring.
+Offline evaluation of the selected checkpoint reports 98.47\% success on the
+1,048-clip validation split and 99.14\% on the independent 1,048-clip test
+split, each with one selected body configuration per clip and a capped
+horizon; these are trained-body, one-shape-per-clip results, not all-shape or
+unseen-body tests. An eight-run grid of four temporal architectures crossed
+with refined and unrefined references, on a 150-clip development set,
+selects temporal slot/type attention without adaLN-Zero. Residual failures on
+both splits are analysed against inherited captions and concentrate on
+ground-contact transitions and whole-body acrobatics. A separate analysis
+asks whether body shape and motion type jointly set physical control demand,
+replaying the trained policy across all 19,200 (clip, shape) pairs of the
+150-clip development set: after correcting a normalization artifact that
+would otherwise have produced a spurious positive result, we find no
+statistically detectable evidence that highly dynamic motions are more
+shape-sensitive than quasi-static ones for this checkpoint. Generalization to
+body shapes outside the 128 trained configurations remains future work.
+\end{abstract}
