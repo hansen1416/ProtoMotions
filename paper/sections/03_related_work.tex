@@ -36,6 +36,38 @@ examines one controller over a large set of paired motions and bodies, with
 shape identity maintained throughout data generation, simulation, and
 evaluation.
 
+Table~\ref{tab:related_work_comparison} summarizes how this positions against
+the work discussed above. No shared benchmark or task spans these systems, so
+the comparison is qualitative rather than a head-to-head evaluation; to the
+best of our knowledge, none of them trains and evaluates one policy across a
+paired, multi-shape motion corpus at anywhere near this scale.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Qualitative positioning against the physics-based imitation and
+morphology-conditioned control work discussed above. ``Body configs'' counts
+distinct trained body shapes evaluated under one policy, not motion coverage;
+entries reflect how each work is characterized in this section, not a full
+independent audit of those papers.}\label{tab:related_work_comparison}
+\begin{tabularx}{\linewidth}{@{}lYYY@{}}
+\toprule
+Method & Task focus & Morphology axis & Body configs \\
+\midrule
+DeepMimic~\cite{deepmimic} & Reference-guided skill imitation & None (single body) & 1 \\
+PHC~\cite{phc} & Real-time humanoid imitation & None (single body) & 1 \\
+PULSE~\cite{pulse} & Universal low-dimensional motion representation & None (single body) & 1 \\
+OmniH2O~\cite{omnih2o} & Whole-body teleoperation & None (single physical robot) & 1 \\
+ExBody2~\cite{exbody2} & Expressive whole-body control & None (single physical robot) & 1 \\
+GMT~\cite{gmt} & Broad motion tracking (mixture-of-experts) & None (single body) & 1 \\
+Won \& Lee~\cite{won2019} & Parametric body-shape control & Continuous (height, weight, proportions) & Parametric range; count not specified \\
+Shared modular policies~\cite{smp2020} & Cross-topology transfer & Topology (limb count/structure), not anthropometric shape & N/A -- topology axis \\
+\midrule
+This work & Multi-morphology motion imitation & Continuous anthropometric shape (SMPL $\boldsymbol{\beta}$), matched simulation assets & \textbf{128}, over 20,951 paired clips \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
 Kinematic retargeting and dynamic tracking address different requirements.
 SMPL provides a common parameterized body representation~\cite{smpl}, and
 SMPLSim constructs simulation-ready assets from these
