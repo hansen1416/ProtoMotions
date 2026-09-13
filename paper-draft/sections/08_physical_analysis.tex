@@ -1,0 +1,90 @@
+\section{Physical Analysis}\label{sec:physics}
+
+This section examines how body morphology changes the physical control
+demand of a motion, using the simulator's instrumented quantities and not
+claims about human biomechanics. The question is not whether body mass or
+size correlates with joint torque, which is partly expected from mechanics,
+but whether the effect of morphology on control demand \emph{depends on the
+motion being performed}.
+
+The procedure holds the motion fixed and varies the body. For the full
+matched corpus of 150 clips evaluated across all 128 trained shape
+configurations (19,200 deterministic rollouts total, epoch-28,170
+checkpoint, zero failed episodes), we record per-joint torque, joint power,
+an aggregate control-effort measure, and jerk from the simulator. Clips are
+grouped by their inherited text descriptions into coarse semantic classes
+(walking, running, jumping, kicking, dancing, sitting, standing, plus an
+unclassified \emph{other} bucket) via keyword matching on the concatenated
+captions, and we compare the cross-morphology variation of each quantity
+between classes.
+
+The hypothesis under test is that morphological variation produces
+motion-dependent changes in control demand, with highly dynamic motions
+(running, jumping, kicking) more sensitive to body shape than slow or
+quasi-static motions (standing, sitting) -- that is, body morphology and
+motion characteristics interact in setting control demand, rather than
+morphology acting as a motion-independent scaling.
+
+\paragraph{Instrumentation validation.} A first pass compared each class's
+per-shape coefficient of variation (CV, std/mean). This produced a
+highly significant difference ($p<10^{-15}$ by Levene's test on every
+metric) -- but in the direction \emph{opposite} the hypothesis, with
+quasi-static classes appearing more shape-sensitive than dynamic ones. The
+cause is a normalization artifact rather than a real effect: quasi-static
+clips have a much smaller mean control demand, so dividing by that small
+mean inflates relative variance from ordinary simulation noise. We therefore
+report absolute, unit-preserving residuals instead (each clip's value minus
+its own across-shape mean, not divided by it), and we perform inference at
+the clip level rather than the row level: a clip's 128 shape replicates are
+correlated observations of that one clip, not 128 independent draws about
+its semantic class, so a naive per-row test overstates significance
+(pseudo-replication).
+
+\begin{table}[t]
+\centering
+\small
+\caption{Cross-shape variability of control demand, dynamic
+(running~+~jumping~+~kicking, $n{=}25$ clips) vs.\ quasi-static
+(standing~+~sitting, $n{=}37$ clips) motion classes. Each cell is the
+standard deviation of the pooled, per-clip-demeaned residual (absolute
+units, clip baseline removed) with a 95\% bootstrap CI resampled at the
+clip level (10,000 resamples). $p$ is Levene's test (Brown--Forsythe,
+median-centered) on the same pooled residuals.}\label{tab:physical_analysis}
+\begin{tabular}{lrrr}
+\toprule
+Metric & Dynamic std [95\% CI] & Quasi-static std [95\% CI] & Levene's $p$ \\
+\midrule
+Normalized torque (frac.\ effort limit) & $1.93$ [$1.71$, $2.21$] $\times10^{-4}$ & $2.06$ [$1.86$, $2.30$] $\times10^{-4}$ & $0.10$ \\
+Mass-normalized power & 0.292 [0.220, 0.370] & 0.259 [0.210, 0.323] & $1.1\times10^{-7}$ \\
+Normalized jerk & 350.2 [283.3, 416.9] & 403.2 [303.3, 513.5] & 0.33 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Result.} Table~\ref{tab:physical_analysis} shows no evidence for
+the hypothesized interaction. For normalized torque and jerk, the
+dynamic-class and quasi-static-class confidence intervals overlap and
+Levene's test is not significant. Mass-normalized power shows a significant
+Levene's $p$, but its clip-level bootstrap CIs overlap and the point
+estimate is, if anything, marginally \emph{higher} for the dynamic classes
+-- consistent with the row-level pseudo-replication described above rather
+than a real, class-level effect (the same 128-replicates-per-clip
+correlation that produced the misleading CV result). Small classes
+(sitting $n{=}4$, kicking $n{=}7$, dancing $n{=}8$) further limit how finely
+this test could distinguish individual classes, which is why dynamic and
+quasi-static are pooled into two groups rather than compared class by
+class.
+
+We conclude that, for this checkpoint and this metric set, morphology's
+effect on control demand does not detectably depend on the motion class
+being performed: cross-shape variability is statistically indistinguishable
+between highly dynamic and quasi-static motions once the near-zero-baseline
+normalization artifact is corrected and inference is done at the clip
+level. This is a properly negative result rather than an absence of
+analysis: the instrumentation is validated (magnitudes match the
+tracking-jerk figures already reported in this paper, and the effort-limit
+normalization reuses the same mass-scaling formula validated elsewhere in
+this work), and the same pipeline that would have reported a false positive
+under a naive CV comparison instead surfaces its own artifact under a
+correct, clip-level test. No mechanical or biomechanical claim is made
+beyond what these instrumented rollouts show for this policy.
