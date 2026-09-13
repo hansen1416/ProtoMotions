@@ -75,6 +75,57 @@ this test could distinguish individual classes, which is why dynamic and
 quasi-static are pooled into two groups rather than compared class by
 class.
 
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+  group style={group size=2 by 1, horizontal sep=1.7cm},
+  width=0.48\linewidth, height=5.2cm,
+  boxplot/draw direction=y,
+  xtick={1,2,3,4,5,6,7,8},
+  xticklabels={walk,run,jump,kick,dance,sit,stand,other},
+  xticklabel style={rotate=40, anchor=east, font=\scriptsize},
+  tick label style={font=\small}, label style={font=\small},
+]
+\nextgroupplot[ylabel={Torque std ($\times10^{-3}$)}, ymin=0, ymax=0.42]
+\addplot+[boxplot prepared={lower whisker=0.153, lower quartile=0.176, median=0.192, upper quartile=0.211, upper whisker=0.242}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.143, lower quartile=0.169, median=0.183, upper quartile=0.210, upper whisker=0.222}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.125, lower quartile=0.138, median=0.143, upper quartile=0.201, upper whisker=0.259}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.167, lower quartile=0.195, median=0.209, upper quartile=0.210, upper whisker=0.383}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.138, lower quartile=0.151, median=0.163, upper quartile=0.180, upper whisker=0.383}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.189, lower quartile=0.198, median=0.215, upper quartile=0.215, upper whisker=0.385}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.143, lower quartile=0.168, median=0.184, upper quartile=0.206, upper whisker=0.259}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.129, lower quartile=0.157, median=0.180, upper quartile=0.200, upper whisker=0.271}] coordinates {};
+\nextgroupplot[ylabel={Jerk std}, ymin=0, ymax=1300]
+\addplot+[boxplot prepared={lower whisker=242.0, lower quartile=332.6, median=370.6, upper quartile=469.3, upper whisker=626.2}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=158.3, lower quartile=231.2, median=266.4, upper quartile=346.1, upper whisker=496.3}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=98.2, lower quartile=183.2, median=231.7, upper quartile=351.4, upper whisker=443.2}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=208.1, lower quartile=408.4, median=411.6, upper quartile=447.4, upper whisker=745.9}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=120.4, lower quartile=346.3, median=359.8, upper quartile=447.4, upper whisker=745.9}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=319.3, lower quartile=462.4, median=495.3, upper quartile=495.3, upper whisker=1259.5}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=61.3, lower quartile=138.6, median=319.3, upper quartile=435.5, upper whisker=593.1}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=54.5, lower quartile=135.4, median=208.8, upper quartile=401.1, upper whisker=697.8}] coordinates {};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Per-clip cross-shape standard deviation (absolute units; box:
+quartiles, whiskers: 5th--95th percentile), pooled by semantic class rather
+than the two pooled groups in Table~\ref{tab:physical_analysis} -- the
+per-class distributions the paper's own framing calls for. Classes overlap
+heavily on both metrics with no separation between the dynamic classes
+(run, jump, kick) and the quasi-static ones (sit, stand); the smallest
+classes (sit $n{=}4$, kick $n{=}7$, dance $n{=}8$) are visibly wider and
+noisier, consistent with their limited sample size rather than a distinct
+effect.}\label{fig:physical_per_class}
+\end{figure}
+
+Figure~\ref{fig:physical_per_class} shows the same demeaned-residual
+quantity broken out across all eight semantic classes rather than pooled
+into the two groups compared above. No class or pair of classes stands out
+as consistently more shape-sensitive on both metrics; the visibly wider
+boxes for sitting, kicking, and dancing track their small clip counts, not a
+distinct physical effect, and are the same limitation noted for
+Table~\ref{tab:physical_analysis}.
+
 We conclude that, for this checkpoint and this metric set, morphology's
 effect on control demand does not detectably depend on the motion class
 being performed: cross-shape variability is statistically indistinguishable
