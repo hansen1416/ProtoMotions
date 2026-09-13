@@ -99,15 +99,6 @@ def main():
     if args.motion_file is not None:
         log.info(f"CLI override: motion_file = {args.motion_file}")
         motion_lib_config.motion_file = args.motion_file
-        # A standalone motion file replaces the checkpoint's training pool.
-        # Let the environment derive asset selection from this file's metadata,
-        # rather than retaining the training bodies saved in the checkpoint.
-        motion_lib_config._target_ = "protomotions.components.motion_lib.MotionLib"
-        robot_config.asset.selected_asset_ids = None
-        log.info(
-            "Using plain MotionLib; cleared checkpoint asset selection so "
-            "the environment selects the bodies present in the supplied motions."
-        )
 
     if args.scenes_file is not None:
         log.info(f"CLI override: scenes_file = {args.scenes_file}")
