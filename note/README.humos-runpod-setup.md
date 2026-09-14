@@ -45,16 +45,9 @@ Upload `humos_infer.tar.gz` to the pod under `/workspace/humos/` (e.g. via the R
 
 ## 3. Extract on the pod
 
-First attempt failed:
-
-```bash
-sudo tar -xzf humos_infer.tar.gz
-# tar: Cannot change ownership to uid 1000, gid 1000: Operation not permitted
-# tar: Exiting with failure status due to previous errors
-```
-
-Cause: root in the container can't `chown` to the archive's original UID/GID due to container
-filesystem restrictions. Fix — drop `sudo` (already root) and skip ownership restoration:
+rclone copy r2:proto-data/humos/humos_infer.tar.gz ./ \
+--transfers=2 --multi-thread-streams=16 --multi-thread-chunk-size=128M \
+--s3-no-check-bucket --progress
 
 ```bash
 tar -xzf humos_infer.tar.gz --no-same-owner
@@ -145,7 +138,7 @@ rclone copy humos_datasets_subset.tar.gz r2:proto-data/humos/ \
 --transfers=1 --multi-thread-streams=16 --multi-thread-chunk-size=128M \
 --s3-no-check-bucket --progress
 
-rclone copy r2:proto-data/humos/humos_datasets_subset.tar.gz ./humos_datasets_subset.tar.gz \
+rclone copy r2:proto-data/humos/humos_datasets_subset.tar.gz ./ \
 --transfers=1 --multi-thread-streams=16 --multi-thread-chunk-size=128M \
 --s3-no-check-bucket --progress
 
@@ -154,7 +147,7 @@ rclone copy r2:proto-data/humos/humos_datasets_subset.tar.gz ./humos_datasets_su
 tar -xzf humos_datasets_subset.tar.gz --no-same-owner
 ```
 
-python -m pip install "git+https://github.com/hansen1416/chumpy.git"
+python -m pip install --no-build-isolation "git+https://github.com/hansen1416/chumpy.git"
 
 ## 7. Smoke test
 
@@ -170,14 +163,75 @@ mismatch, fixed in step 4) -> `ModuleNotFoundError: aitviewer` (step 5) ->
 `ModuleNotFoundError: wandb` (step 5) -> `FileNotFoundError: ./datasets/splits/mld_test_split_keyids.txt`
 (step 6, in progress at time of writing).
 
+## 8. `infer.py` keyid-subset patch and the real run
+
+`infer.py` had no way to restrict which clips it processes — it always iterates the full
+concatenated train/val/test split (20k+ clips), and for every clip generates **both genders x every
+beta in `--betas-file`** (nested loop in `run_inference`). So "N clips x B betas" actually means
+"N x B x 2" variants, and there was no way to target just the 1024-clip pilot set
+(`pilot_1024_motions.json`, already used for `hhi_1024_motion`/`hhi_1024_transfer`/etc. elsewhere in
+the project) without a code change.
+
+Patched `humos/infer.py` (local repo, then re-transferred to the pod) to add a `--keyids-file` flag:
+`run_inference` now takes a `keyids_filter` set and, if given, filters each split's
+`dataset.keyids` down to the intersection before building the `ConcatDataset`. Verified the keyid
+formats match exactly (`pilot_1024_motions.json` and the HUMOS split files both use zero-padded
+6-digit IDs, `M`-prefixed for mirrored clips).
+
+Transferred just the patched file + the pilot JSON (both tiny) via R2, same pattern as the larger
+transfers:
+
+```bash
+# locally
+cd /home/hlz/repos/humos
+cp /home/hlz/repos/ProtoMotions/pilot_1024_motions.json .
+tar -czf humos_infer_patch.tar.gz humos/infer.py pilot_1024_motions.json
+rclone copy humos_infer_patch.tar.gz r2:proto-data/humos/ --s3-no-check-bucket --progress
+```
+
+```bash
+# on the pod, from /workspace/humos
+rclone copy r2:proto-data/humos/humos_infer_patch.tar.gz . --s3-no-check-bucket --progress
+tar -xzf humos_infer_patch.tar.gz --no-same-owner
+```
+
+Real run (1024 clips x 16 interp betas x 2 genders = 32,768 variants):
+
+```bash
+python -u humos/infer.py \
+    --cfg humos/configs/cfg_template.yml \
+    --betas-file humos/all_betas_interp.pt \
+    --keyids-file pilot_1024_motions.json \
+    --local-out-dir /workspace/humos_unseen_morphology_output
+```
+
+Completed cleanly: `Restricted to 1024/1024 requested keyids` at startup (no pilot clips lost to
+the HumanML3D support-object filter), output = 1024 `.pt` files (one per clip keyid, each containing
+all 16 betas x 2 genders), 8.9GB total.
+
+## 9. Output uploaded to R2, pod released
+
+```bash
+rclone copy /workspace/humos_unseen_morphology_output \
+    r2:proto-data/humos_unseen_morphology/ \
+    --transfers=4 --multi-thread-streams=16 --multi-thread-chunk-size=128M \
+    --s3-no-check-bucket --progress
+```
+
+Verified post-upload: 1024 objects, 8.868 GiB on R2 (matches pod exactly); spot-checked
+`000007.pt` loads cleanly with `torch.load` and has the expected structure
+(`{"male": {beta_key: {betas, gender, root_orient, pose_body, trans, offset_height, joints_pos,
+root_vel, root_ang_vel, dof_vel}, ...16 betas}, "female": {...}, "text": [...]}`). Pod released
+after this check — R2 at `r2:proto-data/humos_unseen_morphology/` is now the source of truth for
+this data.
+
 ## Open items / not yet done
 
-- Confirm the smoke test completes end to end after step 6's data transfer.
 - Apply the known `infer.py` train/val/test split-concatenation bug fix (documented in
-  `note/README.note.md` §11, from the earlier E7 held-out pipeline work) before running the real
-  (non-smoke-test) inference.
-- Run the full-scale inference: 1024-clip pilot set (`pilot_1024_motions.json`) x 16 interp betas
-  (`humos/all_betas_interp.pt`) — scoped down from the full 20,951-clip corpus, recommended but not
-  yet formally confirmed.
-- Downstream pipeline after inference: AMASS NPZ export, MotionLib conversion, frame-0 grounding
-  offset (pattern in `note/README.heldout-pipeline.md` steps 4-5b, adapted for this subset).
+  `note/README.note.md` §11, from the earlier E7 held-out pipeline work) — check whether it's
+  relevant now that keyid filtering happens post-concatenation (it may already be moot, since we
+  filter by keyid rather than relying on split membership).
+- Downstream pipeline: AMASS NPZ export, MotionLib conversion, frame-0 grounding offset (pattern in
+  `note/README.heldout-pipeline.md` steps 4-5b, adapted for this 1024x16x2 subset) — not started.
+- Update paper §6.5.1 wording from the placeholder "~20,000 clips" plan to the actual 1024x16x2
+  scoped design, once the downstream pipeline produces real numbers.
