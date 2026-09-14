@@ -39,61 +39,11 @@ rate reflects a difficulty-biased subset of training clips, not the success
 rate of the entire training corpus, and the gap should not be read as
 validation outperforming an i.i.d.\ training sample.
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-  width=\linewidth, height=5.4cm,
-  xlabel={Training epoch}, ylabel={Success rate},
-  xmin=0, xmax=28500, ymin=0.2, ymax=1.0,
-  legend pos=south east, legend cell align=left, legend style={font=\small},
-  tick label style={font=\small}, label style={font=\small},
-  grid=both, grid style={gray!18},
-]
-\addplot[thick, blue] coordinates {
-(255,0.319)(1023,0.378)(1791,0.580)(2303,0.669)(2815,0.708)(3327,0.745)
-(3839,0.767)(4351,0.766)(4863,0.765)(5375,0.800)(5887,0.786)(6399,0.806)
-(6911,0.810)(7423,0.803)(7935,0.791)(8447,0.794)(8959,0.796)(9471,0.805)
-(9983,0.801)(10495,0.803)(11007,0.803)(11519,0.822)(12031,0.808)(12543,0.797)
-(13055,0.815)(13567,0.804)(14079,0.834)(14591,0.833)(15103,0.792)(15615,0.810)
-(16127,0.816)(16639,0.807)(16895,0.784)(16950,0.965)(17407,0.981)(17919,0.980)
-(18431,0.978)(18943,0.981)(19455,0.983)(19967,0.980)(20991,0.978)(21503,0.985)
-(22527,0.982)(23039,0.983)(23551,0.977)(24575,0.979)(25599,0.978)(26111,0.982)
-(27135,0.983)(27647,0.981)(28159,0.985)
-};
-\addlegendentry{validation holdout}
-\addplot[semithick, orange!80!black, dashed] coordinates {
-(255,0.245)(1279,0.490)(2047,0.663)(2815,0.589)(3583,0.719)(4351,0.708)
-(5119,0.787)(5887,0.810)(6655,0.800)(7423,0.797)(8191,0.796)(8959,0.775)
-(9727,0.793)(10495,0.710)(11263,0.764)(12031,0.733)(12799,0.776)(13567,0.754)
-(14335,0.809)(15103,0.813)(15871,0.797)(16639,0.806)(17151,0.895)(17919,0.862)
-(18687,0.892)(19455,0.939)(20223,0.887)(20991,0.964)(21759,0.913)(22527,0.904)
-(23295,0.952)(24063,0.996)(24831,0.996)(25599,0.925)(26367,0.816)(27135,0.874)
-(27903,0.871)
-};
-\addlegendentry{hard resident pool}
-\draw[gray, densely dotted] (axis cs:16920,0.2) -- (axis cs:16920,1.0);
-\node[anchor=south, font=\scriptsize, gray, align=center]
-  at (axis cs:16920,0.24) {evaluation-protocol\\correction ($\sim$ep.\ 16.9k)};
-\end{axis}
-\end{tikzpicture}
-\caption{Scheduled success rate over training for the full-scale slot/type
-run (\texttt{3mvgad6f}). The step near epoch 16.9k is the morphology-matched
-evaluation correction plus its sampling change, not an instantaneous learning
-event; pre-correction points use the earlier, sometimes mismatched
-reference-to-asset assignment and are not comparable to the post-correction
-curve. After the correction the holdout success rate climbs from about
-0.96 to a stable 0.98--0.985. The resident-pool curve is noisier because
-residency is continually re-concentrated on hard clips.}\label{fig:learning_curve}
-\end{figure}
-
 The 98.47\% result supports strong tracking of the selected held-out
 clip/body pairs under the specified threshold, though it speaks only to
 those pairs: all-body success, unseen-body generalization, and an untouched
 test-set score are evaluated separately below and in
-Section~\ref{sec:unseen_morphology}. Figure~\ref{fig:learning_curve} shows
-this success rate over the course of training, before and after the
-evaluation-protocol correction described above. Because a successful rollout can still
+Section~\ref{sec:unseen_morphology}. Because a successful rollout can still
 have visible local errors or jitter, we complement the thresholded success
 rate with position, rotation, and smoothness measures throughout.
 
@@ -258,10 +208,11 @@ doubles it.
 
 These are single-seed development results, and the pre-correction 150-clip
 curves are not comparable to them. The load-bearing signal is the jerk
-difference: a factor-of-two effect that appears in the same ordering under
-both reference versions -- basic attention and adaLN-Zero high, plain MLP
-and slot/type low -- and is therefore a within-experiment replication rather
-than one lucky run, whereas the success-rate column is non-discriminating.
+difference: basic attention and adaLN-Zero are consistently high, plain MLP
+and slot/type are consistently low, and this factor-of-two effect holds under
+both reference versions, so it replicates within the experiment rather than
+reflecting one lucky run. The success-rate column, by contrast, is
+non-discriminating.
 Within those limits the grid supports the selected configuration, slot/type
 attention without adaLN-Zero, as the best-balanced choice rather than merely
 the incumbent. Explicit-panel cross-shape numbers for the selected
@@ -280,12 +231,13 @@ and evaluate the two parts of the argument separately.
 The reference-level part is an offline before/after audit on the packaged
 motion tensors, with no simulation, over all 19,200 references of the 150-clip
 development set (150 clips $\times$ 128 body configurations).
-Table~\ref{tab:refine_audit} reports the artifact measures -- stance-foot
-horizontal speed during detected contact, the fraction of frames whose lowest
-body centre is below the floor, and reference-domain position jerk -- and the
-fidelity measures -- per-body geodesic rotation change, root horizontal
-displacement, and the cross-shape variance of per-shape knee-flexion range,
-which must be preserved rather than flattened.
+Table~\ref{tab:refine_audit} reports two groups of measures: the artifact
+measures (stance-foot horizontal speed during detected contact, the fraction
+of frames whose lowest body centre is below the floor, and reference-domain
+position jerk), and the fidelity measures (per-body geodesic rotation
+change, root horizontal displacement, and the cross-shape variance of
+per-shape knee-flexion range, which must be preserved rather than
+flattened).
 
 \begin{table}[t]
 \centering
@@ -346,11 +298,10 @@ per-shape knee kinematics essentially intact (variance ratio 0.94). The
 per-motion distributions (Figure~\ref{fig:refine_dist}) show these are not
 mean-only effects: stance-foot speed falls for 96\% of individual motions,
 across the full range rather than a few outliers, although the worst-sliding
-5\% of clips are barely improved. Penetration in the raw references is
-bimodal -- a large fraction of clips sit entirely below the floor, a
-whole-clip vertical mis-registration rather than per-frame jitter, which the
-clearance correction removes; clips that were already grounded stay grounded,
-so only 45\% of motions register a change. The cost is a roughly one-third
+5\% of clips are barely improved. Penetration in the raw references is bimodal: a large fraction of clips sit
+entirely below the floor, a whole-clip vertical mis-registration that the
+clearance correction removes, while already-grounded clips stay grounded, so
+only 45\% of motions register a change. The cost is a roughly one-third
 increase in reference-domain position jerk that is broad rather than
 tail-driven: 79\% of motions get jerkier, and the effect is a clip property,
 not a shape property. Grouped by clip (150), the median jerk moves 30.8 to
@@ -433,9 +384,8 @@ simultaneously, and are reported separately below. Rollouts follow the
 Section~\ref{sec:metrics} protocol exactly, and unseen-body success numbers
 are never mixed into the trained-body results above.
 
-Four of the 32 shapes -- \texttt{male\_a83170f5}, \texttt{male\_cf3d5ee7},
-\texttt{female\_4d1b9df1}, \texttt{female\_1d4da893} -- show severe to
-near-total tracking failure (Table~\ref{tab:unseen_flagged}). In each case
+Four of the 32 shapes show severe to near-total tracking failure
+(Table~\ref{tab:unseen_flagged}). In each case
 the identical beta vector applied to the \emph{other} gender's body template
 succeeds at 99.8--100\%, which points to a gender-specific asset artifact for
 that specific configuration rather than a genuinely hard region of shape
@@ -498,12 +448,12 @@ every distance, not a tail of a monotonic trend.}\label{fig:unseen_distance}
 \end{figure}
 
 Excluding the four flagged shapes, the remaining 28 succeed at 99.75\% on
-the 932 train-split pairs (mean position error 0.093\,m, mean rotation error
-0.200\,rad) and 99.61\% on the 2{,}576 validation/test-split pairs where
-motion and shape are both unseen (mean position error 0.093\,m, rotation
-error 0.204\,rad) -- both essentially matching the trained-body validation
-and test numbers in Table~\ref{tab:test_results}, and with no decline across
-the full 2.58--5.05 distance range evaluated (Figure~\ref{fig:unseen_distance}).
+the 932 train-split pairs (mean position error 0.093\,m, rotation error
+0.200\,rad) and 99.61\% on the 2{,}576 validation/test-split pairs where both
+motion and shape are unseen (mean position error 0.093\,m, rotation error
+0.204\,rad). Both essentially match the trained-body validation and test
+numbers in Table~\ref{tab:test_results}, with no decline across the full
+2.58--5.05 distance range evaluated (Figure~\ref{fig:unseen_distance}).
 This is the strong form of the claim in Section~\ref{sec:experiments}: for
 28 of 32 unseen shapes spanning the full sampled distance range, performance
 stays flat rather than declining with distance, consistent with
@@ -516,11 +466,11 @@ rather than smoothed into the aggregate.
 \subsection{Evidence-based analysis of residual failures}\label{sec:failures}
 
 We treat the observed failure fraction as depending on the evaluated
-population, shape panel, checkpoint, horizon, and threshold, rather than as
-a fixed 10\% tail or an intrinsic 80\% learning ceiling -- the old morphology
-mismatch alone previously produced false failures. Each residual failure is
-accordingly treated as an observation to explain, not as evidence that the
-motion is physically impossible.
+population, shape panel, checkpoint, horizon, and threshold, rather than as a
+fixed 10\% tail or an intrinsic 80\% learning ceiling; the old morphology
+mismatch alone previously produced false failures, so each residual failure
+is treated as an observation to explain, not as evidence that the motion is
+physically impossible.
 
 The analysis unit is a failed clip/body pair with a reproducible rollout
 (Figure~\ref{fig:failure_taxonomy}). For each pair, retain the source

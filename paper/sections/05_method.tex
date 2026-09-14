@@ -206,7 +206,8 @@ termination is disabled. This training rule is distinct from the evaluation
 failure threshold in Section~\ref{sec:metrics}.
 
 We optimize using PPO~\cite{ppo}, with 32-step rollouts, discount 0.99,
-GAE parameter 0.95, policy-ratio clipping 0.2, and normalized advantages.
+generalized advantage estimation~\cite{gae} parameter 0.95, policy-ratio
+clipping 0.2, and normalized advantages.
 Separate Adam optimizers use learning rates $2\times10^{-5}$ for the actor
 and $10^{-4}$ for the critic. Other configuration values and actual run
 budgets appear in Table~\ref{tab:training_parameters}. Evaluation rollouts

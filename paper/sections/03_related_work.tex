@@ -6,7 +6,13 @@ DeepMimic demonstrated reference-guided reinforcement learning for simulated
 character skills~\cite{deepmimic}. Perpetual Humanoid Control developed robust
 humanoid imitation for real-time simulated avatars~\cite{phc}. These approaches
 motivate learning a feedback controller rather than directly replaying a
-kinematic trajectory. Subsequent single-body trackers scaled this
+kinematic trajectory. A parallel line adds adversarial style priors and
+reusable low-level skills on top of this feedback-control paradigm: AMP
+conditions style on an adversarial motion prior~\cite{amp}, ASE learns
+large-scale reusable adversarial skill embeddings~\cite{ase}, CALM adds
+directable conditional latent control~\cite{calm}, and MaskedMimic unifies
+control modalities through masked motion inpainting~\cite{maskedmimic}.
+Subsequent single-body trackers scaled this
 feedback-control approach in coverage and deployability: PULSE distills a
 low-dimensional, high-coverage motion representation for general humanoid
 control~\cite{pulse}; OmniH2O and ExBody2 target dexterous, deployable
@@ -30,11 +36,17 @@ character height, weight, and proportions~\cite{won2019}. A separate line of
 work learns policies that transfer across changes in agent \emph{topology} --
 limb count and skeletal structure -- through shared modular
 sub-policies~\cite{smp2020}, a different axis from the continuous
-anthropometric variation studied here. Morphology conditioning is therefore
-an established idea; our contribution is not the concept but a system that
-examines one controller over a large set of paired motions and bodies, with
-shape identity maintained throughout data generation, simulation, and
-evaluation.
+anthropometric variation studied here. More recent work continues both
+threads: AdaptNet adapts a physics-based controller across body-shape
+changes via policy adaptation~\cite{adaptnet}, while a line of
+morphology-conditioned reinforcement learning generalizes one policy across
+many (typically non-humanoid) robot morphologies using contextual
+modulation~\cite{modumorph}, hypernetwork distillation~\cite{hypermorph}, and
+shared modular recurrence~\cite{sharedmodular}. Morphology conditioning is
+therefore an established idea; our contribution is not the concept but a
+system that examines one controller over a large set of paired motions and
+bodies, with shape identity maintained throughout data generation,
+simulation, and evaluation.
 
 Table~\ref{tab:related_work_comparison} summarizes how this positions against
 the work discussed above. No shared benchmark or task spans these systems, so
@@ -62,6 +74,8 @@ ExBody2~\cite{exbody2} & Expressive whole-body control & None (single physical r
 GMT~\cite{gmt} & Broad motion tracking (mixture-of-experts) & None (single body) & 1 \\
 Won \& Lee~\cite{won2019} & Parametric body-shape control & Continuous (height, weight, proportions) & Parametric range; count not specified \\
 Shared modular policies~\cite{smp2020} & Cross-topology transfer & Topology (limb count/structure), not anthropometric shape & N/A -- topology axis \\
+AdaptNet~\cite{adaptnet} & Physics-based policy adaptation & Body-shape changes via adaptation, not joint multi-shape training & N/A -- adaptation, not shared training \\
+ModuMorph~\cite{modumorph} & Universal morphology control & Robot topology/limb configuration (non-humanoid) & Hundreds of UNIMAL morphologies \\
 \midrule
 This work & Multi-morphology motion imitation & Continuous anthropometric shape (SMPL $\boldsymbol{\beta}$), matched simulation assets & \textbf{128}, over 20,951 paired clips \\
 \bottomrule
@@ -74,15 +88,28 @@ SMPLSim constructs simulation-ready assets from these
 models~\cite{smplsim}. A shared skeleton makes poses comparable, but does not
 make global positions or required actuation independent of shape. Matching a
 reference to its intended simulation asset is consequently part of the task
-definition, not an optional evaluation convenience.
+definition, not an optional evaluation convenience. Data-driven kinematic
+controllers such as Mode-Adaptive Neural Networks~\cite{modeadaptive} and
+DeepPhase~\cite{deepphase} achieve high-quality motion blending without
+physics simulation or shape conditioning, underscoring that kinematic motion
+quality and physically/shape-consistent actuation are separate problems.
 
 \subsection{Text-motion data, shape-conditioned generation, and refinement}
 
 AMASS consolidates motion capture in a common body-model
 representation~\cite{amass}. HumanML3D associates processed motion segments
-with natural-language descriptions~\cite{humanml3d}. We inherit those source
-identities and descriptions rather than claiming new motion capture or
-shape-specific language annotation.
+with natural-language descriptions~\cite{humanml3d}. Other text-motion
+resources take different design points: the KIT Motion-Language Dataset
+pairs shorter clips with structured annotations~\cite{kit}, BABEL instead
+attaches discrete per-segment action labels~\cite{babel}, and Motion-X scales
+to expressive whole-body capture with a larger and more diverse
+corpus~\cite{motionx}. Generative text-to-motion models built on such
+resources range from VAE-based approaches~\cite{temos} and tokenized
+sequence-to-sequence generation~\cite{tm2t} to diffusion
+models~\cite{mdm,motiondiffuse}; HUMOS instead conditions generation on body
+shape rather than text alone. We inherit HumanML3D's source identities and
+descriptions rather than claiming new motion capture or shape-specific
+language annotation.
 
 HUMOS generates identity-conditioned human motion using a cycle-consistent
 learning formulation~\cite{humos}. We use its pretrained model to obtain
