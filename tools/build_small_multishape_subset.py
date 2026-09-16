@@ -14,7 +14,11 @@
 # limitations under the License.
 """
 Build a single static, multi-shape motion file out of a small, difficulty-stratified subset of
-the Stage 2 per-clip R2 dataset (~20,951 clips x 128 shapes).
+the Stage 2 per-clip R2 dataset (~20,951 clips x 128 shapes). Reads from the refined per-clip
+dataset (r2:proto-data/hhi_stage2_per_clip_refined/) by default -- the raw/unrefined copy
+(hhi_stage2_per_clip/) was deleted from R2 during the September 2026 storage cleanup, since it
+wasn't the source the actual reported full-scale checkpoint trained on (that used the refined
+data). Pass --r2-source to point at a different prefix if you ever regenerate a raw copy.
 
 Why: the Stage 2 adapter lineage (v1-v6) and the from-scratch GlobalClipPool run both plateaued
 around 63-82% success, while the same architecture on a single body shape reaches 95-97%. An
@@ -45,7 +49,7 @@ Two selection modes:
 Usage (run on the pod -- needs rclone + R2 credentials, see note/README.rclone.md):
     python tools/build_small_multishape_subset.py \\
         --num-clips 150 \\
-        --output /workspace/motion_cache/small150_128shape.pt
+        --output /workspace/motion_cache/small150_128shape_refined.pt
 
     # or, from a frozen hard-clip list:
     python tools/build_small_multishape_subset.py \\
@@ -57,7 +61,7 @@ Then train with the existing (unmodified) mlp_wide.py:
         --robot-name smpl_mor --simulator isaacgym \\
         --experiment-path examples/experiments/mimic/mlp_wide.py \\
         --experiment-name hhi_wide_150motion_128shape \\
-        --motion-file /workspace/motion_cache/small150_128shape.pt \\
+        --motion-file /workspace/motion_cache/small150_128shape_refined.pt \\
         --num-envs 4096 --batch-size 16384
 """
 
@@ -163,7 +167,7 @@ def main():
         help="If given, use this fixed clip_id list instead of difficulty-stratified sampling "
         "(--num-clips/--difficulty-file are ignored). One clip_id per line.",
     )
-    parser.add_argument("--r2-source", default="r2:proto-data/hhi_stage2_per_clip/")
+    parser.add_argument("--r2-source", default="r2:proto-data/hhi_stage2_per_clip_refined/")
     parser.add_argument("--manifest-name", default="clip_manifest.jsonl")
     parser.add_argument("--cache-dir", default="/workspace/motion_cache/small_subset_raw")
     parser.add_argument("--output", required=True)
