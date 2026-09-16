@@ -32,3 +32,7 @@ gdrive
 amass_unseen_morphology/
 humos_unseen_morphology_output/
 unseen_morphology_motionlib/
+
+paper/main.aux
+paper/main.log
+paper/main.out
