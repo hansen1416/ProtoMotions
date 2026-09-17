@@ -6,21 +6,24 @@
 # ProtoMotions repo root.
 #
 # Prerequisites on the pod:
-#   - results/hhi_wide_stage2_discover_attention_slot_type_refined/ (the final checkpoint;
-#     see note/README.runpod.md for the R2 download command)
-#   - data_cache/small150_128shape_refined.pt (8.4GB -- upload it, R2's copy was deleted as a
-#     confirmed-redundant duplicate of the local file during the September cleanup):
-#       rclone copy data_cache/small150_128shape_refined.pt r2:proto-data/tmp-demo-render/ \
-#         --s3-no-check-bucket --progress   # from local machine
-#       rclone copy r2:proto-data/tmp-demo-render/small150_128shape_refined.pt data_cache/ \
-#         --s3-no-check-bucket --progress   # on the pod
+#   - the final checkpoint (see note/README.runpod.md for the R2 download command)
+#   - the 150-clip refined motion file, rebuilt directly on the pod via:
+#       python tools/build_small_multishape_subset.py \
+#         --num-clips 150 --output data_cache/small150_128shape_refined.pt
+#     (reads from r2:proto-data/hhi_stage2_per_clip_refined/ -- the raw/unrefined R2 copy
+#     was deleted during the September cleanup, so this is the only way to get it now)
+#
+# CHECKPOINT/MOTION_FILE default to the paths above but can be overridden without editing
+# this file, e.g. if you built the motion file under a different path/name:
+#   CHECKPOINT=/workspace/... MOTION_FILE=/workspace/motion_cache/small150_128shape.pt \
+#     bash tools/render_demo_videos.sh
 
 set -euo pipefail
 
-CHECKPOINT="results/hhi_wide_stage2_discover_attention_slot_type_refined/last.ckpt"
-MOTION_FILE="data_cache/small150_128shape_refined.pt"
-OUT_DIR="output/videos/demo30"
-NUM_SHAPES=16
+CHECKPOINT="${CHECKPOINT:-results/hhi_wide_stage2_discover_attention_slot_type_refined/last.ckpt}"
+MOTION_FILE="${MOTION_FILE:-data_cache/small150_128shape_refined.pt}"
+OUT_DIR="${OUT_DIR:-output/videos/demo30}"
+NUM_SHAPES="${NUM_SHAPES:-16}"
 
 mkdir -p "$OUT_DIR"
 

@@ -595,19 +595,24 @@ def record_video(
     try:
         log.info(f"Recording {num_steps} frames ...")
         done_indices = None
-        for step in tqdm(range(num_steps), desc="Recording", unit="frame"):
-            obs = agent.add_agent_info_to_obs(obs)
-            obs_td = agent.obs_dict_to_tensordict(obs)
-            model_outs = agent.model(obs_td)
-            action = model_outs.get("mean_action", model_outs["action"])
-            obs, rewards, dones, terminated, extras = env.step(action)
-            done_indices = dones.nonzero(as_tuple=False).squeeze(-1)
+        # no_grad: this is pure inference, no backward pass ever happens here, but
+        # without it every forward pass still builds and retains a full autograd
+        # graph -- at high --num-envs (e.g. 128 with a transformer policy) that's a
+        # large, entirely avoidable extra memory cost and a likely cause of CUDA OOM.
+        with torch.no_grad():
+            for step in tqdm(range(num_steps), desc="Recording", unit="frame"):
+                obs = agent.add_agent_info_to_obs(obs)
+                obs_td = agent.obs_dict_to_tensordict(obs)
+                model_outs = agent.model(obs_td)
+                action = model_outs.get("mean_action", model_outs["action"])
+                obs, rewards, dones, terminated, extras = env.step(action)
+                done_indices = dones.nonzero(as_tuple=False).squeeze(-1)
 
-            simulator.render()
-            gym.write_viewer_image_to_file(
-                viewer, os.path.join(frames_tmp, f"{step:06d}.png")
-            )
-            obs, _ = env.reset(done_indices)
+                simulator.render()
+                gym.write_viewer_image_to_file(
+                    viewer, os.path.join(frames_tmp, f"{step:06d}.png")
+                )
+                obs, _ = env.reset(done_indices)
 
         if num_steps < 2:
             return

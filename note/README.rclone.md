@@ -85,13 +85,7 @@ rclone copy /home/hlz/datasets/humos_proto/failed \
 
 ## Download from R2
 
-rclone copy r2:proto-data/merged4/ /workspace/merged4/ \
-    --transfers=4 \
-    --multi-thread-streams=16 \
-    --multi-thread-chunk-size=128M \
-    --progress
-
-rclone copy r2:proto-data/150motions/ /workspace/motion_cache/ \
+rclone copy r2:proto-data/ckpt/hhi_wide_stage2_discover_attention_slot_type_refined.zip /workspace/ProtoMotions/results \
     --transfers=2 \
     --multi-thread-streams=16 \
     --multi-thread-chunk-size=128M \
@@ -103,25 +97,6 @@ rclone copy ./tmp/ r2:proto-data/ckpt/ \
     --multi-thread-chunk-size=128M \
     --progress
 
-
-rclone copy /media/hlz/R/stage2_data/ r2:proto-data/hhi_stage2/ \
-    --transfers=4 \
-    --multi-thread-streams=16 \
-    --multi-thread-chunk-size=128M \
-    --progress
-
-scp -O -i ~/.ssh/id_ed25519 \
-    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/key_joint_probe_clips.pt \
-    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/key_joint_probe_meta.json \
-    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/diff_key_joint_errors.py \
-    jx5oigi3zbipsh-64411958@ssh.runpod.io:/workspace/ProtoMotions/results/hhi_moe_20946_2shape
-
-rsync -avz -e "ssh -i ~/.ssh/id_ed25519" \
-    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/key_joint_probe_clips.pt \
-    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/key_joint_probe_meta.json \
-    /home/hlz/repos/ProtoMotions/results/hhi_moe_20946_2shape/diff_key_joint_errors.py \
-    jx5oigi3zbipsh-64411958@ssh.runpod.io:/workspace/ProtoMotions/results/hhi_moe_20946_2shape/
-
 python protomotions/record_video_mor.py \
     --checkpoint results/hhi_wide_150motion_128shape_discover/last.ckpt \
     --simulator isaacgym \
@@ -130,10 +105,17 @@ python protomotions/record_video_mor.py \
     --compact-spawn-spacing 2.0 \
     --output results/hhi_wide_150motion_128shape_discover/visualize_videos/M002028_policy_8shapes.mp4
 
-rclone copy humos_datasets_subset.tar.gz r2:proto-data/humos/ \
---transfers=1 --multi-thread-streams=16 --multi-thread-chunk-size=128M \
---s3-no-check-bucket --progress
-
-claude --resume 6babb982-763f-498c-80f1-70f8913dfa54
-    
-rclone copy /workspace/motion_cache/150_128shape_canonical/150_128shape_canonical_offset.pt r2:proto-data/150_128shape_canonical/ --progress --s3-no-check-bucket
+python -u protomotions/record_video_mor_orbit.py \
+--checkpoint results/hhi_wide_stage2_discover_attention_slot_type_refined/last.ckpt \
+--simulator isaacgym \
+--motion-file /workspace/motion_cache/small150_128shape.pt \
+--motion-index 5248 \
+--num-envs 128 \
+--same-motion \
+--compact-spawn-spacing 2.0 \
+--fps 30 \
+--video-steps 720 \
+--camera-orbit \
+--camera-orbit-revolutions 1.0 \
+--output output/videos/test_128shapes_orbit_M001062.mp4 \
+--overrides motion_lib._target_=protomotions.components.motion_lib.MotionLib
