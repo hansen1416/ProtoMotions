@@ -114,8 +114,9 @@ python -u protomotions/record_video_mor_orbit.py \
 --same-motion \
 --compact-spawn-spacing 2.0 \
 --fps 30 \
---video-steps 720 \
+--video-steps 1440 \
 --camera-orbit \
 --camera-orbit-revolutions 1.0 \
+--camera-orbit-distance-scale 1.0 \
 --output output/videos/test_128shapes_orbit_M001062.mp4 \
 --overrides motion_lib._target_=protomotions.components.motion_lib.MotionLib

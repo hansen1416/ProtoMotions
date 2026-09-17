@@ -112,6 +112,15 @@ def create_parser():
         ),
     )
     parser.add_argument(
+        "--camera-orbit-elevation-scale",
+        type=float,
+        default=0.5,
+        help=(
+            "Camera height above the grid centroid, as a multiple of the env-grid "
+            "spread (was hardcoded to 0.5x spread). Lower = lower camera."
+        ),
+    )
+    parser.add_argument(
         "--show-markers",
         action="store_true",
         help=(
@@ -492,7 +501,9 @@ def parse_gender_beta_filter(gender_beta_args):
     return list(dict.fromkeys(selected_asset_ids))
 
 
-def _setup_orbit_camera(simulator, env, num_steps, revolutions=1.0, distance_scale=1.0):
+def _setup_orbit_camera(
+    simulator, env, num_steps, revolutions=1.0, distance_scale=1.0, elevation_scale=0.5,
+):
     """Slowly orbit the camera around the centroid of all envs over the full recording,
     completing `revolutions` full turns by the last frame regardless of how many times
     the underlying motion loops (character animation and camera sweep are independent).
@@ -517,7 +528,7 @@ def _setup_orbit_camera(simulator, env, num_steps, revolutions=1.0, distance_sca
         4.0,
     )
     radius = spread * distance_scale
-    height = float(centroid[2]) + spread * 0.5
+    height = float(centroid[2]) + spread * elevation_scale
     target = gymapi.Vec3(
         float(centroid[0]), float(centroid[1]), float(centroid[2]) + 1.0
     )
@@ -586,7 +597,7 @@ def _setup_fixed_camera(simulator, env):
 def record_video(
     agent, env, simulator, num_steps, fps, output_path,
     camera_orbit=False, camera_orbit_revolutions=1.0, camera_orbit_distance_scale=1.0,
-    show_markers=True,
+    camera_orbit_elevation_scale=0.5, show_markers=True,
 ):
     """Record inference using the IsaacGym viewer and encode directly to MP4."""
     import shutil
@@ -612,6 +623,7 @@ def record_video(
             simulator, env, num_steps,
             revolutions=camera_orbit_revolutions,
             distance_scale=camera_orbit_distance_scale,
+            elevation_scale=camera_orbit_elevation_scale,
         )
     else:
         _setup_fixed_camera(simulator, env)
@@ -945,6 +957,7 @@ def main():
             camera_orbit=args.camera_orbit,
             camera_orbit_revolutions=args.camera_orbit_revolutions,
             camera_orbit_distance_scale=args.camera_orbit_distance_scale,
+            camera_orbit_elevation_scale=args.camera_orbit_elevation_scale,
             show_markers=args.show_markers,
         )
     finally:
