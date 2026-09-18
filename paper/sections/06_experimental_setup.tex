@@ -300,3 +300,11 @@ the launcher logs. We draw no compute-efficiency claim from this accounting:
 the temporal MLP's lower wall-clock cost in Table~\ref{tab:compute_accounting}
 is not weighed here against its higher position error relative to slot/type
 in Table~\ref{tab:ablation_results}.
+
+At the rented rate for this hardware (\$0.49/GPU-hour for the A40, plus
+\$0.014/hour for the 100\,GB volume used by the single-GPU development runs
+and \$0.044/hour for the 320\,GB volume used by the six-GPU full-scale run),
+the eight-run ablation grid and the full-scale training run together cost
+approximately \$315: about \$85 for the ablation grid and \$230 for the
+full-scale run. This reflects one vendor's rate at the time of training, not
+a general claim about training cost.

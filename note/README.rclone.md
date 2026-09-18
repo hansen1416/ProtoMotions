@@ -114,9 +114,28 @@ python -u protomotions/record_video_mor_orbit.py \
 --same-motion \
 --compact-spawn-spacing 2.0 \
 --fps 30 \
---video-steps 1440 \
+--video-steps 2880 \
 --camera-orbit \
 --camera-orbit-revolutions 1.0 \
---camera-orbit-distance-scale 1.0 \
+--camera-orbit-distance-scale 0.8 \
+--camera-orbit-elevation-scale 0.35 \
 --output output/videos/test_128shapes_orbit_M001062.mp4 \
+--overrides motion_lib._target_=protomotions.components.motion_lib.MotionLib
+
+
+python -u protomotions/record_video_mor_orbit.py \
+--checkpoint results/hhi_wide_stage2_discover_attention_slot_type_refined/last.ckpt \
+--simulator isaacgym \
+--motion-file /workspace/motion_cache/small150_128shape.pt \
+--motion-index 17280 \
+--num-envs 128 \
+--same-motion \
+--compact-spawn-spacing 2.0 \
+--fps 30 \
+--video-steps 2880 \
+--camera-orbit \
+--camera-orbit-revolutions 1.0 \
+--camera-orbit-distance-scale 0.8 \
+--camera-orbit-elevation-scale 0.35 \
+--output output/videos/test_128shapes_orbit_M014401.mp4 \
 --overrides motion_lib._target_=protomotions.components.motion_lib.MotionLib
