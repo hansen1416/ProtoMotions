@@ -122,26 +122,4 @@ python -u protomotions/record_video_mor_orbit.py \
 --output output/videos/test_128shapes_orbit_M001062.mp4 \
 --overrides motion_lib._target_=protomotions.components.motion_lib.MotionLib
 
-nohup python -u protomotions/train_agent.py \
-  --robot-name smpl_mor --simulator isaacgym \
-  --experiment-path examples/experiments/mimic/mlp_wide_stage2_discover_attention_slot_type_fulldata.py \
-  --experiment-name hhi_wide_stage2_discover_attention_slot_type_fulldata \
-  --checkpoint results/hhi_wide_stage2_discover_attention_slot_type_refined/last.ckpt \
-  --global-clip-pool-source r2:proto-data/hhi_stage2_per_clip_refined/ \
-  --global-clip-pool-cache-dir /workspace/motion_cache \
-  --global-clip-pool-size 256 --global-clip-pool-rebuild-every 256 \
-  --global-clip-pool-weight-floor 0.05 --global-clip-pool-random-fraction 0.2 \
-  --num-envs 6144 --batch-size 24576 --ngpu 6 \
-  --use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
-  --wandb-group hhi_wide_stage2_discover_attention_slot_type_fulldata \
-  > /tmp/fulldata_polish.log 2>&1 &
 
-
-Since there's no fixed validation set left in this fork (explicit split is disabled — every clip is now trainable), you
-  won't have a clean held-out success-rate curve to watch in wandb like the main run had. Watch the raw rollout success/reward
-  and tracking-error curves instead, and stop it (Ctrl+C the nohup job, or kill the PID) once those flatten — a checkpoint is
-  saved periodically, so you can just kill it and use whatever last.ckpt is in
-  results/hhi_wide_stage2_discover_attention_slot_type_fulldata/ at that point.
-
-  Before you launch: run the rclone copy step from my previous message to push full_manifest.jsonl to R2, or the pod will fail
-  to find it.

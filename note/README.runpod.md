@@ -704,7 +704,6 @@ nohup python -u protomotions/evaluate_validation_split.py \
     > /tmp/validation_eval_epoch_28170.log 2>&1 &
 
 
-
 python tools/analyze_shape_failure_correlation.py --results-dir /workspace/ProtoMotions/results/hhi_wide_150motion_128shape_seggain --motion-file /workspace/motion_cache/small150_128shape.pt --output /workspace/ProtoMotions/results/hhi_wide_150motion_128shape_seggain/failure_correlation_analysis.txt
 
 python tools/select_visualization_clips.py \
@@ -714,6 +713,27 @@ python tools/select_visualization_clips.py \
   --script-output results/hhi_wide_150motion_128shape_discover_historical_lookahead/render_visualize.sh
 
 bash results/hhi_wide_150motion_128shape_discover_historical_lookahead/render_visualize.sh
+
+-----
+
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True nohup python -u protomotions/train_agent.py \
+--robot-name smpl_mor --simulator isaacgym \
+--experiment-path examples/experiments/mimic/mlp_wide_stage2_discover_attention_slot_type_fulldata.py \
+--experiment-name hhi_wide_stage2_discover_attention_slot_type_fulldata \
+--checkpoint results/hhi_wide_stage2_discover_attention_slot_type_refined/last.ckpt \
+--global-clip-pool-source r2:proto-data/hhi_stage2_per_clip_refined/ \
+--global-clip-pool-cache-dir /workspace/motion_cache \
+--global-clip-pool-size 128 --global-clip-pool-rebuild-every 256 \
+--global-clip-pool-weight-floor 0.05 --global-clip-pool-random-fraction 0.2 \
+--num-envs 4096 --batch-size 16384 --ngpu 6 \
+--use-wandb --wandb-project hhi-protomotions --wandb-entity yugoamaryl \
+--wandb-group hhi_wide_stage2_discover_attention_slot_type_fulldata \
+> /tmp/fulldata_polish.log 2>&1 &
+
+rclone copy data/splits/hhi_stage2_v1/full_manifest.jsonl \
+r2:proto-data/hhi_stage2_per_clip_refined/splits/hhi_stage2_v1/ \
+--s3-no-check-bucket
+
 -----
 
 
