@@ -1,20 +1,16 @@
 \section{Conclusion}\label{sec:conclusion}
+We construct a paired multi-morphology corpus and train one physics-based
+controller while preserving correspondence between source clips, generated
+references, and simulation assets. The system integrates shape-conditioned
+generation, reference refinement, temporal slot/type attention, and streamed
+training across 128 body configurations.
 
-We have described a text-associated multi-morphology motion corpus and a
-physics-based imitation system that preserves the correspondence between
-source clips, generated references, and simulated bodies. The construction
-combines AMASS/HumanML3D provenance, HUMOS generation, SMPLSim assets,
-conservative reference refinement, and deterministic clip-grouped splits.
-The controller uses temporal slot/type attention with morphology information
-in both actor and critic and is trained directly across body configurations.
-
-Offline evaluation of the selected checkpoint gives 98.47\% success on
-validation and 99.14\% on the untouched test split for the one-shape-per-clip
-trained-body protocol, and the eight-run development grid selects slot/type
-attention without adaLN-Zero. Residual failures on both splits are dominated
-by ground-contact transitions and whole-body acrobatics. These results do not
-establish all-shape coverage or unseen-body generalization. Two studies are
-specified but not run: an unseen-morphology evaluation over body shapes
-inside the trained coefficient range, and an analysis of how morphology and
-motion type jointly set physical control demand -- whether dynamic motions
-are more shape-sensitive than quasi-static ones.
+The original checkpoint achieves 99.14\% success on 1,048 independent test
+clips with one selected trained body each. A separate 32-body replay achieves
+91.64\% overall success, with strong transfer on 28 bodies and severe errors
+on four unresolved cases. This establishes substantial shared tracking and
+transfer within the sampled range while exposing non-uniform robustness.
+Repeated-seed comparisons and paired reference audits clarify the design
+trade-offs. Fixed all-body held-out coverage, causal conditioning controls,
+and resolution of body-specific failures are the next steps toward stronger
+generalization claims.

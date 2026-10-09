@@ -42,6 +42,10 @@ python tools/build_small_multishape_subset.py \
   --num-clips 150 \
   --output /workspace/motion_cache/small150_128shape.pt
 
+python tools/build_small_multishape_subset.py \
+  --num-clips 150 \
+  --output /workspace/motion_cache/small150_128shape_refined.pt
+
 python tools/build_mixed_source_corpus.py \
 --canonical-file /workspace/motion_cache/150_128shape_canonical/150_128shape_canonical_offset.pt \
 --humos-file /workspace/motion_cache/small150_128shape.pt \

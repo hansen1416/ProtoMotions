@@ -138,6 +138,26 @@ The principal implementation entry points are:
     checks the test-manifest hash, count, and disjointness before running.
 \end{itemize}
 
+\subsection{Unseen-body and repeated-seed evidence}
+The original unseen-body replay uses
+\path{tools/analyze_unseen_morphology_generalization.py}, the
+\path{smpl_mor_interp/assets.yaml} asset manifest, and
+\path{data_cache/unseen_morphology_merged_0.pt}. Retained raw and joined
+CSV records define the 1,024-by-32 evaluation panel. The main population
+summaries include every pair and both successful and failed bodies.
+
+Seed-1/2 architecture records are in the corresponding
+\path{results/hhi_150_evalfix_A_seed1} through
+\path{results/hhi_150_evalfix_D_seed2} run folders. Resumed logging segments
+must be joined by evaluation epoch before forming last-eight summaries.
+Across-seed standard deviation is computed from three run summaries, rather
+than from all scheduled evaluations pooled as independent observations.
+
+The full-data checkpoint is a separate experiment whose resolved motion
+manifest is \path{splits/hhi_stage2_v1/full_manifest.jsonl}. Its pending
+comparison must record checkpoint/configuration hashes and preserve the
+same references, assets, horizons, and threshold as the original replay.
+
 For each final experiment, retain the resolved configuration, code revision,
 model/checkpoint checksum, body coefficient and asset manifests, split hashes,
 all resume segments, frame count, GPU model/count, and elapsed GPU-hours.

@@ -1,0 +1,19 @@
+\section{Problem Formulation and System Overview}\label{sec:problem}
+A body configuration $b=(g,\boldsymbol{\beta})$ specifies a SMPL template
+and shape coefficients. For source clip $c$, HUMOS supplies a shape-specific
+reference $\hat{s}_{c,b}(t)$ and SMPLSim supplies the matching asset. Changing
+$b$ changes geometry, reference positions, mass/inertia, and mass-scaled
+actuation even though topology is shared. The task is to track these paired
+references with one policy, not impose identical world-space paths on all bodies.
+
+We learn $\pi_\theta(a_t\mid o_t,b)$ using present state, history, future
+reference targets, and body information. The same parameters serve every
+body. Clips can change on reset while each environment retains its asset.
+Evaluation preserves reference/body identity.
+
+The system constructs paired references (Section~\ref{sec:dataset}), trains
+a shared controller with streamed residency (Section~\ref{sec:method}), and
+replays fixed pairs with known motion and morphology exposure
+(Section~\ref{sec:experiments}). Figure~\ref{fig:data_pipeline} summarizes
+the identity paths. Text is metadata, not a controller input. The flat-ground
+task has no external objects or partners.

@@ -1,0 +1,1831 @@
+% Generated review copy; edit main.tex and sections, then regenerate.
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs,array,tabularx}
+\usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usetikzlibrary{positioning}
+\usepgfplotslibrary{groupplots}
+\usepgfplotslibrary{statistics}
+\usepackage[hidelinks]{hyperref}
+\urlstyle{same}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\pending}[1]{\par\smallskip\noindent
+  \textit{Pending evidence. #1}\par\smallskip}
+\newcommand{\SO}{\mathrm{SO}}
+\newcommand{\R}{\mathbb{R}}
+
+\title{Morphology-Conditioned Physics-Based Motion Imitation\\
+Across 128 Body Shapes}
+\author{}
+\date{Working draft --- October 2026}
+
+% Compile from paper-draft/. October revision; pending GPU evidence is marked.
+
+\begin{document}
+\maketitle
+\begin{abstract}
+Physics-based imitation across body shapes requires consistent references
+and simulated dynamics. We construct a corpus linking 20,951 AMASS-derived
+HumanML3D clip identities to HUMOS-generated references and matching
+SMPL-based assets for 128 body configurations, yielding 2,681,728 variants.
+Contact-aware refinement reduces sliding and ground penetration with small
+pose changes, at the cost of higher reference position jerk. One
+morphology-conditioned temporal controller is trained directly on 18,855
+clips across all 128 bodies using streamed motion residency. Standalone
+original-checkpoint evaluation achieves 98.47\% validation and 99.14\% test
+success on 1,048 held-out clips per split, with one selected trained body per
+clip. A separate replay of 1,024 clips across 32 unseen bodies achieves
+91.64\% overall success: 28 bodies track at 99.74\%, while four have severe
+tracking failures with unresolved causes. Three-seed development comparisons
+support slot/type attention as a practical trade-off, without a consistent
+advantage on all measures. These results establish large-scale shared
+imitation and substantial but non-uniform transfer within the sampled body
+range; they do not establish all-body held-out-motion coverage or isolate
+the benefit of explicit morphology conditioning.
+\end{abstract}
+
+
+\section{Introduction}\label{sec:introduction}
+A physics-based motion controller should reproduce an action across bodies
+with different proportions and dynamics. Changing limb lengths, collision
+geometry, and mass distribution changes both a motion's spatial realization
+and the actuation needed to follow it. Kinematic retargeting alone is not
+sufficient: the reference must correspond to the simulated body, and a
+feedback policy must track it.
+
+Large motion resources, shape-conditioned generation, and scalable imitation
+provide the building blocks~\cite{amass,humanml3d,humos,phc,protomotions}.
+Their combination raises a practical question: can one controller track a
+large collection of paired, morphology-specific motions across many bodies,
+and how reliably does it transfer to configurations absent from training?
+We address this through system construction and empirical evaluation.
+Morphology conditioning and temporal attention are established techniques;
+the contribution is a consistent paired-motion workflow at this scale and
+an evaluation distinguishing motion exposure from body exposure.
+
+HUMOS generates references for 128 configurations; simulation assets use
+the same SMPL parameters. Clip/body identities are preserved through
+conversion, refinement, training, and replay. Refinement reduces contact
+artifacts with explicit fidelity checks. A shared temporal slot/type-attention
+policy trains directly across bodies, with morphology in actor and critic
+and a streamed pool limiting resident memory. HumanML3D captions support
+descriptive analysis but are not policy inputs.
+
+We make three contributions:
+\begin{enumerate}
+\item A paired corpus construction linking source identities, shape-specific
+references, matching assets, and deterministic clip-grouped splits across
+20,951 clips and 128 body configurations.
+\item A shared imitation system trained on 18,855 clips across all 128
+bodies, combining temporal observations, morphology inputs, reference
+processing, and memory-bounded motion streaming.
+\item An empirical assessment separating held-out tracking, trained-body
+coverage, and unseen-body transfer, with repeated-seed design comparisons
+and an explicit account of residual failures and evidence limits.
+\end{enumerate}
+
+The original checkpoint achieves 99.14\% success on the independent
+1,048-clip test split, with one selected trained body per clip. On a separate
+1,024-clip panel over 32 unseen bodies, overall success is 91.64\%: 28 bodies
+reach 99.74\% collectively, while four transfer poorly. The full-population
+score is central to the generalization claim. These findings support shared
+control over substantial motion and body variation, but also reveal limits
+that aggregate trained-body scores conceal. Fixed all-body held-out coverage
+and causal tests of morphology inputs are needed for stronger claims.
+
+\section{Related Work}\label{sec:related_work}
+
+\subsection{Physics-based motion imitation}
+
+DeepMimic demonstrated reference-guided reinforcement learning for simulated
+character skills~\cite{deepmimic}. Perpetual Humanoid Control developed robust
+humanoid imitation for real-time simulated avatars~\cite{phc}. These approaches
+motivate learning a feedback controller rather than directly replaying a
+kinematic trajectory. Subsequent single-body trackers scaled this
+feedback-control approach in coverage and deployability: PULSE distills a
+low-dimensional, high-coverage motion representation for general humanoid
+control~\cite{pulse}; OmniH2O and ExBody2 target dexterous, deployable
+whole-body teleoperation and expressive control on physical
+humanoids~\cite{omnih2o,exbody2}; GMT uses a motion mixture-of-experts to
+track a broad motion distribution with one policy~\cite{gmt}. Each of these
+typically targets a fixed robot platform or morphology while scaling the
+motion distribution; we instead fix the tracking task and scale the body,
+holding 128 configurations under one
+policy. We implement our experiments in
+ProtoMotions~\cite{protomotions} with Isaac Gym~\cite{isaacgym}, using PPO
+optimization~\cite{ppo}. Our contribution is the multi-morphology data and
+control workflow and its evaluation, rather than a replacement for these
+simulation or learning frameworks.
+
+\subsection{Morphology-conditioned control and retargeting}
+
+Body-shape variation has already been studied in physics-based control:
+Won and Lee learned a parametric controller that accommodates variation in
+character height, weight, and proportions~\cite{won2019}. A separate line of
+work learns policies that transfer across changes in agent \emph{topology} --
+limb count and skeletal structure -- through shared modular
+sub-policies~\cite{smp2020}, which is a different axis from the continuous
+anthropometric variation studied here. Morphology conditioning is therefore
+an established idea, and our work should not be interpreted as introducing it.
+We instead examine one controller over a large set of paired motions and
+bodies, with shape identity maintained throughout data generation,
+simulation, and evaluation.
+
+Kinematic retargeting and dynamic tracking address different requirements.
+SMPL provides a common parameterized body representation~\cite{smpl}, and
+SMPLSim constructs simulation-ready assets from these
+models~\cite{smplsim}. A shared skeleton makes poses comparable, but does not
+make global positions or required actuation independent of shape. Matching a
+reference to its intended simulation asset is consequently part of the task
+definition, not an optional evaluation convenience.
+
+\subsection{Text-motion data, shape-conditioned generation, and refinement}
+
+AMASS consolidates motion capture in a common body-model
+representation~\cite{amass}. HumanML3D associates processed motion segments
+with natural-language descriptions~\cite{humanml3d}. We inherit those source
+identities and descriptions rather than claiming new motion capture or
+shape-specific language annotation.
+
+HUMOS generates identity-conditioned human motion using a cycle-consistent
+learning formulation~\cite{humos}. We use its pretrained model to obtain
+shape-specific references, not as the physics controller and not as a
+text-conditioned policy. The resulting sequences still require conversion to
+the simulator's skeleton and coordinate conventions, and their feasibility
+must be assessed in that simulator. Our refinement is a deliberately limited
+kinematic post-process; it is not a new generative model or a full dynamic
+trajectory optimizer.
+
+The controller uses standard Transformer operations~\cite{attention}.
+Learned slot and type embeddings identify temporal positions and observation
+sources. An ablation also investigates actor-only morphology modulation with
+adaLN-Zero, adapting the zero-initialized conditioning design used in
+Diffusion Transformers~\cite{dit}. That experiment tests a conditioning
+mechanism, not diffusion-based action generation.
+
+\section{Problem Formulation and System Overview}\label{sec:problem}
+A body configuration $b=(g,\boldsymbol{\beta})$ specifies a SMPL template
+and shape coefficients. For source clip $c$, HUMOS supplies a shape-specific
+reference $\hat{s}_{c,b}(t)$ and SMPLSim supplies the matching asset. Changing
+$b$ changes geometry, reference positions, mass/inertia, and mass-scaled
+actuation even though topology is shared. The task is to track these paired
+references with one policy, not impose identical world-space paths on all bodies.
+
+We learn $\pi_\theta(a_t\mid o_t,b)$ using present state, history, future
+reference targets, and body information. The same parameters serve every
+body. Clips can change on reset while each environment retains its asset.
+Evaluation preserves reference/body identity.
+
+The system constructs paired references (Section~\ref{sec:dataset}), trains
+a shared controller with streamed residency (Section~\ref{sec:method}), and
+replays fixed pairs with known motion and morphology exposure
+(Section~\ref{sec:experiments}). Figure~\ref{fig:data_pipeline} summarizes
+the identity paths. Text is metadata, not a controller input. The flat-ground
+task has no external objects or partners.
+
+\section{Paired Motion and Body Corpus}\label{sec:dataset}
+
+We construct a derived corpus in which a source clip identity connects a motion
+description, 128 generated motion variants, and their matching simulation
+assets. A \emph{clip} denotes a source segment, including a mirrored segment
+when present; a \emph{variant} denotes that clip on one body configuration.
+These units must not be conflated when reporting dataset size or evaluation
+coverage. Figure~\ref{fig:data_pipeline} shows the construction paths and
+Figure~\ref{fig:dataset_scale} the resulting scale and split structure.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.94\linewidth}
+\small
+\begin{tabularx}{\linewidth}{@{}p{0.12\linewidth}Y@{}}
+\textbf{Motion} &
+AMASS $\longrightarrow$ HumanML3D preprocessing and clip extraction
+$\longrightarrow$ HUMOS conditioned on $(g,\boldsymbol{\beta})$
+$\longrightarrow$ MotionLib conversion and reference refinement
+$\longrightarrow$ per-clip motion variants. \\[0.7em]
+\textbf{Body} &
+SMPL with the same $(g,\boldsymbol{\beta})$
+$\longrightarrow$ SMPLSim
+$\longrightarrow$ matching skeleton, collision geometry, mass/inertia,
+and MJCF asset identity. \\[0.7em]
+\textbf{Text} &
+HumanML3D source descriptions
+$\longrightarrow$ clip-ID lookup associated with the generated variants
+(metadata only; not a policy input).
+\end{tabularx}
+
+\smallskip
+The body assets are used for motion conversion, shape-specific forward
+kinematics, ground-clearance correction, and simulation. Refined reference
+motion and matching simulated state feed one shared policy.
+\end{minipage}}
+\caption{Dataset and asset construction. The body parameters are shared across
+the motion and body paths; text follows a separate identity-association path.}\label{fig:data_pipeline}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[>=latex, node distance=0.7cm]
+\node[draw, rounded corners, fill=blue!8, minimum width=2.4cm, minimum height=0.8cm]
+  (source) {20,951 clip identities};
+\node[draw, rounded corners, fill=green!10, right=of source, minimum width=2.4cm, minimum height=0.8cm]
+  (variants) {$\times$ 128 bodies};
+\node[draw, rounded corners, fill=orange!12, right=of variants, minimum width=2.4cm, minimum height=0.8cm]
+  (total) {2,681,728 variants};
+\draw[->, thick] (source) -- (variants);
+\draw[->, thick] (variants) -- (total);
+\node[draw, rounded corners, below=0.75cm of variants, minimum width=2.1cm, minimum height=0.65cm]
+  (train) {18,855 train};
+\node[draw, rounded corners, right=0.35cm of train, minimum width=1.8cm, minimum height=0.65cm]
+  (val) {1,048 val};
+\node[draw, rounded corners, right=0.35cm of val, minimum width=1.8cm, minimum height=0.65cm]
+  (test) {1,048 test};
+\draw[->, thick] (source.south) |- (train.north);
+\draw[->, thick] (source.south) |- (val.north);
+\draw[->, thick] (source.south) |- (test.north);
+\end{tikzpicture}
+\caption{Scale and split structure of the derived corpus. Splitting is by clip
+identity, so all 128 body variants of a clip remain in the same partition.}
+\label{fig:dataset_scale}
+\end{figure}
+
+\subsection{Source motion and text provenance}\label{sec:source_data}
+
+We use the AMASS-derived motion portion of HumanML3D~\cite{amass,humanml3d}, with the 18 source collections listed in
+Appendix~\ref{app:preprocessing}. Source SMPL+H sequences are processed at
+20\,Hz, including the Z-up to Y-up coordinate conversion used by the
+HumanML3D/HUMOS preprocessing pipeline. Clip extraction, temporal cropping, and
+mirroring preserve the HumanML3D identities. The preparation also includes
+treadmill/skating cleanup. This subset is not the entirety of AMASS.
+
+The generation pipeline produced 22,459 candidate clip identities, counting
+original and mirrored clips. A subsequent text-based filter excluded 1,508
+clips identified as requiring external objects or environmental support,
+leaving 20,951 identities for the flat-ground imitation task. This filter is a
+task-scope heuristic: it does not prove that every retained reference is
+support-free or dynamically feasible. The retained and excluded ID lists
+provide the audit trail for that decision.
+
+Source descriptions are available through a separate clip-ID lookup and the
+HumanML3D annotation metadata used by HUMOS. A description is associated with
+the variants of its source clip; it is not a new human annotation for each
+generated body. A coarse coverage check against a single-caption-per-clip
+lookup finds a caption for all 20,951 clip identities, but semantic fidelity
+is not established. Of the 9,579 mirrored identities, 22\% carry a caption
+byte-identical to their un-mirrored source, and 40\% contain an explicit
+left/right or clockwise term that mirroring inverts; simply removing a mirror
+prefix therefore does not establish a correct caption. Segment timing and
+multi-annotation coverage against the full HumanML3D annotation set are not
+audited here.
+
+\subsection{Body sampling and shape-specific generation}\label{sec:body_generation}
+
+Let a body configuration be $b=(g,\boldsymbol{\beta})$, where $g$ identifies the
+female or male SMPL body-model variant and
+$\boldsymbol{\beta}\in\R^{10}$ contains shape coefficients. We sample
+\begin{equation}
+    \beta_{ij}\sim\mathcal{U}(-3,3),\qquad
+    i=1,\ldots,64,\quad j=1,\ldots,10,
+    \label{eq:shape_sampling}
+\end{equation}
+using NumPy's \texttt{default\_rng(46)}, and cross these 64 vectors with the two
+body-model variants. Thus the corpus contains 128 body configurations, not
+128 independently sampled beta vectors. The actual coefficient arrays and
+stable beta keys identify the bodies; the keys are not content hashes.
+Uniform sampling of model coefficients is a controlled source of variation,
+not a representative sample of human populations.
+
+For each source clip, we provide the processed pose/root motion features and
+the target body parameters to the pretrained HUMOS
+model~\cite{humos}. The local configuration uses root-relative 6D root and
+joint rotations together with translation, with shape and body-model
+conditioning. The generated pose and root sequences are retained for
+conversion. HUMOS is an existing identity-conditioned model; neither its
+training nor a text-to-motion generator is a contribution of this work.
+The checkpoint used in the documented pipeline is identified in
+Appendix~\ref{app:provenance}.
+
+In parallel, SMPL bodies~\cite{smpl} with identical parameters are converted
+to MJCF assets using SMPLSim~\cite{smplsim}. The asset-generation configuration
+uses mass estimation and the configured hand/foot simplifications
+(\texttt{real\_weight}, \texttt{replace\_feet}, \texttt{remove\_toe}, and
+\texttt{freeze\_hand}). The resulting imitation representation contains
+24 rigid bodies and 69 actuated joint coordinates. Collision proxies, joint
+ranges, and estimated masses/inertias belong to each asset. These physical
+parameters are simulation-model estimates, not measurements of corresponding
+human participants.
+
+\subsection{Motion conversion and reference refinement}\label{sec:refinement}
+
+The generated sequences are converted to ProtoMotions' Z-up simulation
+convention and resampled from 20 to 30\,Hz. Forward kinematics (FK) uses the
+matching asset rather than a single neutral skeleton. The packaged
+representation includes global body positions and rotations, local rotations,
+joint positions, linear/angular and joint velocities, and contact labels.
+The earlier corpus already included frame-zero grounding; the newer
+refinement addresses artifacts throughout each sequence.
+
+Refinement is applied independently to each variant in the following order.
+First, stored ankle/toe contacts are validated, or contacts are detected from
+foot position and velocity if usable labels are unavailable. Short gaps are
+closed and very short contact runs are removed. These labels define candidate
+stance intervals; they are not measured ground-reaction forces.
+
+Second, joint rotations are temporally filtered using sign-continuous
+quaternion representations, normalization, and a bounded geodesic correction.
+Contact-transition frames divide the sequence into segments so filtering does
+not average across a change of stance. A transition taper and a limited
+smoothing blend further restrict changes near those boundaries.
+Post-smoothing FK then recomputes the positions used by subsequent corrections.
+
+Third, a conservative root-translation correction reduces horizontal stance
+sliding. For each contact interval, an anchor is formed from the foot's median
+horizontal position. A least-squares correction seeks a common root XY shift
+that brings the active feet closer to their anchors; the shift is temporally
+regularized and capped. Multiple contacts can disagree, so this root-only
+operation does not guarantee exact foot locking and does not solve for new
+joint angles.
+
+Fourth, we evaluate the lowest point of the matching collision geometry at
+every frame. With floor height zero and margin $\epsilon_z$, the required lift is
+\begin{equation}
+    \ell_t^{\mathrm{req}}
+      = \max\!\left(0,\epsilon_z-\min_{x\in\mathcal{C}_b(t)}x_z\right),
+    \label{eq:clearance}
+\end{equation}
+where $\mathcal{C}_b(t)$ denotes the modeled collision geometry for body $b$.
+A smoothed lift envelope is constrained to remain above this requirement.
+This prevents penetration of the checked geometry in the reference sequence;
+it does not establish balanced support, realistic impacts, or freedom from
+self-collision.
+
+Finally, FK and velocities are recomputed from the corrected root and
+rotations, independently within each motion. This avoids inconsistent
+position/velocity tensors and artificial derivatives across clip boundaries.
+The default thresholds, filter windows, and correction bounds are given in
+Table~\ref{tab:refinement_parameters}.
+
+The refinement objective is modest: reduce visible and measurable kinematic
+artifacts while preserving the generated motion. Before/after assessment must
+therefore include both artifact measures (sliding, penetration, and jerk) and
+fidelity measures (rotation/root changes and retained cross-shape variation).
+Improved kinematics alone does not demonstrate improved policy learning or
+dynamic feasibility.
+
+\subsection{Packaging, scale, and deterministic splits}\label{sec:splits}
+
+Each per-clip file contains the 128 variants, their frame counts and sampling
+rates, and the clip/asset identities needed to recover the corresponding body
+parameters. Captions remain a separately associated metadata resource; they
+are not established as a field of every training tensor file. This packaging
+allows the training system to stream clip files without downloading the
+complete corpus at startup.
+
+\begin{table}[t]
+\centering
+\caption{Current corpus and split sizes. Variants are generated combinations,
+not independent captures. Every clip has 128 body configurations.}\label{tab:dataset_counts}
+\begin{tabular}{lrr}
+\toprule
+Partition & Clip identities & Motion variants \\
+\midrule
+Training & 18,855 & 2,413,440 \\
+Validation & 1,048 & 134,144 \\
+Test & 1,048 & 134,144 \\
+\midrule
+Total & 20,951 & 2,681,728 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We use the versioned \texttt{hhi\_stage2\_v1} split with seed 42 and approximate
+90/5/5 proportions (Table~\ref{tab:dataset_counts}). All variants of a clip
+stay together, and original/mirrored partners are assigned as a group.
+The 150 development clips are reserved for training, together with their
+mirror partners. Training accepts explicit training and validation manifests;
+test-manifest membership is not loaded by the training workflow. Split hashes
+and version information accompany the run and checkpoints.
+
+These splits test held-out clip identities on the trained body set. They have
+not been demonstrated to be disjoint by subject or original capture recording:
+different segments can still share a source recording. This distinction
+limits claims about broader motion generalization.
+
+\subsection{Current resource scope}
+
+The current resource combines generated references, matching assets, inherited
+text associations, and reproducible splits. It is not a fully audited
+text-and-motion benchmark release. Caption completeness and alignment,
+body-specific language, licensing and redistribution conditions, and
+shape-conditioned semantic fidelity require further work. Those extensions
+can be developed independently of the reference-conditioned controller
+evaluated here.
+
+\section{Shared Controller and Training}\label{sec:method}
+
+\subsection{Task, simulation, and actuation}
+
+The policy follows the task in Section~\ref{sec:problem}.
+
+Experiments use the \texttt{smpl\_mor} assets in Isaac Gym through
+ProtoMotions~\cite{isaacgym,protomotions}. Simulation runs at 60\,Hz with two
+substeps and control decimation two, giving a 30\,Hz policy rate. The policy
+outputs a raw action $a_t\in\R^D$, where $D=69$. Joint targets are
+\begin{equation}
+    q_t^{\mathrm{target}}
+      = q^{\mathrm{offset}}
+        + q^{\mathrm{scale}}\odot\tanh(a_t),
+    \label{eq:action_mapping}
+\end{equation}
+with offsets and scales derived from the configured joint ranges. These
+targets drive the simulator's built-in position PD controller. The action is
+not a residual added to the reference pose.
+
+PD stiffness, damping, and effort limits are scaled per joint by the mass of
+its associated rigid body relative to that body in the reference asset.
+This is a body-level mass scaling, not a single scale based on total character
+mass, and it does not guarantee dynamically equivalent actuation across
+geometrically different bodies. Base gains and limits are listed in
+Table~\ref{tab:pd_parameters}.
+
+\subsection{Observation design}\label{sec:observations}
+
+The observation combines present state, history, future reference targets,
+a historical action, and explicit morphology information.
+Let $B=24$ denote the number of simulated bodies. The state representation
+contains root height above ground, root-relative body positions excluding
+the root, 6D body rotations, and linear/angular velocities.
+Positions and velocities use a heading-aligned frame, and rotations remove
+the root heading. This removes dependence on arbitrary global heading and
+horizontal origin while retaining height and body configuration.
+
+We include seven historical states at control-step offsets
+$\{1,2,3,4,8,16,32\}$, covering approximately 1.07\,s, and four future
+reference slots at $\{1,2,4,8\}$, covering approximately 0.27\,s.
+Each historical state uses its own root/heading frame.
+Future slots contain target positions relative to the current root,
+heading-aligned target rotations, position differences from the current body
+state, relative rotations $\smash{R_{t,j}^{-1}\hat{R}_{t+k,j}}$, and
+heading-aligned linear/angular velocity differences. Thus relative rotations
+are expressed with respect to the current body rotation, not as another
+heading-frame position feature.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Observation inputs supplied to both actor and critic. Dimensions are
+per slot. Positions/heights use meters, linear velocities m/s, angular
+velocities rad/s, and 6D rotations are dimensionless. Raw actions and
+morphology coefficients are not joint-angle measurements.}\label{tab:observations}
+\begin{tabularx}{\linewidth}{@{}lrlY@{}}
+\toprule
+Input & Dimension & Slots & Representation and path \\
+\midrule
+Current state & $15B-2=358$ & 1 &
+Height; $3(B-1)$ positions; $6B$ rotations; $3B$ linear and $3B$ angular
+velocities. Current-state encoder. \\
+History & $358$ & 7 &
+Same state representation at the seven past offsets. Shared history encoder. \\
+Future reference & $24B=576$ & 4 &
+Target and relative poses ($18B$), plus velocity differences ($6B$).
+Shared future encoder. \\
+Historical action & $D=69$ & 1 &
+A raw previous policy-action vector, before tanh and PD scaling.
+Bypasses attention. \\
+Morphology & $11$ & 1 &
+$[g,\beta_1,\ldots,\beta_{10}]$ from the assigned asset.
+Bypasses attention. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The temporal context exposes both recent changes and more distant motion
+information; the future targets provide a short anticipation window.
+These are design motivations, not established ablation outcomes.
+History is initialized consistently with reference-state resets using
+available historical reference states; single-state initialization is the
+fallback when a trajectory history is unavailable.
+Contact flags, an explicit phase scalar, text, and estimated physical
+feature vectors are not part of the selected observation.
+
+\subsection{Temporal slot/type attention}\label{sec:architecture}
+
+We use three observation encoders: one for the current state, one shared
+across history slots, and one shared across future slots. Each is an MLP
+with two 256-unit ReLU hidden layers and a 256-dimensional token output.
+Inputs use running mean/standard-deviation normalization and a magnitude
+clamp of five.
+
+The resulting 12 tokens comprise one current, seven historical, and four
+future tokens. For slot $i$, the Transformer input is
+\begin{equation}
+    z_i = E_{\tau(i)}(x_i)
+        + e_i^{\mathrm{slot}} + e_{\tau(i)}^{\mathrm{type}},
+    \qquad i=0,\ldots,11,
+    \label{eq:token_embedding}
+\end{equation}
+where $\tau(i)$ identifies the current/history/future source.
+Slot embeddings distinguish the configured temporal offsets, while type
+embeddings distinguish the observation sources. The Transformer has two
+layers, four attention heads, token width 256, and feed-forward width
+1,024~\cite{attention}. Its current-state token supplies the pooled output
+after the configured output projection and activation.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.94\linewidth}
+\small
+\begin{tabularx}{\linewidth}{@{}YcY@{}}
+Current state: $1\times358$ & $\longrightarrow$ &
+Current encoder: $1\times256$ token \\
+Past states: $7\times358$ & $\longrightarrow$ &
+History encoder: $7\times256$ tokens \\
+Future targets: $4\times576$ & $\longrightarrow$ &
+Future encoder: $4\times256$ tokens
+\end{tabularx}
+\begin{center}
+$\downarrow$\\
+12 tokens + learned temporal-slot and source-type embeddings\\
+$\downarrow$\\
+2 Transformer layers, 4 heads, width 256\\
+$\downarrow$\\
+Pool current token: $h_t\in\R^{256}$\\
+$\downarrow$\\
+Concatenate $[h_t,\ a^{\mathrm{hist}}_t,\ g,\boldsymbol{\beta}]$
+and normalize
+\end{center}
+\begin{tabularx}{\linewidth}{@{}YY@{}}
+\textbf{Actor:} six 2,896-unit layers
+$\longrightarrow$ 69 action means
+$\longrightarrow$ tanh/range scaling
+$\longrightarrow$ PD targets. &
+\textbf{Critic:} four 1,024-unit layers
+$\longrightarrow$ scalar state value.
+\end{tabularx}
+\smallskip
+The entire encoder/attention pathway is instantiated separately for actor
+and critic; the drawing summarizes the common design, not shared weights.
+Morphology and action bypass attention into each head. Text is absent.
+\end{minipage}}
+\caption{Observation-to-action data flow of the selected slot/type policy.
+Both networks receive the same input categories but have separate parameters.}\label{fig:network}
+\end{figure}
+
+The final head input is the concatenation of the 256-dimensional attention
+output, the historical raw action, and the 11-dimensional morphology vector.
+This 336-dimensional input also uses running normalization and clamp five.
+Betas are not manually divided by three, embedded as a separate attention
+token, or used for adaLN modulation in the selected model.
+
+Actor and critic have separate token encoders, attention modules, slot/type
+embeddings, and MLP heads. The actor head has six hidden layers of width
+2,896; the critic has four of width 1,024, all with ReLU activations.
+The outputs are a Gaussian action mean and a scalar value, respectively.
+PPO samples actions with fixed diagonal log standard deviation $-2.9$;
+evaluation uses the mean action. Figure~\ref{fig:network} summarizes the flow.
+
+\subsection{Tracking reward, resets, and PPO}\label{sec:learning}
+
+The training reward combines global body tracking and root-height tracking.
+For corresponding simulated and reference body positions $p_j,\hat{p}_j$,
+rotations $R_j,\hat{R}_j$, and velocities $v_j,\hat{v}_j$ and
+$\omega_j,\hat{\omega}_j$, define
+\begin{align}
+    e_p &= \frac{1}{3B}\sum_{j=1}^{B}\|p_j-\hat{p}_j\|_2^2,
+    & e_R &= \frac{1}{B}\sum_{j=1}^{B}
+                  d_{\SO(3)}(R_j,\hat{R}_j)^2, \\
+    e_v &= \frac{1}{3B}\sum_{j=1}^{B}\|v_j-\hat{v}_j\|_2^2,
+    & e_\omega &= \frac{1}{3B}\sum_{j=1}^{B}
+                     \|\omega_j-\hat{\omega}_j\|_2^2, \\
+    e_h &= (h-\hat{h})^2, &&
+\end{align}
+where $d_{\SO(3)}$ is the geodesic rotation angle in radians.
+The coordinate-wise means in the position and velocity errors match the
+implemented reductions. The reward is
+\begin{equation}
+\begin{split}
+    r_t ={}& 0.5\exp(-25e_p) + 0.3\exp(-5e_R)
+             + 0.1\exp(-0.5e_v)\\
+           &+0.2\exp(-0.1e_\omega) + 0.2\exp(-100e_h).
+\end{split}\label{eq:reward}
+\end{equation}
+The weights are not normalized to sum to one. There is no explicit effort,
+action-smoothness, or contact-matching reward in this experiment, and there
+is no source-dependent switch between canonical and HUMOS reward functions.
+
+References are sampled only from variants matching the environment's asset.
+Reference-state initialization starts at frame zero with probability 0.2;
+otherwise it uses a random valid reference time. Training episodes have a
+maximum of 1,000 control steps and use the configured fall termination with
+a 0.15\,m height setting and permitted foot-contact bodies. Tracking-error
+termination is disabled. This training rule is distinct from the evaluation
+failure threshold in Section~\ref{sec:metrics}.
+
+We optimize using PPO~\cite{ppo}, with 32-step rollouts, discount 0.99,
+GAE parameter 0.95, policy-ratio clipping 0.2, and normalized advantages.
+Separate Adam optimizers use learning rates $2\times10^{-5}$ for the actor
+and $10^{-4}$ for the critic. Other configuration values and actual run
+budgets appear in Table~\ref{tab:training_parameters}. Evaluation rollouts
+use deterministic inference without gradient tracking.
+
+\subsection{Direct multi-shape learning and streamed sampling}\label{sec:sampling}
+
+The final approach is direct multi-shape training on refined HUMOS
+references. A small static corpus supports initial development; the
+full-scale experiment streams per-clip files through \texttt{GlobalClipPool}.
+The training manifest is deterministically partitioned across GPU ranks.
+Each rank maintains a bounded resident pool containing all 128 variants
+of its selected clips. Environment-level motion sampling respects the
+assigned morphology.
+
+At each scheduled rebuild, most resident slots are selected by explicit
+top priority, combining estimated clip difficulty and an exploration bonus.
+A fraction 0.2 is reserved for uniform random selection, maintaining rehearsal
+outside the highest-priority set. Difficulty estimates are updated from
+training-pool evaluations with an exponential moving average of rate 0.1
+and a floor of 0.05. The exploration coefficient is 1.0.
+This is a training curriculum, not uniform sampling of the complete corpus.
+
+The resident pool is rebuilt every 256 epochs. The full-scale run initially
+used 256 clips per rank and was resumed with 128 after memory failures; the
+local cache multiplier was reduced to 1.0. These changes affect residency
+and memory demand, not the underlying training split. Validation membership
+is fixed independently of pool rebuilding, and validation evaluation does
+not update training sampling weights. We report resident-pool and validation
+metrics separately because they measure different populations.
+
+\section{Evaluation Protocol}\label{sec:experiments}
+
+\subsection{Development subset and full-scale protocol}
+
+The development corpus contains 150 clips and all 128 body configurations,
+for 19,200 variants. These clips are reserved within the full training split
+and are not a held-out generalization benchmark. Small-scale experiments
+investigate architecture and reference-processing choices with a fixed
+simulation budget. The full-scale run uses the 18,855 training clips in
+Table~\ref{tab:dataset_counts}, with validation membership fixed throughout.
+
+The selected full-scale experiment is slot/type attention trained directly on
+refined references. Its code retains a historical \texttt{stage2} name, but
+this run does not use neutral pretraining followed by shape transfer.
+Table~\ref{tab:training_parameters} records the shared optimization settings
+and the actual environment/batch sizes used after the initial memory-related
+launch adjustments. Run-specific resolved configurations take precedence
+over older launch examples.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Training configuration and budgets. Environment and minibatch counts
+are per GPU. The full-scale frame count is a recorded stopping snapshot,
+not a budget matched to the development runs.}\label{tab:training_parameters}
+\begin{tabularx}{\linewidth}{@{}lYY@{}}
+\toprule
+Setting & Corrected 150-clip runs & Full-scale selected run \\
+\midrule
+Parallel GPUs per policy & 1 & 6 \\
+Environments per GPU & 4,096 & 2,048 \\
+PPO minibatch size per GPU & 16,384 & 8,192 \\
+Rollout length & 32 control steps & 32 control steps \\
+Mini-epochs per update & 1 & 1 \\
+Actor / critic learning rates &
+$2\times10^{-5}$ / $10^{-4}$ & $2\times10^{-5}$ / $10^{-4}$ \\
+Discount / GAE / ratio clip & 0.99 / 0.95 / 0.2 & 0.99 / 0.95 / 0.2 \\
+Gradient norm clip & 50 & 50 \\
+Evaluation cadence & 200 epochs & 256 epochs \\
+Training seed & 0--2 (refined A--D); 0 (unrefined E--H) & Recorded in saved run configuration \\
+Reference residency & All 150 clips & 256, later 128 clips per GPU \\
+Training frames & 786,432,000 per run (6,000 epochs) & Approximately $11.07\times10^9$ recorded \\
+Status of reported evidence & Completed, Table~\ref{tab:architecture_seeds} & Epoch-28,170 checkpoint, Table~\ref{tab:test_results} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Design comparisons and aggregation}\label{sec:ablation_design}
+We compare four architectures: A, temporal MLP; B, temporal attention; C,
+attention with slot/type embeddings; and D, C with actor-only adaLN-Zero.
+All retain morphology inputs in actor and critic. Refined-reference runs
+use three seeds (0, 1, 2), a matched 6,000-epoch budget, and the same cadence.
+Each run is summarized by its last eight evaluations (epochs 4,600--6,000);
+architecture means and sample standard deviations are then computed across
+three run summaries. Within-run evaluations are not training replicates.
+
+The full-scale model predates these supporting reruns. They reassess its
+design rather than establish prospective selection or statistical superiority.
+Models differ in parameter count; compute details are in Appendix~\ref{app:history}.
+The original seed-0 grid is retained in Table~\ref{tab:ablation_results}.
+Unrefined cases E--H have one seed each. Refined and unrefined policies track
+their own targets, preventing a causal policy-level refinement conclusion.
+The paired offline reference audit provides the evidence for artifact reduction.
+\begin{table}[t]
+\centering
+\small
+\caption{Corrected 150-clip grid: four architectures $\times$ two reference
+versions, seed 0. Refined A--D also have seed-1/2 repeats in Table~\ref{tab:architecture_seeds}.}\label{tab:ablations}
+\begin{tabularx}{\linewidth}{@{}llYY@{}}
+\toprule
+Case & References & Architecture & Comparison purpose \\
+\midrule
+A & Refined & Wide temporal MLP; beta concatenation &
+Temporal MLP baseline. \\
+B & Refined & Basic temporal attention &
+Attention versus flattened temporal input. \\
+C & Refined & Attention with slot/type embeddings &
+Explicit temporal/source identity. \\
+D & Refined & C + actor-only adaLN-Zero &
+Morphology modulation with critic unchanged. \\
+E & Unrefined & As C &
+Reference version at fixed architecture (slot/type). \\
+F & Unrefined & As A &
+Reference version at fixed architecture (temporal MLP). \\
+G & Unrefined & As B &
+Reference version at fixed architecture (attention). \\
+H & Unrefined & As D &
+Reference version at fixed architecture (slot/type + adaLN). \\
+\bottomrule
+\end{tabularx}
+\end{table}
+\subsection{Morphology-matched evaluation and checkpoint scope}\label{sec:evaluation_protocol}
+
+Each reference is rolled out only in an environment using its exact asset
+identity (Figure~\ref{fig:evaluation_protocol}). A selected reference
+therefore cannot be assigned to a different body simply because an
+environment slot is available. Multiple rollout batches may be needed when
+several references require the same body.
+
+Routine monitoring selects one variant per clip. With seed $s=42$, stable
+clip identity $c$, panel index $p$, and $N_c$ available variants, the choice is
+\begin{equation}
+    k(c,p) =
+    \left(
+       \operatorname{uint64}_{\mathrm{big}}
+       \bigl(\operatorname{SHA256}(s\!:\!c)_{0:8}\bigr)
+       +p
+    \right)\bmod N_c .
+    \label{eq:shape_panel}
+\end{equation}
+Here $s\!:\!c$ is the UTF-8 string formed as \texttt{seed:clip\_id}.
+For scheduled monitoring, $p$ is the integer quotient of the checkpointed
+epoch and evaluation cadence. This produces deterministic staggered shape
+choices that rotate across evaluations and remain reproducible after resume.
+The validation \emph{clip list} is fixed; the selected \emph{shape panel}
+changes. Thus successive scores are not repeated measurements on an
+identical set of clip/shape pairs.
+
+Evaluation uses the mean action, reference initialization, and no gradient
+tracking. It disables training termination and records errors over the
+valid reference horizon, capped at 600 control steps (20\,s at 30\,Hz).
+Success therefore refers to the evaluated horizon, not necessarily the
+entire duration of a longer source clip.
+
+Final model comparisons should freeze the checkpoint, clip/shape panel,
+reference version, simulator configuration, and seed. Validation is available
+for model selection and has been repeatedly monitored; it is not an untouched
+test set. The independent test manifest remains outside training and model
+selection; its one-time evaluation is reported in
+Section~\ref{sec:test_results}. The downloaded epoch-28,170
+\texttt{last.ckpt} is distinct from the epoch-28,159 monitoring snapshot
+in Table~\ref{tab:full_results}; the standalone validation and test results
+therefore refer explicitly to the downloaded checkpoint.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[>=latex, node distance=0.35cm, every node/.style={font=\small}]
+\node[draw, rounded corners, fill=blue!8, align=center, minimum width=2.05cm, minimum height=0.72cm] (clip) {clip identity\\+ manifest};
+\node[draw, rounded corners, fill=green!10, right=of clip, align=center, minimum width=2.15cm, minimum height=0.72cm] (pick) {SHA-256\\shape pick};
+\node[draw, rounded corners, fill=orange!12, right=of pick, align=center, minimum width=2.15cm, minimum height=0.72cm] (asset) {matching\\SMPLSim asset};
+\node[draw, rounded corners, fill=purple!10, right=of asset, align=center, minimum width=1.9cm, minimum height=0.72cm] (roll) {mean-action\\rollout};
+\node[draw, rounded corners, fill=gray!12, right=of roll, align=center, minimum width=1.75cm, minimum height=0.72cm] (metrics) {per-motion\\metrics};
+\draw[->, thick] (clip) -- (pick);
+\draw[->, thick] (pick) -- (asset);
+\draw[->, thick] (asset) -- (roll);
+\draw[->, thick] (roll) -- (metrics);
+\node[below=0.32cm of pick, align=center] {one body per clip\\(rotating panel)};
+\node[below=0.32cm of roll, align=center] {no gradients\\capped horizon};
+\end{tikzpicture}
+\caption{Standalone evaluation protocol. The clip list is fixed, while a
+reproducible hash-and-panel rule selects one body variant per clip; the
+selected reference and simulation asset therefore always match.}
+\label{fig:evaluation_protocol}
+\end{figure}
+
+\subsection{Metrics and aggregation}\label{sec:metrics}
+
+For each evaluated clip/shape pair $i$, define its per-frame mean body
+position error
+\begin{equation}
+    d_{i,t} = \frac{1}{B}\sum_{j=1}^{B}
+                 \|p_{i,t,j}-\hat{p}_{i,t,j}\|_2 .
+\end{equation}
+The configured success indicator is
+\begin{equation}
+    S_i = \mathbf{1}\!\left[
+             \max_{t<T_i}d_{i,t}\leq 0.5\ \mathrm{m}
+          \right],
+    \label{eq:success}
+\end{equation}
+where $T_i$ is the evaluated horizon. This threshold is deliberately distinct
+from the smoother training reward. Passing it does not imply fine-grained
+pose accuracy or biomechanical realism.
+
+We also report time-averaged mean body-position error, mean global
+body-rotation geodesic error, and the time average of the largest body-position
+error within each frame. The last quantity is the logged
+\emph{mean maximum-joint error}; it is not the maximum over the entire dataset.
+Global body-rotation error is not a local joint-angle/DOF error.
+
+Within an evaluator rank, errors are averaged over valid frames per motion
+and then over motions, including failed rollouts. The distributed training
+logger aggregates scalar summaries across ranks; the monitoring table
+retains those logged values rather than reconstructing exact pooled counts.
+Final offline comparisons should aggregate saved per-motion records over
+unique clip/shape pairs, avoiding unequal weighting of partially filled
+batches or duplicate padded rollouts.
+
+Trajectory smoothness uses the implementation's windowed normalized-jerk
+score, with the definition and numerical regularizers in
+Appendix~\ref{app:smoothness}. Lower scores indicate lower jerk under that
+fixed convention. The accompanying high-jerk statistic is the percentage
+of windows in which any body exceeds threshold 6,500; the logger calls it
+a frame percentage, but it is window-based.
+
+\subsection{Populations and generalization axes}
+Table~\ref{tab:evidence_populations} separates the evaluated populations.
+The development corpus is drawn from training. Unseen references have
+frame-zero grounding but not the full training-reference refinement.
+
+\begin{table}[t]
+\centering\small
+\caption{Original-checkpoint evaluation populations. Held-out clip identity
+does not imply subject- or source-recording-disjoint splits.}\label{tab:evidence_populations}
+\begin{tabularx}{\linewidth}{@{}lYYr@{}}
+\toprule
+Population & Motion exposure & Body exposure & Pairs \\
+\midrule
+Validation / test & Held-out clips & Trained; one per clip & 1,048 each \\
+Development replay & Training clips & All 128 trained bodies & 19,200 \\
+Unseen bodies, original train & Seen clips & 32 unseen bodies & 29,824 \\
+Unseen bodies, original val/test & Held-out clips & 32 unseen bodies & 2,944 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The pending full-data checkpoint comparison uses the same unseen references,
+but additional training includes all original motion splits. It tests unseen
+bodies on known motions and cannot replace the original held-out-motion result.
+
+\section{Results}\label{sec:results}
+We assess held-out tracking, distinguish trained-body coverage from unseen
+transfer, and use design comparisons and failures to delimit the claim.
+
+\subsection{Tracking held-out motions on trained bodies}\label{sec:test_results}
+
+The epoch-28,170 checkpoint was re-evaluated offline with a standalone
+streaming evaluator, once on the validation split and once on the
+independent test split. Both runs use the same protocol as training-time
+monitoring -- one deterministically selected body shape per clip, an
+environment with that exact asset, the mean action, and a capped horizon --
+and write a per-motion record for every clip. The test manifest is loaded
+only by this standalone evaluator; its SHA-256 and clip count are checked
+against the split metadata, and its disjointness from train and validation is
+verified before evaluation. All test clips are the standard 6.6\,s HumanML3D
+crop, so none reach the horizon cap. The test split is evaluated once; its
+number is not iterated against.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Offline evaluation of the epoch-28,170 checkpoint on the 1,048-clip
+validation and 1,048-clip test splits of \texttt{hhi\_stage2\_v1}, one
+selected trained body per clip (rotating shape panel index 110). Same
+standalone evaluator for both.}\label{tab:test_results}
+\begin{tabular}{lrr}
+\toprule
+Metric & Validation & Test \\
+\midrule
+Success rate (\%) $\uparrow$ & 98.47 & 99.14 \\
+Failure rate (gt err $>0.5$) (\%) $\downarrow$ & 1.53 & 0.86 \\
+Mean body-position error (m) $\downarrow$ & 0.0699 & 0.0676 \\
+Mean global body-rotation error (rad) $\downarrow$ & 0.1738 & 0.1723 \\
+Mean maximum-joint position error (m) $\downarrow$ & 0.1419 & 0.1393 \\
+Normalized jerk $\downarrow$ & 1,154.3 & 1,050.9 \\
+High-jerk windows (\%) $\downarrow$ & 27.46 & 25.33 \\
+Worst single clip, gt err max (m) & 3.79 & 1.67 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Validation and test scores are similar under the same evaluator. Test
+success is 1,039 of 1,048 pairs; validation success is 1,032 of 1,048. No
+significance claim is made from their difference. The original test was
+revealed once and was not used to select the checkpoint. These scores concern
+selected pairs, not every body variant. Continuous pose errors and jerk
+complement the permissive 0.5\,m success threshold.
+
+\subsection{Tracking consistency across trained bodies}\label{sec:trained_consistency}
+The development replay covers 150 training clips on all 128 trained bodies
+(19,200 pairs), with zero failed episodes recorded in the physical analysis.
+It establishes broad execution on that training subset, not full-body
+coverage of held-out clips evaluated on one body each.
+
+\pending{Replay a frozen held-out subset on all 128 trained bodies. Report
+per-clip success fraction, median and worst-body error, and the number of
+clips succeeding on every body. Add synchronized reference/controller views
+of the same clip across contrasting bodies.}
+
+\subsection{Generalization to unseen bodies}\label{sec:unseen_morphology}
+The original epoch-28,170 checkpoint is replayed on 32 bodies excluded from
+training: 16 new beta vectors in $[-3,3]^{10}$ instantiated in both male and
+female SMPL templates. The panel contains 1,024 clips on every body (32,768
+pairs): 932 original training clips isolate the body axis; 47 validation and
+45 test clips also have unseen motion identities. Mean-action replay uses
+matching assets, a 210-step cap, and the 0.5\,m maximum mean-body-position-error
+threshold. Episodes have approximately 198 steps. These references have
+frame-zero grounding rather than full training-reference refinement.
+
+\begin{table}[t]
+\centering\small
+\caption{Original-checkpoint unseen-body replay. The final two rows partition
+the full population; they are diagnostic subgroups. Errors are pair means in
+metres and radians.}\label{tab:unseen_population}
+\begin{tabularx}{\linewidth}{@{}Yrrrr@{}}
+\toprule
+Population & Pairs & Success (\%) & Position & Rotation \\
+\midrule
+All 32 bodies & 32,768 & 91.64 & 0.177 & 0.314 \\
+Seen clips, all 32 & 29,824 & 91.69 & 0.176 & 0.313 \\
+Held-out clips, all 32 & 2,944 & 91.07 & 0.181 & 0.324 \\
+Other 28 (all clips) & 28,672 & 99.74 & 0.093 & 0.201 \\
+Four severe (all clips) & 4,096 & 34.89 & 0.765 & 1.107 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Overall success is 91.64\%. The other 28 bodies reach 99.74\%, but that
+subgroup includes a milder outlier, \texttt{male\_95749fe2}, at approximately
+96.3\%. Strong transfer is common but not uniform. The four severe cases
+remain part of the overall result.
+
+\begin{table}[t]
+\centering\small
+\caption{Severe cases on 932 original training clips. Opposite-template
+variants share numeric beta vectors but differ in geometry and dynamics.}\label{tab:unseen_flagged}
+\begin{tabular}{lrr}
+\toprule
+Beta key & Severe case, success & Opposite-template success \\
+\midrule
+\texttt{a83170f5} & male: 58.3\% & female: 100.0\% \\
+\texttt{cf3d5ee7} & male: 46.8\% & female: 99.8\% \\
+\texttt{4d1b9df1} & female: 35.8\% & male: 99.8\% \\
+\texttt{1d4da893} & female: 0.1\% & male: 99.8\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The severe cases show tracking error without recorded termination. Success
+on the opposite template suggests a body-specific mechanism, but does not
+establish an asset defect: the coefficients map through different templates.
+Static inspection found substantial segment-mass differences for three cases,
+while \texttt{4d1b9df1} lacked that pattern. Dynamic traces and controlled
+interventions are needed to explain the failures.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+ width=0.9\linewidth,height=5.2cm,
+ xlabel={Nearest trained body, raw beta distance},ylabel={Success (\%)},
+ xmin=2.4,xmax=5.2,ymin=-5,ymax=105,
+ legend pos=south east,legend style={font=\small},
+ tick label style={font=\small},label style={font=\small}]
+\addplot[only marks,mark=*,blue!70!black] coordinates {
+(4.0932,99.7070)
+(2.5827,99.8047)
+(4.6459,99.8047)
+(4.0570,100.0000)
+(4.3938,100.0000)
+(4.6785,99.9023)
+(4.9430,99.9023)
+(4.4515,100.0000)
+(3.2395,100.0000)
+(5.0481,99.9023)
+(2.7052,99.9023)
+(3.5273,99.8047)
+(3.1343,100.0000)
+(4.5587,100.0000)
+(4.0932,99.9023)
+(2.5827,99.5117)
+(3.6670,99.8047)
+(4.6459,99.8047)
+(3.5304,99.8047)
+(4.0570,100.0000)
+(4.3938,100.0000)
+(4.6785,99.9023)
+(4.9430,99.8047)
+(4.4515,96.2891)
+(5.0481,99.9023)
+(2.7052,100.0000)
+(3.1343,99.7070)
+(4.5587,99.6094)
+};
+\addlegendentry{Other 28 bodies}
+\addplot[only marks,mark=x,mark size=3pt,thick,red!70!black] coordinates {
+(3.6670,0.0977)
+(3.5304,35.6445)
+(3.2395,57.5195)
+(3.5273,46.2891)
+};
+\addlegendentry{Four severe cases}
+\end{axis}
+\end{tikzpicture}
+\caption{All 32 unseen bodies, each evaluated on the same 1,024 clips.
+Distance uses the nearest trained body of the same SMPL template. The four
+severe cases are retained, and success is not uniformly high over the panel.}
+\label{fig:unseen_distance}
+\end{figure}
+
+Nearest-trained-body distances span approximately 2.58--5.05 in raw beta
+coordinates, comparing within template. Figure~\ref{fig:unseen_distance} shows all bodies. The successful subgroup has no clear
+descriptive decline over that range; this does not establish full-population
+invariance or extrapolation. Explicit conditioning is present, but this study
+does not isolate its benefit from shape information in state and references.
+
+\subsubsection{Pending full-data checkpoint comparison}
+\pending{Replay the preselected epoch-34,000 full-data checkpoint on the same
+32,768 pairs. Include all bodies and report recoveries, regressions, and error
+changes. Additional training includes all original motion splits on the
+original 128 bodies, so this tests unseen bodies on known motions. Add a
+matched trained-body control. No outcome is assumed while GPU evaluation is
+unavailable.}
+
+\subsection{Architecture trade-offs across training seeds}\label{sec:architecture_results}
+Each refined-reference architecture has three seeds. Each run contributes
+one last-eight-evaluation summary (epochs 4,600--6,000); uncertainty below is
+sample standard deviation across three summaries. Seed-1/2 values were checked
+against local TensorBoard records. Seed-0 values are retained from the
+historical table; their original logs were not independently available in that check.
+
+\begin{table}[t]
+\centering\small
+\caption{Three-seed refined-reference development comparison. Success and
+jerk are mean $\pm$ sample standard deviation across seeds; position and
+rotation are across-seed means.}\label{tab:architecture_seeds}
+\begin{tabularx}{\linewidth}{@{}Yrrrr@{}}
+\toprule
+Architecture & Success (\%) & Pos. (m) & Rot. (rad) & Jerk \\
+\midrule
+A: temporal MLP & $95.14\pm2.07$ & 0.118 & 0.216 & $2{,}110\pm643$ \\
+B: temporal attention & $97.56\pm0.34$ & 0.090 & 0.218 & $2{,}783\pm887$ \\
+C: slot/type attention & $97.89\pm0.22$ & 0.090 & 0.219 & $2{,}413\pm762$ \\
+D: C + adaLN-Zero & $97.17\pm0.08$ & 0.083 & 0.211 & $2{,}659\pm674$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+C has the highest mean success; D has the lowest position and rotation errors;
+A has the lowest mean jerk. No model dominates. Jerk ordering changes across
+seeds, so the apparent factor-of-two advantage in seed 0 is not a consistent
+architecture effect. Three seeds do not establish statistical superiority
+from small success differences. We retain C as a practical compromise.
+These reruns support the already-trained full-scale model rather than
+establishing selection before training. Capacities and runtimes differ
+(Appendix~\ref{app:history}).
+
+\subsection{Reference refinement: artifact reduction and fidelity}\label{sec:refinement_results}
+
+A paired reference audit supports reduced sliding and penetration with
+small pose/root changes, at the cost of higher reference jerk. Policy
+comparisons do not establish a causal benefit or absence of quality cost.
+
+The reference-level part is an offline before/after audit on the packaged
+motion tensors, with no simulation, over all 19,200 references of the 150-clip
+development set (150 clips $\times$ 128 body configurations).
+Table~\ref{tab:refine_audit} reports the artifact measures -- stance-foot
+horizontal speed during detected contact, the fraction of frames whose lowest
+body centre is below the floor, and reference-domain position jerk -- and the
+fidelity measures -- per-body geodesic rotation change, root horizontal
+displacement, and the cross-shape variance of per-shape knee-flexion range,
+which must be preserved rather than flattened.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Reference-refinement audit over all 19,200 development references.
+Artifact rows: corpus mean before and after, and the fraction of individual
+motions that improve; the per-motion distributions are in
+Figure~\ref{fig:refine_dist}. Fidelity rows: corpus mean of the
+refined-vs-unrefined difference. Jerk is the raw mean third-difference of body
+positions, not the windowed evaluator score.}\label{tab:refine_audit}
+\begin{tabularx}{\linewidth}{@{}Yrrr@{}}
+\toprule
+& Unref.\ mean & Refined mean & Motions improved \\
+\midrule
+Stance-foot speed (m/s) $\downarrow$ & 0.055 & 0.038 & 96\% \\
+Frames below floor (\%) $\downarrow$ & 39.6 & 3.3 & 45\% \\
+Frames within 2\,cm of floor (\%) $\downarrow$ & 49.8 & 33.6 & --- \\
+Position jerk (m/s$^3$) & 45.2 & 60.7 & 21\% \\
+\midrule
+Per-body rotation change (deg) & \multicolumn{3}{c}{0.12} \\
+Root horizontal displacement (m) & \multicolumn{3}{c}{0.008} \\
+Cross-shape var., knee-flexion range (ratio r/u) & \multicolumn{3}{c}{0.94} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+  group style={group size=2 by 1, horizontal sep=1.4cm},
+  width=0.44\linewidth, height=4.6cm,
+  boxplot/draw direction=y, xtick={1,2}, xticklabels={unref., refined},
+  tick label style={font=\small}, label style={font=\small},
+]
+\nextgroupplot[ylabel={stance-foot speed (m/s)}, ymin=0, ymax=0.14]
+\addplot+[boxplot prepared={lower whisker=0.0174, lower quartile=0.0294,
+  median=0.0430, upper quartile=0.0695, upper whisker=0.1228}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=0.0078, lower quartile=0.0151,
+  median=0.0237, upper quartile=0.0476, upper whisker=0.1157}] coordinates {};
+\nextgroupplot[ylabel={position jerk (m/s$^3$)}, ymin=0, ymax=170]
+\addplot+[boxplot prepared={lower whisker=6.5, lower quartile=14.0,
+  median=30.4, upper quartile=61.6, upper whisker=133.5}] coordinates {};
+\addplot+[boxplot prepared={lower whisker=5.7, lower quartile=20.8,
+  median=49.2, upper quartile=86.7, upper whisker=161.6}] coordinates {};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Per-motion distributions (box: quartiles; whiskers: 5th--95th
+percentile) over the 19,200 development references. Foot-skate drops across
+almost the whole distribution; position jerk rises across almost the whole
+distribution.}\label{fig:refine_dist}
+\end{figure}
+
+Refinement removes most ground penetration and about a third of the
+stance-foot sliding, while changing joint rotations by a tenth of a degree
+and the root path by millimetres, and leaving the cross-shape spread of
+per-shape knee kinematics essentially intact (variance ratio 0.94). The
+per-motion distributions (Figure~\ref{fig:refine_dist}) show these are not
+mean-only effects: stance-foot speed falls for 96\% of individual motions,
+across the full range rather than a few outliers, although the worst-sliding
+5\% of clips are barely improved. Penetration in the raw references is
+bimodal -- a large fraction of clips sit entirely below the floor, a
+whole-clip vertical mis-registration rather than per-frame jitter, which the
+clearance correction removes; clips that were already grounded stay grounded,
+so only 45\% of motions register a change. The cost is a roughly one-third
+increase in reference-domain position jerk that is broad rather than
+tail-driven: 79\% of motions get jerkier, and the effect is a clip property,
+not a shape property. Grouped by clip (150), the median jerk moves 30.8 to
+50.9 and the range spans 3.9--237 (unrefined) versus 3.4--246 (refined);
+grouped by body shape (128), the medians move 45.5 to 60.5 within a tight
+36--57 versus 51--74 band, so refinement raises jerk almost uniformly across
+morphologies. It is introduced by the per-window root-translation correction
+and the per-frame ground-clearance lift. Higher target jerk could contribute to the lower policy jerk of the
+unrefined slot/type seed-0 run, but different targets and training variability
+prevent attribution to references alone.
+
+The refined/unrefined pairs in Table~\ref{tab:ablation_results} track their
+own targets and have one seed per unrefined case. They describe different
+tasks. The reference audit justifies cleaning; a stronger policy-level claim
+requires a common-reference checkpoint comparison.
+
+\subsection{Residual failure patterns}\label{sec:failures}
+Nine test pairs and 16 validation pairs fail the configured threshold.
+Caption joins suggest ground transitions (six test, five validation failures)
+and whole-body rotations (two test, four validation failures). These describe
+the failed sample rather than mechanical causes. Without class counts among
+successful clips they do not establish class-specific failure rates.
+
+Other captions describe turning, side-stepping, an abrupt stop, and a hand-held
+sparring stick absent from simulation. An omitted object does not establish
+missing load-bearing support. A clip with rounded peak error near 0.5\,m
+remains in the failure count pending exact threshold sensitivity. Failures in
+both orientations on different bodies do not isolate skill, morphology, or
+reference effects.
+
+\pending{Inspect synchronized rollouts and first-crossing traces, including
+successful variants of the same clips. Use population class denominators
+before claiming enrichment and interventions before assigning causes.}
+
+\section{Exploratory Physical Analysis}\label{sec:physics}
+As a secondary question, we examine whether cross-body variability in
+control demand differs between dynamic and quasi-static motions. The original
+checkpoint is replayed over 150 development clips and all 128 trained bodies
+(19,200 pairs, zero recorded failed episodes). Torque, power, and jerk describe
+the configured simulation/controller, not calibrated human biomechanics.
+
+Inherited captions assign classes by keyword matching. Running, jumping,
+and kicking form a dynamic group (25 clips); standing and sitting form a
+quasi-static group (37 clips). Other clips are outside this pooled comparison.
+We subtract each clip's across-body mean before summarizing spread. A
+coefficient of variation is sensitive to small baseline demand, so absolute
+residuals are more interpretable for this question. This sensitivity alone
+does not prove that a relative difference is merely simulation noise.
+\begin{table}[t]
+\centering
+\small
+\caption{Cross-shape variability of control demand, dynamic
+(running~+~jumping~+~kicking, $n{=}25$ clips) vs.\ quasi-static
+(standing~+~sitting, $n{=}37$ clips) motion classes. Each cell is the
+standard deviation of the pooled, per-clip-demeaned residual (absolute
+units, clip baseline removed) with a 95\% bootstrap CI resampled at the
+clip level (10,000 resamples). The final column retains historical pooled-row Levene tests; correlated body rows prevent class-level interpretation of those values.}\label{tab:physical_analysis}
+\begin{tabularx}{\linewidth}{@{}Yrrr@{}}
+\toprule
+Metric & Dynamic std [95\% CI] & Quasi-static std [95\% CI] & Pooled-row $p$ \\
+\midrule
+Normalized torque (frac.\ effort limit) & $1.93$ [$1.71$, $2.21$] $\times10^{-4}$ & $2.06$ [$1.86$, $2.30$] $\times10^{-4}$ & $0.10$ \\
+Mass-normalized power & 0.292 [0.220, 0.370] & 0.259 [0.210, 0.323] & $1.1\times10^{-7}$ \\
+Normalized jerk & 350.2 [283.3, 416.9] & 403.2 [303.3, 513.5] & 0.33 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The descriptive spreads differ modestly and their separate confidence
+intervals overlap. Bootstrap intervals resample clips, while the recorded
+Levene tests pool correlated body rows. Neither pooled-row significance nor
+overlap of separate intervals settles the class-level contrast. The present
+analysis is descriptive, not a definitive positive or negative interaction result.
+
+\pending{Estimate the dynamic-minus-quasi-static spread contrast using
+clip-level resampling or a clip-level permutation test. Report its interval
+and effect size, and check units, class membership, and sensitivity to small
+classes before drawing an interaction conclusion.}
+
+\section{Discussion and Limitations}\label{sec:discussion}
+The central result is a shared controller over a large paired motion/body
+corpus. The held-out-motion evaluation shows strong tracking on selected
+trained bodies. Unseen-body replay reveals a less uniform outcome: 91.64\%
+overall success, with most bodies transferring well and four exhibiting
+severe tracking errors. Both results characterize the system. Excluding
+those bodies would change the population rather than resolve its limitations.
+
+\paragraph{Coverage and mechanism.}
+One body per held-out clip does not measure all-body consistency. Complete
+150-by-128 replay concerns training clips; the unseen-body panel contains
+only 92 held-out identities. Original/mirrored variants stay together, but
+splits are not demonstrated to be subject- or recording-disjoint.
+Morphology-input interventions or a matched policy without those inputs are
+needed to isolate their benefit: state and references also carry shape
+information. Transfer inside $[-3,3]^{10}$ does not establish extrapolation
+to arbitrary bodies or different skeletal topologies.
+
+\paragraph{Design trade-offs.}
+Repeated runs support slot/type attention as a compromise, not a universal
+winner. Historical jerk ordering does not persist across seeds. Refinement
+reduces sliding and penetration while raising position jerk; comparisons
+against different targets establish neither causal learning benefit nor
+absence of cost. The physical analysis awaits a clip-level contrast before
+an interaction conclusion is warranted.
+
+\paragraph{Body-specific failures.}
+Opposite-template contrasts and static mass measurements identify candidate
+mechanisms, not verified defects. The fourth severe case lacks the same mass
+pattern. Unseen reference processing also differs from training. Dynamic
+traces, rendered comparisons, and controlled interventions are needed to
+separate reference, actuation, and controller effects.
+
+\paragraph{Physical and resource scope.}
+Estimated masses, collision proxies, and mass-scaled gains are modeling
+choices. Clearance correction is not dynamics optimization; success and
+jerk do not certify biomechanical realism. The flat-ground task excludes
+objects and partners. Caption-derived failure families are descriptions,
+not causal diagnoses. The corpus is derived: variants are combinations of
+clips and bodies, not independent captures. Caption alignment and
+redistribution permissions require auditing before a benchmark-release claim.
+
+\paragraph{Pending checkpoint comparison.}
+The full-data polish checkpoint additionally trained on all original motion
+splits. Replaying the same unseen pairs with a trained-body control can test
+whether further training changes transfer. It cannot replace the original
+held-out-motion test or separate training-duration and motion-coverage effects.
+No result from that checkpoint is assumed here.
+
+\section{Conclusion}\label{sec:conclusion}
+We construct a paired multi-morphology corpus and train one physics-based
+controller while preserving correspondence between source clips, generated
+references, and simulation assets. The system integrates shape-conditioned
+generation, reference refinement, temporal slot/type attention, and streamed
+training across 128 body configurations.
+
+The original checkpoint achieves 99.14\% success on 1,048 independent test
+clips with one selected trained body each. A separate 32-body replay achieves
+91.64\% overall success, with strong transfer on 28 bodies and severe errors
+on four unresolved cases. This establishes substantial shared tracking and
+transfer within the sampled range while exposing non-uniform robustness.
+Repeated-seed comparisons and paired reference audits clarify the design
+trade-offs. Fixed all-body held-out coverage, causal conditioning controls,
+and resolution of body-specific failures are the next steps toward stronger
+generalization claims.
+
+
+\appendix
+\section{Reproducibility Details}\label{app:reproducibility}
+
+\subsection{Source preparation and refinement settings}\label{app:preprocessing}
+
+The AMASS source collections used by the preparation pipeline are ACCAD,
+BioMotionLab\_NTroje, BMLhandball, BMLmovi, CMU, DFaust\_67, EKUT,
+Eyes\_Japan\_Dataset, HumanEva, KIT, MPI\_HDM05, MPI\_Limits, MPI\_mosh,
+SFU, SSM\_synced, TCD\_handMocap, TotalCapture, and Transitions\_mocap.
+Source preparation operates at 20\,Hz; the final motion libraries use
+30\,Hz. Joint ordering and quaternion conventions must follow the matching
+asset and MotionLib conversion rather than be inferred from source array
+positions.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Default settings of the current reference-refinement procedure.
+Frame counts refer to the 30\,Hz MotionLib representation. These are
+kinematic-processing settings, not physical constraints learned by the policy.}\label{tab:refinement_parameters}
+\begin{tabularx}{\linewidth}{@{}lY@{}}
+\toprule
+Operation & Setting \\
+\midrule
+Contact candidates & Left/right ankle and toe bodies \\
+Contact detection thresholds & Speed 0.15\,m/s; height 0.10\,m \\
+Contact cleanup & Close gaps up to 2 frames; remove runs shorter than 3 frames \\
+Rotation filter & Savitzky--Golay, 9-frame window, polynomial order 3 \\
+Rotation blend / bound & Strength 0.5; maximum geodesic correction $8^\circ$ \\
+Contact-transition guard & Separate segments; 2-frame transition taper \\
+Root XY correction & Median stance anchors; least-squares common translation \\
+Root correction regularization & 21-frame smoothing window; 0.10\,m displacement cap \\
+Ground clearance & 0.005\,m collision-geometry margin; 5-frame lift smoothing \\
+Final reconstruction & Per-asset FK and per-motion velocity recomputation \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{PD gains and limits}\label{app:control}
+
+Table~\ref{tab:pd_parameters} gives the base values configured for the
+SMPL morphology robot. For joint $d$ belonging to rigid body $j$, the
+simulator applies the multiplier
+\begin{equation}
+    \rho_{b,j} = \frac{m_{b,j}}{m_{\mathrm{ref},j}}
+\end{equation}
+to stiffness, damping, and effort limit. The velocity limit is not mass-scaled.
+All relevant asset masses, joint ranges, collision settings, and the reference
+asset must accompany a reproducible physical interpretation.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Base PD and actuation values before per-body mass scaling.
+Stiffness and damping use the simulator's rotational PD units
+(Nm/rad and Nm\,s/rad); effort limits are in Nm and velocity limits in rad/s.}\label{tab:pd_parameters}
+\begin{tabular}{lrrrr}
+\toprule
+Joint family & Stiffness & Damping & Effort limit & Velocity limit \\
+\midrule
+Hip, knee, ankle & 800 & 80 & 500 & 100 \\
+Toe & 500 & 50 & 500 & 100 \\
+Torso, spine, chest & 1,000 & 100 & 500 & 100 \\
+Neck, head, thorax, shoulder, elbow & 500 & 50 & 500 & 100 \\
+Wrist, hand & 300 & 30 & 500 & 100 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Windowed jerk convention}\label{app:smoothness}
+
+The logged smoothness score is computed from simulated global body positions
+using consecutive finite differences with control interval
+$\Delta t=1/30$\,s. A nominal 0.4\,s window contains
+$W=\max(4,\lfloor0.4/\Delta t\rfloor)$ frames, giving $W=12$ at the
+configured rate and duration $T_w=(W-1)\Delta t$. For body $j$ in window $w$,
+let $L_{w,j}$ be the sum of speed times $\Delta t$ and let
+$\dddot{p}_{w,j}$ denote the third finite difference. The implementation uses
+\begin{equation}
+    J_{w,j} =
+    \frac{T_w^5
+      \sum_{t\in w}\|\dddot{p}_{t,j}\|_2^2\,\Delta t}
+    {\max(L_{w,j},\epsilon)^2+\epsilon},
+    \qquad \epsilon=0.1,
+    \label{eq:jerk}
+\end{equation}
+where the sum includes the valid third-difference samples in the window.
+Window scores are averaged per body and then across bodies and motions.
+High-jerk percentage counts windows for which
+$\max_j J_{w,j}>6{,}500$.
+
+Equation~\eqref{eq:jerk} documents the existing numerical convention, including
+its regularizers; it is not presented as a universally dimensionless or
+sampling-rate-invariant biomechanical measure. Comparisons must keep the
+sample rate, window, units, regularizers, and aggregation fixed. Reference
+refinement reports also include raw jerk in m/s$^3$; those values are a
+different metric and cannot be compared numerically to this logged score.
+
+\subsection{Split and experiment provenance}\label{app:provenance}
+
+The split metadata is stored in
+\path{data/splits/hhi_stage2_v1/split_metadata.json}, with schema version 1,
+split seed 42, and split identifier
+\begin{quote}
+\footnotesize\ttfamily
+4c1c9d592e3dbeef15abe18cb50a3141820735849414ecc2d8959e9f38502263
+\end{quote}
+It records the source-manifest hash, training/validation/test manifest and
+ID-list hashes, difficulty information, and the forced training reservation.
+The generator uses 100 difficulty strata; the 150 requested development
+identities expand to 286 retained identities when existing mirrored partners
+are included. Checkpoint/run split provenance refers to these artifacts,
+not just a verbal 90/5/5 ratio.
+
+The documented HUMOS configuration selects
+\path{logs/humos/q6zbv2tu/checkpoints/latest-epoch=1599.ckpt}. The immutable
+HUMOS checkpoint checksum and the SMPLSim / asset-generation revision hashes
+are to be archived with the dataset release; a checkpoint path identifies the
+local workflow but is not a substitute for a checksum.
+
+The principal implementation entry points are:
+\begin{itemize}
+    \item Reference refinement:
+    \path{tools/refine_humos_motion.py}; streamed per-clip processing:
+    \path{tools/refine_humos_r2_per_clip.py}.
+    \item Selected full-scale experiment:
+    \path{examples/experiments/mimic/mlp_wide_stage2_discover_attention_slot_type.py},
+    inheriting the common attention experiment and enabling slot/type embeddings.
+    \item Corrected development comparison:
+    \path{tools/train_150_evalfix_ablation.sh} (cases A--E) and
+    \path{tools/train_150_evalfix_unrefined.sh} (cases F--H), seed 0.
+    \item Motion residency and evaluation:
+    \path{protomotions/components/global_clip_pool.py} and
+    \path{protomotions/agents/evaluators/mimic_evaluator.py}.
+    \item Standalone split evaluation:
+    \path{evaluate_validation_split.py} and \path{evaluate_test_split.py}
+    under \path{protomotions/}. Each output records the checkpoint, split,
+    reference version, and shape panel; the test evaluator additionally
+    checks the test-manifest hash, count, and disjointness before running.
+\end{itemize}
+
+\subsection{Unseen-body and repeated-seed evidence}
+The original unseen-body replay uses
+\path{tools/analyze_unseen_morphology_generalization.py}, the
+\path{smpl_mor_interp/assets.yaml} asset manifest, and
+\path{data_cache/unseen_morphology_merged_0.pt}. Retained raw and joined
+CSV records define the 1,024-by-32 evaluation panel. The main population
+summaries include every pair and both successful and failed bodies.
+
+Seed-1/2 architecture records are in the corresponding
+\path{results/hhi_150_evalfix_A_seed1} through
+\path{results/hhi_150_evalfix_D_seed2} run folders. Resumed logging segments
+must be joined by evaluation epoch before forming last-eight summaries.
+Across-seed standard deviation is computed from three run summaries, rather
+than from all scheduled evaluations pooled as independent observations.
+
+The full-data checkpoint is a separate experiment whose resolved motion
+manifest is \path{splits/hhi_stage2_v1/full_manifest.jsonl}. Its pending
+comparison must record checkpoint/configuration hashes and preserve the
+same references, assets, horizons, and threshold as the original replay.
+
+For each final experiment, retain the resolved configuration, code revision,
+model/checkpoint checksum, body coefficient and asset manifests, split hashes,
+all resume segments, frame count, GPU model/count, and elapsed GPU-hours.
+For each evaluation, retain per-pair clip and asset IDs, panel selection,
+success/failure, valid horizon, and component errors in a local analysis file.
+The main full-scale W\&B identifier is \texttt{3mvgad6f}; the corrected
+small-scale group is \texttt{hhi\_150\_evalfix\_comparison}.
+The evaluation/sampling correction is recorded in commit \texttt{3685247}.
+
+\pending{Two items remain before a finalized benchmark report: the immutable
+HUMOS/SMPLSim checksums (to be archived with the dataset release) and the
+release of the retained per-motion evaluation records for the validation and
+test splits.}
+
+\section{Development and Training Provenance}\label{app:history}
+The main results use the original epoch-28,170 checkpoint. The monitoring
+snapshot below is a separate measurement at epoch 28,159. Historical
+single-seed comparisons and compute records are retained here to distinguish
+provenance from final performance.
+\subsection{Recorded full-scale validation result}\label{sec:full_results}
+
+Table~\ref{tab:full_results} reports the final scheduled monitoring evaluation
+recorded for the selected full-scale slot/type run, at epoch 28,159 after
+approximately 11.07 billion simulated frames. The separately downloaded
+checkpoint is from epoch 28,170. These values are post-correction,
+morphology-matched evaluations, not measurements of that later checkpoint
+or of the independent test split.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Recorded full-scale monitoring snapshot. Validation contains
+1,048 held-out clips; each evaluation uses one selected trained body per clip.
+The active resident pool is difficulty-biased. Values are the stored
+distributed logging summaries from run \texttt{3mvgad6f}, epoch 28,159;
+no confidence intervals or all-shape coverage are implied.}\label{tab:full_results}
+\begin{tabular}{lrr}
+\toprule
+Metric & Hard resident pool & Validation holdout \\
+\midrule
+Success rate (\%) $\uparrow$ & 89.84 & 98.47 \\
+Mean body-position error (m) $\downarrow$ & 0.0960 & 0.0698 \\
+Mean global body-rotation error (rad) $\downarrow$ & 0.2261 & 0.1760 \\
+Mean maximum-joint position error (m) $\downarrow$ & 0.1848 & 0.1412 \\
+Windowed normalized jerk $\downarrow$ & 1,442.8 & 1,151.7 \\
+High-jerk windows (\%) $\downarrow$ & 31.05 & 27.25 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The validation score is higher than the resident-pool score, while the
+reported errors are lower. This comparison is consistent with a curriculum
+that concentrates residency on difficult clips: the resident pool is not an
+independent uniform sample of the training distribution. Its 89.84\% success
+rate should not be interpreted as the success rate of the entire training
+corpus, nor should the difference be described as validation outperforming
+an IID training sample.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\linewidth, height=5.4cm,
+  xlabel={Training epoch}, ylabel={Success rate},
+  xmin=0, xmax=28500, ymin=0.2, ymax=1.0,
+  legend pos=south east, legend cell align=left, legend style={font=\small},
+  tick label style={font=\small}, label style={font=\small},
+  grid=both, grid style={gray!18},
+]
+\addplot[thick, blue] coordinates {
+(255,0.319)(1023,0.378)(1791,0.580)(2303,0.669)(2815,0.708)(3327,0.745)
+(3839,0.767)(4351,0.766)(4863,0.765)(5375,0.800)(5887,0.786)(6399,0.806)
+(6911,0.810)(7423,0.803)(7935,0.791)(8447,0.794)(8959,0.796)(9471,0.805)
+(9983,0.801)(10495,0.803)(11007,0.803)(11519,0.822)(12031,0.808)(12543,0.797)
+(13055,0.815)(13567,0.804)(14079,0.834)(14591,0.833)(15103,0.792)(15615,0.810)
+(16127,0.816)(16639,0.807)(16895,0.784)(16950,0.965)(17407,0.981)(17919,0.980)
+(18431,0.978)(18943,0.981)(19455,0.983)(19967,0.980)(20991,0.978)(21503,0.985)
+(22527,0.982)(23039,0.983)(23551,0.977)(24575,0.979)(25599,0.978)(26111,0.982)
+(27135,0.983)(27647,0.981)(28159,0.985)
+};
+\addlegendentry{validation holdout}
+\addplot[semithick, orange!80!black, dashed] coordinates {
+(255,0.245)(1279,0.490)(2047,0.663)(2815,0.589)(3583,0.719)(4351,0.708)
+(5119,0.787)(5887,0.810)(6655,0.800)(7423,0.797)(8191,0.796)(8959,0.775)
+(9727,0.793)(10495,0.710)(11263,0.764)(12031,0.733)(12799,0.776)(13567,0.754)
+(14335,0.809)(15103,0.813)(15871,0.797)(16639,0.806)(17151,0.895)(17919,0.862)
+(18687,0.892)(19455,0.939)(20223,0.887)(20991,0.964)(21759,0.913)(22527,0.904)
+(23295,0.952)(24063,0.996)(24831,0.996)(25599,0.925)(26367,0.816)(27135,0.874)
+(27903,0.871)
+};
+\addlegendentry{hard resident pool}
+\draw[gray, densely dotted] (axis cs:16920,0.2) -- (axis cs:16920,1.0);
+\node[anchor=south, font=\scriptsize, gray, align=center]
+  at (axis cs:16920,0.24) {evaluation-protocol\\correction ($\sim$ep.\ 16.9k)};
+\end{axis}
+\end{tikzpicture}
+\caption{Scheduled success rate over training for the full-scale slot/type
+run (\texttt{3mvgad6f}). The step near epoch 16.9k is the morphology-matched
+evaluation correction plus its sampling change, not an instantaneous learning
+event; pre-correction points use the earlier, sometimes mismatched
+reference-to-asset assignment and are not comparable to the post-correction
+curve. After the correction the holdout success rate climbs from about
+0.96 to a stable 0.98--0.985. The resident-pool curve is noisier because
+residency is continually re-concentrated on hard clips.}\label{fig:learning_curve}
+\end{figure}
+
+The 98.47\% result supports strong tracking of the selected held-out
+clip/body pairs under the specified threshold. It does not establish
+all-body success for those clips, unseen-body generalization, or an untouched
+test-set score. The thresholded success rate is complemented by position,
+rotation, and smoothness measures because a successful rollout can still
+have visible local errors or jitter.
+
+% Evidence: note/README.note.md, section 76, recorded 2026-09-07.
+% Do not replace the monitoring epoch with last.ckpt's epoch.
+The run record is available at
+\href{https://wandb.ai/yugoamaryl/hhi-protomotions/runs/3mvgad6f}
+{the full-scale W\&B run}. The current table uses the recorded snapshot,
+not a newly executed evaluation.
+
+
+\subsection{Historical single-seed reference grid}
+Cases A--D use refined references and E--H use unrefined references.
+Within-run variation must not be interpreted as uncertainty across training
+runs. The main architecture conclusion uses repeated refined runs instead.
+\begin{table}[t]
+\centering
+\small
+\caption{Historical seed-0 development grid. Success uncertainty is variation across eight evaluations within each run. Other columns are their means. Refined and unrefined policies track different targets. The three-seed comparison is in Table~\ref{tab:architecture_seeds}.}\label{tab:ablation_results}
+\begin{tabularx}{\linewidth}{@{}llYrrrr@{}}
+\toprule
+Case & Architecture / data & Success (\%) & gt err & gr err & Jerk & HJ\% \\
+\midrule
+A & temporal MLP, refined        & 97.5 $\pm$ 0.8 & 0.109 & 0.207 & 1{,}729 & 33.3 \\
+B & attention, refined           & 97.5 $\pm$ 1.4 & 0.098 & 0.228 & 3{,}455 & 40.4 \\
+C & slot/type, refined           & \textbf{98.1 $\pm$ 0.6} & 0.097 & 0.226 & \textbf{1{,}757} & 34.2 \\
+D & slot/type + AdaLN, refined   & 97.1 $\pm$ 1.2 & \textbf{0.090} & 0.220 & 3{,}145 & 38.9 \\
+E & slot/type, unrefined         & 97.9 $\pm$ 0.6 & 0.102 & 0.219 & 1{,}422 & 29.6 \\
+F & temporal MLP, unrefined      & 96.2 $\pm$ 1.6 & 0.115 & 0.212 & 2{,}927 & 36.6 \\
+G & attention, unrefined         & 97.8 $\pm$ 1.2 & 0.098 & 0.219 & 3{,}117 & 34.9 \\
+H & slot/type + AdaLN, unrefined & 97.5 $\pm$ 0.9 & 0.091 & 0.207 & 2{,}956 & 34.0 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+\subsection{Compute accounting}
+We retain W\&B logs, resolved configurations, checkpoint epochs, and local
+results for compute accounting. Small-scale development and full-scale
+training costs should be reported separately, including resumed segments and
+failed launches when discussing practical cost. GPU-hours, rather than
+epoch counts alone, quantify this budget.
+
+Table~\ref{tab:compute_accounting} reports parameter counts and single-A40
+wall-clock cost for the eight corrected 150-clip runs, all completed at the
+6,000-epoch budget. Parameter counts are computed analytically from
+each run's resolved model configuration (encoder, transformer or flat-MLP,
+and head widths), not read from a stored checkpoint file, since every linear
+layer in this codebase is instantiated with \texttt{nn.LazyLinear} and has no
+fixed parameter count outside a materialized model. Parameter count is set by
+the architecture only, so the refined/unrefined pairs share a count
+(A/F, B/G, C/E, D/H).
+
+\begin{table}[t]
+\centering
+\small
+\caption{Parameter counts and single-GPU wall-clock cost for the eight
+corrected 150-clip runs (seed 0, one A40 each, 6,000 epochs). Actor and
+critic are separate networks with independent parameters.}\label{tab:compute_accounting}
+\begin{tabularx}{\linewidth}{@{}llrrrY@{}}
+\toprule
+Case & Arch & Actor params & Critic params & Total params & GPU-h \\
+\midrule
+A / F & temporal MLP        & 57,349,557 & 8,524,801 & 65,874,358 & 15.8 / 14.4 \\
+B / G & attention           & 45,430,197 & 5,800,705 & 51,230,902 & 23.5 / 21.5 \\
+C / E & slot/type           & 45,434,037 & 5,804,545 & 51,238,582 & 23.7 / 23.9 \\
+D / H & slot/type + adaLN   & 46,256,053 & 5,804,545 & 52,060,598 & 23.9 / 22.4 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Two consequences run against a naive intuition. First, the temporal MLP has
+the most total parameters of any architecture, not the fewest: its actor's
+first layer reads the full raw concatenation of every observation category
+(5,248 dimensions) directly, which alone costs more parameters than the
+attention models' three token encoders and transformer combined. The
+attention models compress that same information to a 256-dimensional token
+per source before the shared final head, trading parameters for the added
+transformer computation. Second, despite having more parameters, the temporal
+MLP is the fastest to train by a wide margin (15.8/14.4 vs.\ 21.5--23.9
+GPU-hours) -- parameter count does not predict wall-clock cost here, since the
+attention models pay for multiple sequential module calls (three encoders,
+then a transformer stack) rather than one large matrix multiplication chain.
+Actor-only adaLN-Zero adds a small but non-negligible cost over slot/type
+(roughly 822,000 actor parameters from the per-layer modulation networks and
+morphology encoder), a capacity difference rather than evidence of a smoothness benefit.
+
+The full-scale selected run shares C and E's architecture exactly (same
+encoder, transformer, and head widths;
+\texttt{mlp\_wide\_stage2\_discover\_attention\_slot\_type.py} inherits
+these constants unchanged from the 150-clip experiment file), so its
+parameter count is also 51,238,582. It ran on six A40 GPUs
+(\texttt{ddp}, 32-bit, 2,048 environments and an 8,192 minibatch per GPU) for
+roughly 28,170 epochs. The logged rank-0 wall time is about 77\,h, of which
+one interruption near epoch 760 accounts for about 3\,h, giving on the order
+of 450 GPU-hours; the run is not directly comparable to the eight matched
+single-GPU development runs. An early restart after a memory-related failure
+resumed from the last checkpoint with the resident pool reduced from 256 to
+128 clips per rank and the local cache multiplier set to 1.0; because
+configs are reloaded from the pickle on resume, the frozen configuration
+still records the pre-restart pool size of 256. The earlier failed launch was
+logged into the same run and is not separately quantifiable.
+Segment-level cost accounting remains incomplete. Approximate full-scale
+GPU-hours cannot establish superior compute efficiency against the smaller
+matched development runs.
+
+% Bibliography is kept in LaTeX to preserve the source-only update scope.
+% Primary papers and official software repositories; checked during drafting.
+\begin{thebibliography}{99}
+
+\bibitem{amass}
+Naureen Mahmood, Nima Ghorbani, Nikolaus F. Troje, Gerard Pons-Moll,
+and Michael J. Black.
+AMASS: Archive of Motion Capture as Surface Shapes.
+In \emph{ICCV}, 2019.
+\url{https://arxiv.org/abs/1904.03278}.
+
+\bibitem{humanml3d}
+Chuan Guo, Shihao Zou, Xinxin Zuo, Sen Wang, Wei Ji, Xingyu Li,
+and Li Cheng.
+Generating Diverse and Natural 3D Human Motions From Text.
+In \emph{CVPR}, 2022.
+\href{https://openaccess.thecvf.com/content/CVPR2022/html/Guo_Generating_Diverse_and_Natural_3D_Human_Motions_From_Text_CVPR_2022_paper.html}
+{CVF Open Access paper}.
+
+\bibitem{humos}
+Shashank Tripathi, Omid Taheri, Christoph Lassner, Michael J. Black,
+Daniel Holden, and Carsten Stoll.
+HUMOS: Human Motion Model Conditioned on Body Shape.
+In \emph{ECCV}, 2024.
+\url{https://arxiv.org/abs/2409.03944}.
+
+\bibitem{deepmimic}
+Xue Bin Peng, Pieter Abbeel, Sergey Levine, and Michiel van de Panne.
+DeepMimic: Example-Guided Deep Reinforcement Learning of Physics-Based
+Character Skills.
+\emph{ACM Transactions on Graphics}, 37(4), 2018.
+\url{https://xbpeng.github.io/projects/DeepMimic/index.html}.
+
+\bibitem{phc}
+Zhengyi Luo, Jinkun Cao, Alexander W. Winkler, Kris Kitani, and Weipeng Xu.
+Perpetual Humanoid Control for Real-time Simulated Avatars.
+In \emph{ICCV}, 2023.
+\href{https://openaccess.thecvf.com/content/ICCV2023/html/Luo_Perpetual_Humanoid_Control_for_Real-time_Simulated_Avatars_ICCV_2023_paper.html}
+{CVF Open Access paper}.
+
+\bibitem{protomotions}
+The ProtoMotions contributors.
+ProtoMotions.
+Open-source software for physics-based character animation and humanoid control.
+\url{https://github.com/NVlabs/ProtoMotions}.
+
+\bibitem{isaacgym}
+Viktor Makoviychuk, Lukasz Wawrzyniak, Yunrong Guo, Michelle Lu, Kier Storey,
+Miles Macklin, David Hoeller, Nikita Rudin, Arthur Allshire, Ankur Handa,
+and Gavriel State.
+Isaac Gym: High Performance GPU-Based Physics Simulation For Robot Learning.
+Technical report, 2021.
+\url{https://arxiv.org/abs/2108.10470}.
+
+\bibitem{ppo}
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
+Proximal Policy Optimization Algorithms.
+Technical report, 2017.
+\url{https://arxiv.org/abs/1707.06347}.
+
+\bibitem{won2019}
+Jungdam Won and Jehee Lee.
+Learning Body Shape Variation in Physics-based Characters.
+\emph{ACM Transactions on Graphics}, 38(6), Article 207, 2019.
+\url{https://doi.org/10.1145/3355089.3356499}.
+
+\bibitem{smpl}
+Matthew Loper, Naureen Mahmood, Javier Romero, Gerard Pons-Moll,
+and Michael J. Black.
+SMPL: A Skinned Multi-Person Linear Model.
+\emph{ACM Transactions on Graphics}, 34(6), 2015.
+\url{https://smpl.is.tue.mpg.de/}.
+
+\bibitem{smplsim}
+Zhengyi Luo and contributors.
+SMPLSim.
+Open-source SMPL-family body-model simulation software.
+\url{https://github.com/ZhengyiLuo/SMPLSim}.
+
+\bibitem{attention}
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
+Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin.
+Attention Is All You Need.
+In \emph{NeurIPS}, 2017.
+\url{https://arxiv.org/abs/1706.03762}.
+
+\bibitem{dit}
+William Peebles and Saining Xie.
+Scalable Diffusion Models with Transformers.
+In \emph{ICCV}, 2023.
+\url{https://arxiv.org/abs/2212.09748}.
+
+\bibitem{pulse}
+Zhengyi Luo, Jinkun Cao, Josh Merel, Alexander Winkler, Jing Huang,
+Kris Kitani, and Weipeng Xu.
+Universal Humanoid Motion Representations for Physics-Based Control.
+In \emph{ICLR}, 2024.
+\url{https://arxiv.org/abs/2310.04582}.
+
+\bibitem{omnih2o}
+Tairan He, Zhengyi Luo, Xialin He, Wenli Xiao, Chong Zhang, Weinan Zhang,
+Kris Kitani, Changliu Liu, and Guanya Shi.
+OmniH2O: Universal and Dexterous Human-to-Humanoid Whole-Body
+Teleoperation and Learning.
+In \emph{CoRL}, 2024.
+\url{https://arxiv.org/abs/2406.08858}.
+
+\bibitem{exbody2}
+Mazeyu Ji, Xuanbin Peng, Fangchen Liu, Jialong Li, Ge Yang, Xuxin Cheng,
+and Xiaolong Wang.
+ExBody2: Advanced Expressive Humanoid Whole-Body Control.
+Technical report, 2024.
+\url{https://arxiv.org/abs/2412.13196}.
+
+\bibitem{gmt}
+Zixuan Chen, Mazeyu Ji, Xuxin Cheng, Xuanbin Peng, Xue Bin Peng,
+and Xiaolong Wang.
+GMT: General Motion Tracking for Humanoid Whole-Body Control.
+Technical report, 2025.
+\url{https://arxiv.org/abs/2506.14770}.
+
+\bibitem{smp2020}
+Wenlong Huang, Igor Mordatch, and Deepak Pathak.
+One Policy to Control Them All: Shared Modular Policies for
+Agent-Agnostic Control.
+In \emph{ICML}, 2020.
+\url{https://proceedings.mlr.press/v119/huang20d.html}.
+
+\end{thebibliography}
+
+\end{document}

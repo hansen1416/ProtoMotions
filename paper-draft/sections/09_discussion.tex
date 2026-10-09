@@ -1,65 +1,48 @@
 \section{Discussion and Limitations}\label{sec:discussion}
+The central result is a shared controller over a large paired motion/body
+corpus. The held-out-motion evaluation shows strong tracking on selected
+trained bodies. Unseen-body replay reveals a less uniform outcome: 91.64\%
+overall success, with most bodies transferring well and four exhibiting
+severe tracking errors. Both results characterize the system. Excluding
+those bodies would change the population rather than resolve its limitations.
 
-The current evidence supports the feasibility of combining shape-specific
-references, matching simulation assets, and one shared controller at the
-scale of the constructed corpus. The corrected 150-clip grid selects
-slot/type attention without adaLN-Zero, on the basis of a large, replicated
-jerk difference rather than the non-discriminating success-rate column, and
-this ordering is single-seed. The refinement audit shows the processed
-references have substantially less penetration and foot sliding at negligible
-fidelity cost, but no causal learning benefit from refined training is
-claimed: the refined and unrefined runs track different targets and were not
-cross-evaluated on a common reference.
+\paragraph{Coverage and mechanism.}
+One body per held-out clip does not measure all-body consistency. Complete
+150-by-128 replay concerns training clips; the unseen-body panel contains
+only 92 held-out identities. Original/mirrored variants stay together, but
+splits are not demonstrated to be subject- or recording-disjoint.
+Morphology-input interventions or a matched policy without those inputs are
+needed to isolate their benefit: state and references also carry shape
+information. Transfer inside $[-3,3]^{10}$ does not establish extrapolation
+to arbitrary bodies or different skeletal topologies.
 
-The dataset is derived from existing motion capture, captions, body models,
-and HUMOS generation. The 2,681,728 variants represent combinations of
-20,951 clip identities and 128 configurations, not equally many independent
-human examples. Mirrored clips are also not independent captures.
-Caption alignment, left/right semantics, body-specific wording, and
-redistribution permissions require further auditing before a benchmark
-release or language-grounded performance claim.
+\paragraph{Design trade-offs.}
+Repeated runs support slot/type attention as a compromise, not a universal
+winner. Historical jerk ordering does not persist across seeds. Refinement
+reduces sliding and penetration while raising position jerk; comparisons
+against different targets establish neither causal learning benefit nor
+absence of cost. The physical analysis awaits a clip-level contrast before
+an interaction conclusion is warranted.
 
-Refinement changes kinematics rather than solving the complete equations
-of motion. Ground clearance of collision proxies does not guarantee
-balanced support, plausible contact forces, or realistic joint torques.
-Similarly, estimated asset masses and mass-scaled actuators are modeling
-choices rather than a calibrated description of human physiology. The
-flat-ground task excludes much environmental interaction, and text-based
-filtering cannot ensure that every remaining clip satisfies that scope.
+\paragraph{Body-specific failures.}
+Opposite-template contrasts and static mass measurements identify candidate
+mechanisms, not verified defects. The fourth severe case lacks the same mass
+pattern. Unseen reference processing also differs from training. Dynamic
+traces, rendered comparisons, and controlled interventions are needed to
+separate reference, actuation, and controller effects.
 
-Generalization is limited by the split and evaluation design. Original and
-mirrored variants stay together, but the current split is not demonstrated
-to be subject- or source-recording-disjoint. Validation reuses the trained
-body set and has been monitored during development. Its rotating panel
-covers only one shape per clip at a time, and long clips have a capped
-evaluation horizon. Fixed-pair test evaluation and the unseen-morphology
-experiment in Section~\ref{sec:unseen_morphology} remain necessary for
-broader claims, and any morphology-generalization statement is confined to
-body shapes inside the trained coefficient range rather than arbitrary
-bodies.
+\paragraph{Physical and resource scope.}
+Estimated masses, collision proxies, and mass-scaled gains are modeling
+choices. Clearance correction is not dynamics optimization; success and
+jerk do not certify biomechanical realism. The flat-ground task excludes
+objects and partners. Caption-derived failure families are descriptions,
+not causal diagnoses. The corpus is derived: variants are combinations of
+clips and bodies, not independent captures. Caption alignment and
+redistribution permissions require auditing before a benchmark-release claim.
 
-The success threshold is permissive relative to fine-grained pose accuracy.
-A high success rate should be read together with continuous errors,
-smoothness, and qualitative rollouts. The logged normalized-jerk measure
-also has implementation-specific windows and regularizers; it is not a
-standalone certificate of physical plausibility. Raw policy-action
-increments must not be interpreted as joint-angle or torque measurements.
-
-Cost constraints motivated small-scale development and streamed full-scale
-training, and introduced memory-related resumes and configuration changes on
-the full-scale run. The 150-clip grid is single-seed: the architecture
-conclusion is drawn from the jerk difference, which is a large effect that
-recurs across both reference versions, and not from the success-rate
-differences, which are within run-to-run noise and are reported as
-non-discriminating. Seed repeats would sharpen the latter but are not
-expected to change the former. These costs and choices should be reported
-transparently; they do not by themselves establish better compute efficiency
-than another method.
-
-We explored neutral-body pretraining followed by multi-shape transfer and
-mixed canonical/HUMOS source-weighted rewards during development, but did
-not retain either as the main approach. Their historical measurements are
-not used as controlled negative results, particularly where the earlier
-evaluation protocol differed. The present method is direct multi-shape
-training. Future work may revisit these alternatives after the current
-comparisons and dataset audits are complete.
+\paragraph{Pending checkpoint comparison.}
+The full-data polish checkpoint additionally trained on all original motion
+splits. Replaying the same unseen pairs with a trained-body control can test
+whether further training changes transfer. It cannot replace the original
+held-out-motion test or separate training-duration and motion-coverage effects.
+No result from that checkpoint is assumed here.

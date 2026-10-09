@@ -1,13 +1,8 @@
-\section{Morphology-Conditioned Motion Imitation}\label{sec:method}
+\section{Shared Controller and Training}\label{sec:method}
 
 \subsection{Task, simulation, and actuation}
 
-For a clip $c$ and body configuration $b$, let
-$\hat{s}_{c,b}(t)$ be the refined reference state and $s_t$ the simulated state
-of the matching asset. We learn a shared policy
-$\pi_\theta(a_t\mid o_t,b)$ that tracks this reference on flat ground.
-The body assigned to an environment is fixed, while its reference motion can
-change on reset. No language input or external scene object is supplied.
+The policy follows the task in Section~\ref{sec:problem}.
 
 Experiments use the \texttt{smpl\_mor} assets in Isaac Gym through
 ProtoMotions~\cite{isaacgym,protomotions}. Simulation runs at 60\,Hz with two

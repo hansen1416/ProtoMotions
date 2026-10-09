@@ -1,27 +1,20 @@
 \begin{abstract}
-Physics-based motion imitation must accommodate both the diversity of human
-movement and differences in body geometry and dynamics. We construct a
-text-associated, multi-morphology motion corpus from AMASS-derived HumanML3D
-clips using HUMOS, pairing shape-specific reference motions with matching
-SMPL-based simulation assets. The current corpus contains 20,951 clip identities,
-including mirrored clips, across 128 body configurations, yielding 2,681,728
-generated variants. Source captions remain associated metadata rather than
-controller inputs. A contact-aware kinematic refinement procedure reduces
-selected reference artifacts while retaining explicit limits on pose and root
-changes. We train one morphology-conditioned policy directly on the refined
-multi-shape references, using temporal slot/type attention and a streamed
-training pool. Deterministic, clip-grouped splits and morphology-matched
-evaluation distinguish held-out motion tracking from training-pool monitoring.
-Offline evaluation of the selected checkpoint reports 98.47\% success on the
-1,048-clip validation split and 99.14\% on the independent 1,048-clip test
-split, each with one selected body configuration per clip and a capped
-horizon; these are trained-body, one-shape-per-clip results, not all-shape or
-unseen-body tests. A corrected eight-run grid of four temporal architectures
-crossed with refined and unrefined references, on a 150-clip development set,
-selects temporal slot/type attention without adaLN-Zero. Residual failures on
-both splits are analysed against inherited captions and concentrate on
-ground-contact transitions and whole-body acrobatics. An unseen-morphology
-generalisation study within the trained coefficient range, and an analysis of
-how body shape and motion type jointly set control demand, are specified but
-not yet run.
+Physics-based imitation across body shapes requires consistent references
+and simulated dynamics. We construct a corpus linking 20,951 AMASS-derived
+HumanML3D clip identities to HUMOS-generated references and matching
+SMPL-based assets for 128 body configurations, yielding 2,681,728 variants.
+Contact-aware refinement reduces sliding and ground penetration with small
+pose changes, at the cost of higher reference position jerk. One
+morphology-conditioned temporal controller is trained directly on 18,855
+clips across all 128 bodies using streamed motion residency. Standalone
+original-checkpoint evaluation achieves 98.47\% validation and 99.14\% test
+success on 1,048 held-out clips per split, with one selected trained body per
+clip. A separate replay of 1,024 clips across 32 unseen bodies achieves
+91.64\% overall success: 28 bodies track at 99.74\%, while four have severe
+tracking failures with unresolved causes. Three-seed development comparisons
+support slot/type attention as a practical trade-off, without a consistent
+advantage on all measures. These results establish large-scale shared
+imitation and substantial but non-uniform transfer within the sampled body
+range; they do not establish all-body held-out-motion coverage or isolate
+the benefit of explicit morphology conditioning.
 \end{abstract}

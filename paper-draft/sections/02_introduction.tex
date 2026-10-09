@@ -1,63 +1,47 @@
 \section{Introduction}\label{sec:introduction}
+A physics-based motion controller should reproduce an action across bodies
+with different proportions and dynamics. Changing limb lengths, collision
+geometry, and mass distribution changes both a motion's spatial realization
+and the actuation needed to follow it. Kinematic retargeting alone is not
+sufficient: the reference must correspond to the simulated body, and a
+feedback policy must track it.
 
-A motion-imitation controller should reproduce an action without assuming that
-every character has the same body. Changes in limb lengths, mass distribution,
-and collision geometry alter both the reference trajectory and the dynamics
-required to follow it. Replaying an identical joint sequence across bodies does
-not necessarily preserve foot placement, clearance, or balance. Conversely,
-optimizing only spatial agreement can obscure whether the intended articulation
-has been retained. Learning across body shapes therefore requires a consistent
-relationship between source motion, shape-specific reference, and simulated body.
+Large motion resources, shape-conditioned generation, and scalable imitation
+provide the building blocks~\cite{amass,humanml3d,humos,phc,protomotions}.
+Their combination raises a practical question: can one controller track a
+large collection of paired, morphology-specific motions across many bodies,
+and how reliably does it transfer to configurations absent from training?
+We address this through system construction and empirical evaluation.
+Morphology conditioning and temporal attention are established techniques;
+the contribution is a consistent paired-motion workflow at this scale and
+an evaluation distinguishing motion exposure from body exposure.
 
-Existing work provides large motion-capture collections, body-shape-conditioned
-motion generation, and scalable physics-based control~\cite{amass,humanml3d,humos,deepmimic,phc,protomotions}. We build on these
-components to study a practical question: how can one policy imitate a large
-collection of shape-specific motions while preserving traceable data identities
-and a meaningful evaluation protocol? Our focus is their integration and
-empirical assessment, not a claim that morphology conditioning or attention is new.
+HUMOS generates references for 128 configurations; simulation assets use
+the same SMPL parameters. Clip/body identities are preserved through
+conversion, refinement, training, and replay. Refinement reduces contact
+artifacts with explicit fidelity checks. A shared temporal slot/type-attention
+policy trains directly across bodies, with morphology in actor and critic
+and a streamed pool limiting resident memory. HumanML3D captions support
+descriptive analysis but are not policy inputs.
 
-Our data pipeline extends AMASS-derived HumanML3D clips to 128 body
-configurations. HUMOS generates the corresponding reference motions; SMPLSim
-constructs simulation assets from the same body parameters. A conservative
-refinement pass smooths rotations, reduces stance sliding through root
-translation, and enforces clearance of the modeled collision geometry.
-The inherited descriptions connect each source action to its generated
-variants. This association supports paired analysis and future language-based
-uses, but the controller studied here consumes reference motion, not text.
-
-The selected controller combines current state, dilated state history, and
-future reference targets through temporal slot/type attention. Body parameters
-and a previous action are concatenated into separate actor and critic heads.
-The main experiment trains directly on multiple shapes; neutral-body
-pretraining and mixed-source reward training are not part of the final method.
-We use a 150-clip development subset to make design exploration affordable,
-followed by full-scale training on a versioned split. Corrected small-scale
-reruns are now reassessing the design choices made during that development.
-
-This draft makes three contributions:
+We make three contributions:
 \begin{enumerate}
-    \item A derived, text-associated multi-morphology corpus, with an explicit
-    construction procedure linking source clips, generated references, body
-    assets, and reproducible splits. Its captions are inherited rather than
-    newly annotated for each body.
-    \item A single morphology-conditioned imitation system operating across
-    18,855 training clips and 128 body configurations, integrating temporal
-    observations, matching simulation assets, reference refinement, and
-    memory-bounded motion streaming.
-    \item An empirical protocol separating architecture, reference quality,
-    and evaluation correctness: an eight-run architecture/reference grid on a
-    150-clip development set, a full-scale validation and independent test
-    evaluation of the selected checkpoint, and a caption-grounded analysis of
-    the residual failures.
+\item A paired corpus construction linking source identities, shape-specific
+references, matching assets, and deterministic clip-grouped splits across
+20,951 clips and 128 body configurations.
+\item A shared imitation system trained on 18,855 clips across all 128
+bodies, combining temporal observations, morphology inputs, reference
+processing, and memory-bounded motion streaming.
+\item An empirical assessment separating held-out tracking, trained-body
+coverage, and unseen-body transfer, with repeated-seed design comparisons
+and an explicit account of residual failures and evidence limits.
 \end{enumerate}
 
-The selected checkpoint reaches 98.47\% success on validation and 99.14\% on
-the untouched test split under the protocol in
-Section~\ref{sec:evaluation_protocol}. These results concern held-out clip
-identities on trained body configurations, with one body evaluated per clip;
-they do not establish success for every shape or for unseen bodies.
-Section~\ref{sec:results} also specifies, without results, an evaluation on
-body shapes drawn from the trained coefficient range but excluded from the
-128 training configurations (Section~\ref{sec:unseen_morphology}), and a
-study of how morphology and motion type jointly shape physical control demand
-(Section~\ref{sec:physics}).
+The original checkpoint achieves 99.14\% success on the independent
+1,048-clip test split, with one selected trained body per clip. On a separate
+1,024-clip panel over 32 unseen bodies, overall success is 91.64\%: 28 bodies
+reach 99.74\% collectively, while four transfer poorly. The full-population
+score is central to the generalization claim. These findings support shared
+control over substantial motion and body variation, but also reveal limits
+that aggregate trained-body scores conceal. Fixed all-body held-out coverage
+and causal tests of morphology inputs are needed for stronger claims.
