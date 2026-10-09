@@ -45,9 +45,7 @@ Upload `humos_infer.tar.gz` to the pod under `/workspace/humos/` (e.g. via the R
 
 ## 3. Extract on the pod
 
-rclone copy r2:proto-data/humos/humos_infer.tar.gz ./ \
---transfers=2 --multi-thread-streams=16 --multi-thread-chunk-size=128M \
---s3-no-check-bucket --progress
+rclone copy r2:proto-data/humos/humos_infer.tar.gz ./ --transfers=2 --multi-thread-streams=16 --multi-thread-chunk-size=128M --s3-no-check-bucket --progress
 
 ```bash
 tar -xzf humos_infer.tar.gz --no-same-owner
@@ -59,6 +57,10 @@ HUMOS needs **Python 3.10** (`conda create -n humos_p310 python=3.10` per HUMOS'
 `README.md:27`). The Ubuntu 22.04 RunPod template ships Python 3.10 as default `python3`/`python`,
 so no venv/conda needed inside the container.
 
+```bash
+apt-get update && apt-get install -y python3.10 python3.10-venv && python3.10 -m venv /workspace/venv310 && source /workspace/venv310/bin/activate && python --version
+```
+
 Pod GPU: NVIDIA A40, driver 570.195.03, CUDA 12.8 (`nvidia-smi`). Driver is backward-compatible with
 older CUDA runtimes, so cu121 wheels are fine.
 
@@ -68,7 +70,11 @@ this container has multiple Python installs (`pip` alone resolved to Python 3.12
 
 ```bash
 python -m pip install torch --index-url https://download.pytorch.org/whl/cu121
-python -m pip install -r requirements.txt
+
+mkdir -p /workspace/humos && cd / && mv humos body_models assets bosRegressor logs setup.py requirements.txt /workspace/humos/ && cd /workspace/humos && ls && python -m pip install -r requirements.txt
+
+## python -m pip install -r requirements.txt
+
 python -m pip install -e .
 ```
 

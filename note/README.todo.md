@@ -166,8 +166,3 @@ against the 1024×128 pilot dataset if needed for ablation comparison against St
 4. if even with bigger NN, carefully desgined training process, we still can't fit on the difficult motions, build converging evidence that they are not reproducible under our simulator's physical assumptions
 
 ------
-
-1. first build a claim-evidence map and agree on the revised outline; 
-2. identify the minimum additional evaluations needed; 
-3. restructure the body sections around those questions; 
-4. finally rewrite the introduction, abstract, and conclusion. Sentence polishing should come after that.
