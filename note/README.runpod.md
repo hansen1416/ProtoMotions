@@ -882,3 +882,6 @@ sudo systemctl restart docker
 codex resume 019ff1f9-8219-7931-a78c-8625ce2d843e
 
 
+tmux new -s claude
+  cd /workspace/ProtoMotions
+  claude --continue
