@@ -1,0 +1,15 @@
+/usr/local/lib/python3.8/dist-packages/glfw/__init__.py:917: GLFWError: (65550) b'X11: The DISPLAY environment variable is missing'
+Importing module 'gym_38' (/workspace/isaacgym/python/isaacgym/_bindings/linux-x86_64/gym_38.so)
+Setting GYM_USD_PLUG_INFO_PATH to /workspace/isaacgym/python/isaacgym/_bindings/linux-x86_64/usd/plugInfo.json
+results/frozen/fulldata size 615057590 epoch 34000 step_count 15661793280
+   robot asset folder: mjcf/smpl_mor/
+   motion lib: {'manifest_name': 'splits/hhi_stage2_v1/full_manifest.jsonl', 'validation_manifest_name': None, 'eval_holdout_size': 0}
+results/frozen/refined size 615057590 epoch 28170 step_count 11076894720
+   robot asset folder: mjcf/smpl_mor/
+   motion lib: {'manifest_name': 'splits/hhi_stage2_v1/train_manifest.jsonl', 'validation_manifest_name': 'splits/hhi_stage2_v1/validation_manifest.jsonl', 'eval_holdout_size': 0}
+ladder/other: results/hhi_wide_stage2_discover_attention_slot_type_refined/epoch_26000.ckpt epoch 26000 step_count 10223616000
+ladder/other: results/hhi_wide_stage2_discover_attention_slot_type_refined/epoch_27000.ckpt epoch 27000 step_count 10616832000
+ladder/other: results/hhi_wide_stage2_discover_attention_slot_type_refined/epoch_28000.ckpt epoch 28000 step_count 11010048000
+ladder/other: results/hhi_wide_stage2_discover_attention_slot_type_refined/last.ckpt epoch 28170 step_count 11076894720
+ladder/other: results/hhi_wide_stage2_discover_attention_slot_type_refined/score_based.ckpt epoch 24832 step_count 9764339712
+ladder/other: results/hhi_wide_stage2_discover_attention_slot_type_fulldata/last.ckpt epoch 34050 step_count 15701114880

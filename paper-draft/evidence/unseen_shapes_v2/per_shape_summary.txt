@@ -1,0 +1,66 @@
+
+##### inside (233 train-split clips, per-shape success averaged over shapes in each bin)
+  by max|beta|:
+    [     0,      2)  n=  6  refined  99.93%  fulldata  99.43%  gt_err 0.0751 / 0.0753 m
+    [     2,    2.5)  n= 18  refined  99.21%  fulldata  98.86%  gt_err 0.0809 / 0.0833 m
+    [   2.5,      3)  n=104  refined  96.80%  fulldata  96.43%  gt_err 0.1032 / 0.1089 m
+  by mass kg:
+    [  26.4,     40)  n= 11  refined  98.79%  fulldata  98.52%  gt_err 0.0778 / 0.0837 m
+    [    40,     60)  n= 29  refined  93.86%  fulldata  93.22%  gt_err 0.1227 / 0.1331 m
+    [    60,     80)  n= 35  refined  99.28%  fulldata  98.87%  gt_err 0.0817 / 0.0845 m
+    [    80,    100)  n= 31  refined  99.43%  fulldata  99.10%  gt_err 0.0841 / 0.0859 m
+    [   100,  144.4)  n= 21  refined  95.01%  fulldata  95.18%  gt_err 0.1233 / 0.1271 m
+    [ 144.4,   1000)  n=  1  refined  91.42%  fulldata  86.27%  gt_err 0.1718 / 0.2029 m
+  by height m:
+    [     0,   1.13)  n=  3  refined  96.42%  fulldata  99.43%  gt_err 0.1001 / 0.0900 m
+    [  1.13,    1.3)  n= 30  refined  97.08%  fulldata  96.95%  gt_err 0.0978 / 0.1020 m
+    [   1.3,   1.45)  n= 45  refined  97.14%  fulldata  96.20%  gt_err 0.1000 / 0.1105 m
+    [  1.45,    1.6)  n= 41  refined  99.53%  fulldata  99.16%  gt_err 0.0804 / 0.0809 m
+    [   1.6,   1.67)  n=  9  refined  88.75%  fulldata  89.22%  gt_err 0.1787 / 0.1837 m
+  by M/F mass ratio:
+    [  0.56,      1)  n= 36  refined  99.45%  fulldata  98.80%  gt_err 0.0820 / 0.0843 m
+    [     1,    1.5)  n= 28  refined  96.29%  fulldata  95.19%  gt_err 0.1073 / 0.1199 m
+    [   1.5,      2)  n= 32  refined  96.66%  fulldata  96.98%  gt_err 0.1015 / 0.1047 m
+    [     2,   3.21)  n= 32  refined  96.34%  fulldata  96.23%  gt_err 0.1074 / 0.1103 m
+  by gender (0=f,1=m):
+    [     0,      1)  n= 64  refined  97.95%  fulldata  97.85%  gt_err 0.0919 / 0.0972 m
+    [     1,      2)  n= 64  refined  96.61%  fulldata  95.98%  gt_err 0.1056 / 0.1102 m
+  lowest 10 shapes by refined success: male_669a0fb3(3%/9%, 127kg 1.64m), male_ec3bb7f8(19%/11%, 43kg 1.41m), female_d2e840d7(38%/43%, 57kg 1.27m), female_1c7a626a(85%/89%, 47kg 1.24m), female_0df54b49(88%/85%, 37kg 1.33m), female_5d08dfec(88%/86%, 60kg 1.36m), female_cfc560dc(89%/98%, 69kg 1.13m), male_826291a7(91%/86%, 154kg 1.58m), female_e7bc8c92(92%/79%, 80kg 1.32m), male_790287d8(92%/88%, 90kg 1.36m)
+
+##### outside (233 train-split clips, per-shape success averaged over shapes in each bin)
+  by tier:
+    [     0,      1)  n= 32  refined  99.03%  fulldata  99.46%  gt_err 0.0833 / 0.0819 m
+    [     1,      2)  n= 32  refined  97.76%  fulldata  97.81%  gt_err 0.0938 / 0.0982 m
+    [     2,      3)  n= 32  refined  95.33%  fulldata  95.12%  gt_err 0.1072 / 0.1174 m
+    [     3,      4)  n= 32  refined  96.47%  fulldata  97.87%  gt_err 0.0960 / 0.0922 m
+  by max|beta|:
+    [     3,    3.5)  n= 32  refined  99.03%  fulldata  99.46%  gt_err 0.0833 / 0.0819 m
+    [   3.5,      4)  n= 32  refined  97.76%  fulldata  97.81%  gt_err 0.0938 / 0.0982 m
+    [     4,    4.5)  n= 32  refined  95.33%  fulldata  95.12%  gt_err 0.1072 / 0.1174 m
+    [   4.5,   5.01)  n= 32  refined  96.47%  fulldata  97.87%  gt_err 0.0960 / 0.0922 m
+  by mass kg:
+    [     0,   26.4)  n=  2  refined 100.00%  fulldata 100.00%  gt_err 0.0641 / 0.0658 m
+    [  26.4,     40)  n= 11  refined  99.49%  fulldata  99.77%  gt_err 0.0795 / 0.0796 m
+    [    40,     60)  n= 33  refined  98.78%  fulldata  98.40%  gt_err 0.0796 / 0.0854 m
+    [    60,     80)  n= 31  refined  98.59%  fulldata  97.94%  gt_err 0.0884 / 0.0895 m
+    [    80,    100)  n= 17  refined  95.81%  fulldata  95.43%  gt_err 0.1065 / 0.1224 m
+    [   100,  144.4)  n= 26  refined  98.61%  fulldata  99.09%  gt_err 0.0946 / 0.0904 m
+    [ 144.4,   1000)  n=  8  refined  79.02%  fulldata  88.62%  gt_err 0.1909 / 0.1797 m
+  by height m:
+    [     0,   1.13)  n=  5  refined  97.25%  fulldata  99.74%  gt_err 0.1006 / 0.0903 m
+    [  1.13,    1.3)  n= 31  refined  97.12%  fulldata  97.76%  gt_err 0.0957 / 0.0922 m
+    [   1.3,   1.45)  n= 36  refined  99.87%  fulldata  99.76%  gt_err 0.0802 / 0.0783 m
+    [  1.45,    1.6)  n= 40  refined  96.91%  fulldata  97.06%  gt_err 0.0978 / 0.1022 m
+    [   1.6,   1.67)  n= 14  refined  90.53%  fulldata  91.81%  gt_err 0.1255 / 0.1512 m
+    [  1.67,      9)  n=  2  refined  99.57%  fulldata 100.00%  gt_err 0.0723 / 0.0673 m
+  by M/F mass ratio:
+    [     0,   0.56)  n= 22  refined  94.63%  fulldata  94.60%  gt_err 0.1172 / 0.1231 m
+    [  0.56,      1)  n= 32  refined  98.75%  fulldata  98.34%  gt_err 0.0881 / 0.0927 m
+    [     1,    1.5)  n= 30  refined  97.94%  fulldata  98.80%  gt_err 0.0933 / 0.0888 m
+    [   1.5,      2)  n= 18  refined  97.97%  fulldata  96.61%  gt_err 0.0854 / 0.1032 m
+    [     2,   3.21)  n= 22  refined  95.10%  fulldata  98.09%  gt_err 0.0988 / 0.0914 m
+    [  3.21,     99)  n=  4  refined  99.78%  fulldata  99.89%  gt_err 0.0658 / 0.0654 m
+  by gender (0=f,1=m):
+    [     0,      1)  n= 64  refined  96.89%  fulldata  97.45%  gt_err 0.0977 / 0.0999 m
+    [     1,      2)  n= 64  refined  97.41%  fulldata  97.68%  gt_err 0.0924 / 0.0949 m
+  lowest 10 shapes by refined success: male_1c099619(13%/71%, 211kg 1.62m), female_98d4329d(30%/95%, 159kg 1.48m), female_bd0ec1ce(64%/53%, 56kg 1.48m), male_a7f6b877(66%/41%, 94kg 1.62m), female_1b5f1e4c(68%/82%, 116kg 1.29m), female_33cc784f(76%/91%, 87kg 1.29m), male_edcf2449(82%/67%, 76kg 1.14m), male_98d4329d(91%/95%, 80kg 1.15m), female_1c099619(93%/100%, 88kg 1.08m), female_4adc1af1(94%/99%, 71kg 1.11m)

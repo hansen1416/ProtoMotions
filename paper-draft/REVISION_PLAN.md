@@ -1,83 +1,44 @@
-# Structural revision and claim–evidence map
+# Connection Science revision — 10 October 2026
 
-Working revision: 6 October 2026. Changes are confined to `paper-draft/`.
-GPU evaluation is deferred. No pending result is assumed.
-
-## Central argument
-
-A shared controller can track a large paired corpus of morphology-specific
-motions across diverse simulated bodies. The paper establishes the system's
-scale, measured tracking, and substantial but non-uniform unseen-body transfer.
-It does not yet establish uniform held-out all-body coverage or the causal
-benefit of explicit morphology inputs.
+The editable manuscript is main.tex and sections/. review.tex is generated.
+The current revision implements the agreed RQ1–RQ3 argument in paper-draft/.
 
 ## Claim–evidence map
 
-| Claim | Available evidence | Defensible wording / remaining gap |
+| Question | Evidence | Claim boundary |
 |---|---|---|
-| Large paired motion/body construction | 20,951 clip identities × 128 configurations; HUMOS references, matching SMPLSim assets, deterministic splits | Derived paired corpus; variants are not independent captures. Resource release requires provenance/licensing audits. |
-| One shared policy tracks held-out motions | Original epoch 28,170: validation 98.47%, test 99.14%; 1,048 pairs per split | Strong tracking on selected trained-body pairs under the specified threshold. No all-body or source-recording-disjoint claim. |
-| Broad trained-body coverage | 150 training clips × 128 bodies, physical replay with zero recorded failed episodes | Coverage of the development subset. Held-out all-body consistency remains pending. |
-| Unseen-body transfer | Saved 32,768 replay rows: 30,027 successes, 91.6351% overall; 28-body subgroup 99.7419%; four-body subgroup 34.8877% | Substantial, non-uniform transfer in the sampled coefficient range. Include all 32 in the headline. |
-| Four bodies fail because of bad assets | Opposite-template contrasts; static mass differences in three cases; fourth lacks that pattern | Cause unresolved. Template changes affect geometry/dynamics; symmetry in beta coefficients does not prove a defect. |
-| Slot/type attention is a practical choice | Three refined-reference seeds per architecture; best mean success for C, best errors for D, lowest mean jerk for A | Retain C as a compromise. No universal dominance or consistent factor-of-two jerk advantage. Reruns support an existing choice. |
-| Refinement improves reference contact quality | 19,200 paired references: foot speed 0.055→0.038 m/s; below-floor frames 39.6→3.3%; small pose/root changes | Artifact reduction with a jerk cost (45.2→60.7 m/s³). Not a causal policy-learning benefit or proof of no cost. |
-| Dynamic motions are more/less shape-sensitive | Recorded residual spreads and clip bootstrap intervals; historical pooled-row tests | Descriptive only pending a direct clip-level contrast. Interval overlap is not a test of a difference. |
-| Failure families explain mechanical causes | Caption joins of 25 failed trained-body pairs | Descriptive categories; class denominators and dynamic interventions needed for enrichment/causal claims. |
-| Explicit morphology conditioning causes transfer | Model includes morphology inputs; unseen-body success | Mechanism not isolated: state/reference also encode shape. Add interventions or a matched training control for that claim. |
-| Full-data polishing improves transfer | Candidate checkpoint exists; additional training includes all original motion splits | Pending paired replay. It will test unseen bodies on known motions, not untouched motion generalization. |
+| RQ1: shared tracking | Epoch 28,170: 99.14% test success, 1,048 clips, one trained body per clip; development replay across 128 bodies | Strong selected-pair motion transfer and trained-body execution, not every held-out clip on every body |
+| RQ2: unseen transfer | New 9 October report: 233 known clips × 128 inside and 128 outside bodies; 97.28% / 97.15% refined success | High average transfer, with worst-body success 3.0% / 13.3%; sampled parameter extrapolation, not arbitrary body robustness |
+| RQ2: checkpoint sensitivity | Paired full-data deltas −0.37 / +0.42 pp; control −0.17 pp; 3 inside and 6 outside substantial regressions | Measured change between two checkpoints; duration and coverage confounded; rerun measures simulator variability only |
+| RQ3: architecture | Three refined seeds per A–D; best average success C, lowest pose errors D, lowest mean jerk A | Practical trade-offs, no dominance; capacities differ; seed-0 original logs not independently rechecked |
+| RQ3: reference refinement | 19,200 paired references: lower sliding/penetration, small pose changes, higher target jerk | Reference artifact reduction, not a causal policy-learning improvement |
+| RQ3: conditioning | All compared models retain explicit shape inputs | Causal contribution remains untested |
+| External positioning | Primary sources in CAPABILITY_SOURCES.md and cited headline table | Published capability comparison, no matched performance superiority |
 
-## Revised outline implemented
+## Implemented structure
 
-1. Introduction: problem, shared-control claim, three contributions, principal limits.
-2. Related work: large-scale tracking versus morphology-conditioned control.
-3. Problem formulation and system overview: shared policy and paired body/reference identity.
-4. Paired motion and body corpus: construction, refinement, scale, splits.
-5. Shared controller and training: observations, attention, PPO, streaming.
-6. Evaluation protocol: exposure populations, seed aggregation, asset matching, metrics.
-7. Results, ordered by question:
-   - held-out motions on trained bodies;
-   - trained-body consistency and missing held-out panel;
-   - unseen-body transfer including all four severe cases;
-   - pending full-data comparison;
-   - architecture trade-offs over three seeds;
-   - reference-quality trade-offs;
-   - descriptive failure patterns.
-8. Exploratory physical analysis: secondary question with inference limitations.
-9. Discussion and limitations.
-10. Conclusion.
-11. Appendices: reproducibility, monitoring snapshot, original seed-0 grid, compute history.
+Introduction → Related Work (capability table) → Problem → Paired Corpus →
+Shared Controller → Evaluation Protocol → Results (RQ1, RQ2, RQ3) → Discussion → Conclusion.
+Appendices: reproducibility, monitoring/evaluator history, exploratory physical
+analysis, and all 256 new per-body rows. Old unseen-body results, figures,
+interpretations and pending old-panel comparison are removed entirely from
+this revised manuscript, including its generated review copy.
 
-## Minimum remaining evidence, ordered by purpose
+## Missing experiments, prioritised by claim
 
-1. **Unseen-body checkpoint comparison (GPU pending).** Freeze epoch 34,000;
-   reuse original 1,024 × 32 references/assets and horizons. Report overall
-   and per-body scores, recoveries/regressions; add matched trained-body control.
-   See `../note/README.unseen-morphology-fulldata-evaluation.md`.
-2. **Held-out all-body panel (GPU pending).** Choose a frozen, affordable subset
-   of held-out clips, cover all 128 trained bodies, retain paired records,
-   and report per-clip worst-body errors and all-body success fractions.
-3. **Inference repair for physical analysis.** Use a direct contrast resampled
-   at the clip level; check class construction, normalization, and units.
-   Does not require new policy training, but source instrumentation must be audited.
-4. **Qualitative and failure verification.** Same-clip multi-body reference
-   overlays; recovered/persistent unseen failures; first-crossing traces;
-   caption-family denominators. Do not replace these with unrelated parallel scenes.
+1. Fixed held-out-motion subset crossed with all 128 trained bodies: per-clip
+   coverage, worst-body errors, and every-body success.
+2. Matched explicit-conditioning removal: same body/reference panel, budget,
+   and seeds. Mask/shuffle interventions supplement rather than replace it.
+3. Common-reference policy comparison to separate refinement from target changes.
+4. Dynamic first-crossing diagnostics and per-asset feasibility audit for severe
+   unseen failures; successful counterparts and contact/root/actuation traces.
+5. Matched external tracker replay (e.g. PHC) if performance superiority is sought.
+6. Additional training seeds / checkpoint ladder for transfer uncertainty.
 
-Optional stronger claims require additional controls: correct/neutral/shuffled
-morphology-input replay plus a matched policy trained without explicit inputs;
-or common-reference replay for refined/unrefined checkpoints. These are not
-prerequisites for the narrower system claims in this revision.
+Physical-property groups and caption families remain descriptive; direct
+clip-level physical contrasts and class denominators remain unresolved.
+Release checksums, licensing and caption provenance need completion.
 
-## Evidence provenance and validation limits
-
-- Unseen population numbers recalculated directly from
-  `data_cache/unseen_morphology_generalization.joined.csv`, including failures.
-- Repeated-seed summaries use the verified values from the prior local log
-  review; seed-0 values are inherited from the historical paper table. That
-  review could not independently recover seed-0 logs. The source grid and
-  repeated-seed uncertainty conventions are distinguished in the manuscript.
-- Monitoring epoch 28,159 is moved to an appendix; original final results use
-  epoch 28,170. The full-data candidate is a separate checkpoint.
-- Existing `main.pdf` predates this source revision unless a new build is
-  explicitly reported. Pending evidence markers are for the working draft.
+No additional GPU experiments were run in this revision. The new evaluation
+is read from its source report, not inferred from the planning chat.

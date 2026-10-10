@@ -1,48 +1,56 @@
 \section{Discussion and Limitations}\label{sec:discussion}
-The central result is a shared controller over a large paired motion/body
-corpus. The held-out-motion evaluation shows strong tracking on selected
-trained bodies. Unseen-body replay reveals a less uniform outcome: 91.64\%
-overall success, with most bodies transferring well and four exhibiting
-severe tracking errors. Both results characterize the system. Excluding
-those bodies would change the population rather than resolve its limitations.
+The three questions distinguish a capability from its coverage and mechanism.
+RQ1 establishes shared tracking of held-out motions on selected trained
+bodies and execution across all trained bodies on development clips. RQ2
+establishes high average transfer on both sides of the training coefficient
+boundary, while exposing bodies for which tracking largely fails. RQ3
+supports practical architecture and reference-processing choices, but not a
+causal explanation of transfer.
 
-\paragraph{Coverage and mechanism.}
-One body per held-out clip does not measure all-body consistency. Complete
-150-by-128 replay concerns training clips; the unseen-body panel contains
-only 92 held-out identities. Original/mirrored variants stay together, but
-splits are not demonstrated to be subject- or recording-disjoint.
-Morphology-input interventions or a matched policy without those inputs are
-needed to isolate their benefit: state and references also carry shape
-information. Transfer inside $[-3,3]^{10}$ does not establish extrapolation
-to arbitrary bodies or different skeletal topologies.
+\paragraph{Average transfer and individual robustness.}
+Similar inside/outside averages do not make body extrapolation uniformly
+reliable. Tier success is non-monotonic, and poor tracking occurs both beyond
+and within the training mass/height ranges. These simulated properties
+describe the tested assets; their associations do not identify failure causes.
+The later checkpoint recovers some bodies and substantially harms others.
+Its outside success gain accompanies a slight increase in mean position
+error, so threshold success alone would overstate the improvement.
 
-\paragraph{Design trade-offs.}
-Repeated runs support slot/type attention as a compromise, not a universal
-winner. Historical jerk ordering does not persist across seeds. Refinement
-reduces sliding and penetration while raising position jerk; comparisons
-against different targets establish neither causal learning benefit nor
-absence of cost. The physical analysis awaits a clip-level contrast before
-an interaction conclusion is warranted.
+\paragraph{Coverage and inference.}
+The unseen-body headline uses known motion identities to isolate body
+transfer. The separate 23 validation/test clips cannot provide an untouched
+motion test for the full-data checkpoint, which trained on them. The
+1,048-clip independent test uses one trained body per clip; a fixed
+held-out-motion panel crossed with all 128 trained bodies remains missing.
+Original/mirrored variants stay together, but the splits are not demonstrated
+to be subject- or recording-disjoint. Clip-bootstrap intervals hold the body
+panel fixed and do not quantify uncertainty over shape space. One full-scale
+training run and one candidate checkpoint do not measure training-seed or
+ordinary checkpoint variation. Identical-checkpoint reruns measure simulator
+variability, with nearly cancelling pooled changes but appreciable pair flips.
 
-\paragraph{Body-specific failures.}
-Opposite-template contrasts and static mass measurements identify candidate
-mechanisms, not verified defects. The fourth severe case lacks the same mass
-pattern. Unseen reference processing also differs from training. Dynamic
-traces, rendered comparisons, and controlled interventions are needed to
-separate reference, actuation, and controller effects.
+\paragraph{Mechanism and design.}
+State and reference observations already carry shape information. A matched
+policy without explicit morphology inputs is needed to attribute transfer to
+those inputs. The architecture comparison keeps them in every model and has
+unequal capacities. Refinement reduces contact artifacts with small pose
+changes but raises target jerk; policies evaluated against different targets
+do not isolate its learning benefit. The exploratory physical analysis in
+Appendix~\ref{sec:physics} remains descriptive pending a clip-level contrast.
 
-\paragraph{Physical and resource scope.}
+\paragraph{Failure diagnosis and scope.}
+The unseen-body runs detect error-threshold failures, and all failed rows have zero termination flags. Those flags alone do not
+prove absence of falls; their interpretation depends on the replay
+configuration. Synchronized rollouts, contact/root trajectories, and reference-quality
+audits are needed before assigning a failure mechanism. Extreme HUMOS
+references have been refined but lack per-asset feasibility validation.
 Estimated masses, collision proxies, and mass-scaled gains are modeling
-choices. Clearance correction is not dynamics optimization; success and
-jerk do not certify biomechanical realism. The flat-ground task excludes
-objects and partners. Caption-derived failure families are descriptions,
-not causal diagnoses. The corpus is derived: variants are combinations of
-clips and bodies, not independent captures. Caption alignment and
-redistribution permissions require auditing before a benchmark-release claim.
+choices; tracking success and jerk do not certify biomechanical realism.
+The short, reference-initialized flat-ground protocol excludes objects,
+partners, long-horizon recovery, skeletal-topology changes, and real robots.
 
-\paragraph{Pending checkpoint comparison.}
-The full-data polish checkpoint additionally trained on all original motion
-splits. Replaying the same unseen pairs with a trained-body control can test
-whether further training changes transfer. It cannot replace the original
-held-out-motion test or separate training-duration and motion-coverage effects.
-No result from that checkpoint is assumed here.
+The corpus is derived: clip/body variants are not independent captures.
+Caption alignment, immutable generation checksums, and redistribution
+permissions require auditing before a benchmark-release claim. A matched
+external tracker would strengthen comparative conclusions, but the published
+capability table alone cannot establish a performance advantage.

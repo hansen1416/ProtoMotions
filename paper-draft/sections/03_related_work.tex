@@ -6,21 +6,13 @@ DeepMimic demonstrated reference-guided reinforcement learning for simulated
 character skills~\cite{deepmimic}. Perpetual Humanoid Control developed robust
 humanoid imitation for real-time simulated avatars~\cite{phc}. These approaches
 motivate learning a feedback controller rather than directly replaying a
-kinematic trajectory. Subsequent single-body trackers scaled this
-feedback-control approach in coverage and deployability: PULSE distills a
-low-dimensional, high-coverage motion representation for general humanoid
-control~\cite{pulse}; OmniH2O and ExBody2 target dexterous, deployable
-whole-body teleoperation and expressive control on physical
-humanoids~\cite{omnih2o,exbody2}; GMT uses a motion mixture-of-experts to
-track a broad motion distribution with one policy~\cite{gmt}. Each of these
-typically targets a fixed robot platform or morphology while scaling the
-motion distribution; we instead fix the tracking task and scale the body,
-holding 128 configurations under one
-policy. We implement our experiments in
-ProtoMotions~\cite{protomotions} with Isaac Gym~\cite{isaacgym}, using PPO
-optimization~\cite{ppo}. Our contribution is the multi-morphology data and
-control workflow and its evaluation, rather than a replacement for these
-simulation or learning frameworks.
+kinematic trajectory. PULSE learns a motion representation for humanoid control, while OmniH2O,
+ExBody2, and GMT study large-scale control on robot platforms~\cite{pulse,omnih2o,exbody2,gmt}.
+ASE learns reusable latent skills and downstream task policies rather than
+requiring exact clip tracking~\cite{ase}. These objectives provide context,
+but their published scores do not measure our clip/body replay task.
+We implement our experiments in ProtoMotions with Isaac Gym and PPO
+optimization~\cite{protomotions,isaacgym,ppo}.
 
 \subsection{Morphology-conditioned control and retargeting}
 
@@ -67,3 +59,46 @@ sources. An ablation also investigates actor-only morphology modulation with
 adaLN-Zero, adapting the zero-initialized conditioning design used in
 Diffusion Transformers~\cite{dit}. That experiment tests a conditioning
 mechanism, not diffusion-based action generation.
+
+\subsection{Headline capability and evidence comparison}
+Table~\ref{tab:capabilities} separates published support from demonstrated
+evaluation coverage. In particular, PHC's Appendix B describes shape-varying
+humanoids and training with sampled AMASS shapes; its quantitative comparisons
+use the mean neutral SMPL body~\cite{phc}. It is therefore inaccurate to
+classify PHC as incapable of body variation. Won and Lee directly establish
+parametric body control~\cite{won2019}. Our distinction is the paired corpus
+and systematic inside/outside replay, not priority for morphology conditioning.
+
+\begin{table}[p]
+\centering\footnotesize
+\caption{Published capabilities and evaluation scope, not a performance
+ranking. ``Not reported'' concerns the cited source and the specified
+unseen-body test, not impossibility. No external system has been rerun on our
+matched references, assets, horizon, and aggregation. Software documentation
+for ProtoMotions 3 is distinguished from paper evaluations and from the
+implementation used in this study.}\label{tab:capabilities}
+\begin{tabularx}{\linewidth}{@{}p{0.13\linewidth}YYY@{}}
+\toprule
+System / source & Task and motion evidence & Body capability & Evaluation relevance \\
+\midrule
+PHC~\cite{phc} & Reference tracking and recovery; 11,313 train and 140 test AMASS sequences. & SMPL shape/gender variation; sampled shapes and body-normalized references described. & Quantitative motion tests use mean neutral body; shape variation shown qualitatively. No systematic inside/outside unseen-body panel reported. \\[0.5em]
+ASE~\cite{ase} & Latent skill pretraining and downstream tasks; 187 clips. Exact reference tracking is not its objective. & Published experiments use a sword/shield humanoid; a shared shape-conditioned body sweep is not reported. & Task transfer, skill coverage, and recovery evaluated; unseen-body clip-tracking test not reported. \\[0.5em]
+ProtoMotions 3~\cite{protomotions} & Framework documents large-scale tracking, distributed training, retargeting, and generative policies. & Supports different configured characters/robots; this alone does not demonstrate one policy across shape variants. & Official README is a software capability source, not a matched multi-body benchmark. Our simulator/PPO/tracking infrastructure is inherited. \\[0.5em]
+Won \& Lee~\cite{won2019} & Parametric physical character control with adaptive shape sampling. & One parametric controller accommodates height, weight, and proportion changes; new and changing bodies demonstrated. & Direct prior body-control capability; experiments differ from our large clip-by-body imitation panels. \\[0.5em]
+HUMOS~\cite{humos} & Identity-conditioned motion generation with physical-consistency objectives. & Shape-conditioned motions; supplies our pretrained reference generator. & Not an online feedback tracker; its motion-generation scores are not tracking success under our simulator protocol. \\[0.5em]
+This study & Shared tracking; 18,855 training identities, 1,048 held-out test identities. & 128 trained bodies; references and assets share identity. & Test: one trained body per clip. Unseen: 233 known clips $\times$ each of 128 inside and 128 outside bodies; all shapes retained. Conditioning mechanism remains unisolated. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Inherited functions and study additions.}
+ProtoMotions provides the simulation abstraction, PPO training, motion-library
+and imitation infrastructure. HUMOS supplies the pretrained generator;
+SMPL/SMPLSim supply the body parameterization and asset construction. Our
+study adds the paired corpus assembly and identity checks, reference
+processing and fidelity audit, the evaluated temporal slot/type controller
+configuration, streamed clip residency, and exposure-separated evaluation.
+These are system and empirical contributions built on existing methods,
+not claims to invent attention, PPO, body models, or motion imitation.
+A directly comparable performance claim requires a matched external replay;
+none is made here.

@@ -1,10 +1,10 @@
-% Generated review copy; edit main.tex and sections, then regenerate.
+% Generated review copy; edit main.tex and sections.
 \documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
-\usepackage{booktabs,array,tabularx}
+\usepackage{booktabs,array,tabularx,longtable}
 \usepackage{xcolor}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.17}
@@ -23,81 +23,84 @@
 \title{Morphology-Conditioned Physics-Based Motion Imitation\\
 Across 128 Body Shapes}
 \author{}
-\date{Working draft --- October 2026}
+\date{Connection Science working draft --- 10 October 2026}
 
 % Compile from paper-draft/. October revision; pending GPU evidence is marked.
 
 \begin{document}
 \maketitle
 \begin{abstract}
-Physics-based imitation across body shapes requires consistent references
-and simulated dynamics. We construct a corpus linking 20,951 AMASS-derived
-HumanML3D clip identities to HUMOS-generated references and matching
-SMPL-based assets for 128 body configurations, yielding 2,681,728 variants.
-Contact-aware refinement reduces sliding and ground penetration with small
-pose changes, at the cost of higher reference position jerk. One
-morphology-conditioned temporal controller is trained directly on 18,855
-clips across all 128 bodies using streamed motion residency. Standalone
-original-checkpoint evaluation achieves 98.47\% validation and 99.14\% test
-success on 1,048 held-out clips per split, with one selected trained body per
-clip. A separate replay of 1,024 clips across 32 unseen bodies achieves
-91.64\% overall success: 28 bodies track at 99.74\%, while four have severe
-tracking failures with unresolved causes. Three-seed development comparisons
-support slot/type attention as a practical trade-off, without a consistent
-advantage on all measures. These results establish large-scale shared
-imitation and substantial but non-uniform transfer within the sampled body
-range; they do not establish all-body held-out-motion coverage or isolate
-the benefit of explicit morphology conditioning.
+Learning one physics-based motion controller across bodies requires both
+shared control and references consistent with each body's geometry. We study
+this problem through three questions: shared tracking, unseen-body transfer,
+and the design choices supporting them. A paired corpus links 20,951
+HumanML3D clip identities to HUMOS references and matching simulated assets
+for 128 body configurations. One morphology-conditioned temporal controller
+trains on 18,855 clips across those bodies. It achieves 99.14\% tracking
+success on 1,048 held-out motions, with one selected trained body per clip.
+On 233 training-split clips replayed across each of two 128-body unseen
+panels, success is 97.28\% inside the training coefficient range and 97.15\%
+outside it. These averages coexist with individual-body success as low as
+3.0\% and 13.3\%, respectively. A later checkpoint improves outside-panel
+success but worsens inside-panel success, with substantial individual
+regressions. Three-seed architecture comparisons reveal trade-offs between
+tracking and smoothness; paired reference refinement reduces sliding and
+penetration while increasing reference jerk. The evidence supports shared
+learning and strong average transfer within the evaluated domain, while
+leaving all-body held-out-motion coverage, the causal value of explicit
+morphology inputs, and the mechanisms of severe failures unresolved.
 \end{abstract}
 
 
 \section{Introduction}\label{sec:introduction}
-A physics-based motion controller should reproduce an action across bodies
-with different proportions and dynamics. Changing limb lengths, collision
-geometry, and mass distribution changes both a motion's spatial realization
-and the actuation needed to follow it. Kinematic retargeting alone is not
-sufficient: the reference must correspond to the simulated body, and a
-feedback policy must track it.
+A shared physics-based controller must reproduce actions on bodies with
+different proportions and dynamics. Changing limb lengths, collision
+geometry, and mass distribution changes both the spatial realization of a
+motion and the actuation needed to track it. The learning problem therefore
+has two coupled axes: variation in motion and variation in body. Good
+tracking on new motions for a familiar body does not establish transfer to
+a new body, and a high average over bodies can conceal severe failures.
 
-Large motion resources, shape-conditioned generation, and scalable imitation
-provide the building blocks~\cite{amass,humanml3d,humos,phc,protomotions}.
-Their combination raises a practical question: can one controller track a
-large collection of paired, morphology-specific motions across many bodies,
-and how reliably does it transfer to configurations absent from training?
-We address this through system construction and empirical evaluation.
-Morphology conditioning and temporal attention are established techniques;
-the contribution is a consistent paired-motion workflow at this scale and
-an evaluation distinguishing motion exposure from body exposure.
-
-HUMOS generates references for 128 configurations; simulation assets use
-the same SMPL parameters. Clip/body identities are preserved through
-conversion, refinement, training, and replay. Refinement reduces contact
-artifacts with explicit fidelity checks. A shared temporal slot/type-attention
-policy trains directly across bodies, with morphology in actor and critic
-and a streamed pool limiting resident memory. HumanML3D captions support
-descriptive analysis but are not policy inputs.
-
-We make three contributions:
+Large motion resources, shape-conditioned reference generation, and scalable
+imitation provide the building blocks~\cite{amass,humanml3d,humos,phc,protomotions}.
+Body-conditioned control is established~\cite{won2019}; PHC also supports
+body variation, although its quantitative evaluations use the mean SMPL
+body~\cite{phc}. Our question is how reliably one controller learns and
+transfers across a large corpus of explicitly paired motions and bodies.
+We address it through three research questions:
 \begin{enumerate}
-\item A paired corpus construction linking source identities, shape-specific
-references, matching assets, and deterministic clip-grouped splits across
-20,951 clips and 128 body configurations.
-\item A shared imitation system trained on 18,855 clips across all 128
-bodies, combining temporal observations, morphology inputs, reference
-processing, and memory-bounded motion streaming.
-\item An empirical assessment separating held-out tracking, trained-body
-coverage, and unseen-body transfer, with repeated-seed design comparisons
-and an explicit account of residual failures and evidence limits.
+\item \textbf{RQ1: Can one shared controller learn to track diverse motions
+across different bodies?} We distinguish held-out-motion performance on
+selected bodies from coverage of every trained body.
+\item \textbf{RQ2: How well does that capability generalise to unseen body
+shapes, and where does it fail?} We evaluate inside- and outside-range bodies,
+retain every shape, and examine checkpoint sensitivity.
+\item \textbf{RQ3: Which design choices support that capability, and what
+trade-offs do they introduce?} We compare temporal architectures and audit
+reference refinement, while identifying the missing conditioning control.
 \end{enumerate}
 
-The original checkpoint achieves 99.14\% success on the independent
-1,048-clip test split, with one selected trained body per clip. On a separate
-1,024-clip panel over 32 unseen bodies, overall success is 91.64\%: 28 bodies
-reach 99.74\% collectively, while four transfer poorly. The full-population
-score is central to the generalization claim. These findings support shared
-control over substantial motion and body variation, but also reveal limits
-that aggregate trained-body scores conceal. Fixed all-body held-out coverage
-and causal tests of morphology inputs are needed for stronger claims.
+Our contribution is a paired corpus and learning workflow that preserves
+clip/body identity from HUMOS generation through simulation and replay,
+together with an evaluation that separates motion exposure from body
+exposure. The corpus contains 20,951 clip identities and 128 body
+configurations. A shared temporal slot/type-attention controller trains
+directly on 18,855 clips across those bodies using streamed motion residency.
+We inherit the simulator integration, PPO machinery, and motion-tracking
+infrastructure from ProtoMotions; we do not claim these or morphology
+conditioning itself as new. HumanML3D captions are metadata, not policy
+inputs: this is reference-conditioned imitation, not text-conditioned control.
+
+The original checkpoint achieves 99.14\% success on 1,048 independent test
+clips, each paired with one selected trained body. On 233 training-split
+clips across 128 unseen inside-range bodies and 128 unseen outside-range
+bodies, success is 97.28\% and 97.15\%. Yet the worst bodies succeed on only
+3.0\% and 13.3\% of those clips. These findings support the central claim:
+\emph{one shared controller learns morphology-specific tracking with strong
+average transfer to unseen shapes, but uneven robustness across individual
+bodies}. The design evidence explains practical trade-offs; it does not yet
+isolate the benefit of explicit morphology inputs or establish uniform
+held-out-motion performance across all bodies.
 
 \section{Related Work}\label{sec:related_work}
 
@@ -107,21 +110,13 @@ DeepMimic demonstrated reference-guided reinforcement learning for simulated
 character skills~\cite{deepmimic}. Perpetual Humanoid Control developed robust
 humanoid imitation for real-time simulated avatars~\cite{phc}. These approaches
 motivate learning a feedback controller rather than directly replaying a
-kinematic trajectory. Subsequent single-body trackers scaled this
-feedback-control approach in coverage and deployability: PULSE distills a
-low-dimensional, high-coverage motion representation for general humanoid
-control~\cite{pulse}; OmniH2O and ExBody2 target dexterous, deployable
-whole-body teleoperation and expressive control on physical
-humanoids~\cite{omnih2o,exbody2}; GMT uses a motion mixture-of-experts to
-track a broad motion distribution with one policy~\cite{gmt}. Each of these
-typically targets a fixed robot platform or morphology while scaling the
-motion distribution; we instead fix the tracking task and scale the body,
-holding 128 configurations under one
-policy. We implement our experiments in
-ProtoMotions~\cite{protomotions} with Isaac Gym~\cite{isaacgym}, using PPO
-optimization~\cite{ppo}. Our contribution is the multi-morphology data and
-control workflow and its evaluation, rather than a replacement for these
-simulation or learning frameworks.
+kinematic trajectory. PULSE learns a motion representation for humanoid control, while OmniH2O,
+ExBody2, and GMT study large-scale control on robot platforms~\cite{pulse,omnih2o,exbody2,gmt}.
+ASE learns reusable latent skills and downstream task policies rather than
+requiring exact clip tracking~\cite{ase}. These objectives provide context,
+but their published scores do not measure our clip/body replay task.
+We implement our experiments in ProtoMotions with Isaac Gym and PPO
+optimization~\cite{protomotions,isaacgym,ppo}.
 
 \subsection{Morphology-conditioned control and retargeting}
 
@@ -168,6 +163,49 @@ sources. An ablation also investigates actor-only morphology modulation with
 adaLN-Zero, adapting the zero-initialized conditioning design used in
 Diffusion Transformers~\cite{dit}. That experiment tests a conditioning
 mechanism, not diffusion-based action generation.
+
+\subsection{Headline capability and evidence comparison}
+Table~\ref{tab:capabilities} separates published support from demonstrated
+evaluation coverage. In particular, PHC's Appendix B describes shape-varying
+humanoids and training with sampled AMASS shapes; its quantitative comparisons
+use the mean neutral SMPL body~\cite{phc}. It is therefore inaccurate to
+classify PHC as incapable of body variation. Won and Lee directly establish
+parametric body control~\cite{won2019}. Our distinction is the paired corpus
+and systematic inside/outside replay, not priority for morphology conditioning.
+
+\begin{table}[p]
+\centering\footnotesize
+\caption{Published capabilities and evaluation scope, not a performance
+ranking. ``Not reported'' concerns the cited source and the specified
+unseen-body test, not impossibility. No external system has been rerun on our
+matched references, assets, horizon, and aggregation. Software documentation
+for ProtoMotions 3 is distinguished from paper evaluations and from the
+implementation used in this study.}\label{tab:capabilities}
+\begin{tabularx}{\linewidth}{@{}p{0.13\linewidth}YYY@{}}
+\toprule
+System / source & Task and motion evidence & Body capability & Evaluation relevance \\
+\midrule
+PHC~\cite{phc} & Reference tracking and recovery; 11,313 train and 140 test AMASS sequences. & SMPL shape/gender variation; sampled shapes and body-normalized references described. & Quantitative motion tests use mean neutral body; shape variation shown qualitatively. No systematic inside/outside unseen-body panel reported. \\[0.5em]
+ASE~\cite{ase} & Latent skill pretraining and downstream tasks; 187 clips. Exact reference tracking is not its objective. & Published experiments use a sword/shield humanoid; a shared shape-conditioned body sweep is not reported. & Task transfer, skill coverage, and recovery evaluated; unseen-body clip-tracking test not reported. \\[0.5em]
+ProtoMotions 3~\cite{protomotions} & Framework documents large-scale tracking, distributed training, retargeting, and generative policies. & Supports different configured characters/robots; this alone does not demonstrate one policy across shape variants. & Official README is a software capability source, not a matched multi-body benchmark. Our simulator/PPO/tracking infrastructure is inherited. \\[0.5em]
+Won \& Lee~\cite{won2019} & Parametric physical character control with adaptive shape sampling. & One parametric controller accommodates height, weight, and proportion changes; new and changing bodies demonstrated. & Direct prior body-control capability; experiments differ from our large clip-by-body imitation panels. \\[0.5em]
+HUMOS~\cite{humos} & Identity-conditioned motion generation with physical-consistency objectives. & Shape-conditioned motions; supplies our pretrained reference generator. & Not an online feedback tracker; its motion-generation scores are not tracking success under our simulator protocol. \\[0.5em]
+This study & Shared tracking; 18,855 training identities, 1,048 held-out test identities. & 128 trained bodies; references and assets share identity. & Test: one trained body per clip. Unseen: 233 known clips $\times$ each of 128 inside and 128 outside bodies; all shapes retained. Conditioning mechanism remains unisolated. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Inherited functions and study additions.}
+ProtoMotions provides the simulation abstraction, PPO training, motion-library
+and imitation infrastructure. HUMOS supplies the pretrained generator;
+SMPL/SMPLSim supply the body parameterization and asset construction. Our
+study adds the paired corpus assembly and identity checks, reference
+processing and fidelity audit, the evaluated temporal slot/type controller
+configuration, streamed clip residency, and exposure-separated evaluation.
+These are system and empirical contributions built on existing methods,
+not claims to invent attention, PPO, body models, or motion imitation.
+A directly comparable performance claim requires a matched external replay;
+none is made here.
 
 \section{Problem Formulation and System Overview}\label{sec:problem}
 A body configuration $b=(g,\boldsymbol{\beta})$ specifies a SMPL template
@@ -855,36 +893,74 @@ fixed convention. The accompanying high-jerk statistic is the percentage
 of windows in which any body exceeds threshold 6,500; the logger calls it
 a frame percentage, but it is window-based.
 
-\subsection{Populations and generalization axes}
-Table~\ref{tab:evidence_populations} separates the evaluated populations.
-The development corpus is drawn from training. Unseen references have
-frame-zero grounding but not the full training-reference refinement.
 
+\subsection{Research questions, populations, and checkpoint scope}
+Table~\ref{tab:evidence_populations} maps the evidence to the three questions.
+Held-out identity is clip-grouped, not a demonstrated subject/recording split.
 \begin{table}[t]
 \centering\small
-\caption{Original-checkpoint evaluation populations. Held-out clip identity
-does not imply subject- or source-recording-disjoint splits.}\label{tab:evidence_populations}
+\caption{Evaluation populations and their inference scope. Each unseen panel
+has 128 bodies; the 233-clip and 23-clip subsets partition its 256 clips.}
+\label{tab:evidence_populations}
 \begin{tabularx}{\linewidth}{@{}lYYr@{}}
 \toprule
-Population & Motion exposure & Body exposure & Pairs \\
+Question & Motion exposure & Body exposure & Pairs \\
 \midrule
-Validation / test & Held-out clips & Trained; one per clip & 1,048 each \\
-Development replay & Training clips & All 128 trained bodies & 19,200 \\
-Unseen bodies, original train & Seen clips & 32 unseen bodies & 29,824 \\
-Unseen bodies, original val/test & Held-out clips & 32 unseen bodies & 2,944 \\
+RQ1: validation / test & Held-out clips & Trained; one per clip & 1,048 each \\
+RQ1: development replay & 150 training clips & All 128 trained & 19,200 \\
+RQ2: inside / outside & 233 training clips & All 128 unseen per panel & 29,824 each \\
+RQ2: diagnostic subset & 23 val/test clips; seen by full-data & Same unseen panels & 2,944 each \\
+RQ2: trained control & 150 training clips & All 128 trained & 19,200 \\
+RQ3: design comparison & Development clips & Trained bodies & Three refined seeds \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-The pending full-data checkpoint comparison uses the same unseen references,
-but additional training includes all original motion splits. It tests unseen
-bodies on known motions and cannot replace the original held-out-motion result.
+\paragraph{Unseen-body construction and replay.}
+Each panel contains 64 new coefficient vectors instantiated on male and female
+SMPL templates. Inside vectors lie in $[-3,3]^{10}$; outside vectors have
+$\|\beta\|_\infty\in(3,5]$, with 16 vectors (32 bodies) in each of four
+half-unit tiers. Inside denotes membership of the training coefficient box,
+not demonstrated membership of the convex hull of trained bodies. Both
+panels use matching HUMOS references and assets, frame-zero offsets and
+full reference refinement. The build report records finite complete clip/body
+panels and zero penetration under its refinement diagnostic; it does not
+certify dynamic feasibility.
+
+All nine runs completed on an A40 on 9 October 2026. Replay uses mean actions,
+reference initialization, 32 environments per asset (4,096 environments),
+and at most 210 control steps (7\,s). Success follows Eq.~\eqref{eq:success}.
+The 233 training-split identities isolate the body axis; the other 23
+validation/test identities remain separate. The trained-body control uses a
+different 150-clip panel and refinement run, so only within-dataset checkpoint
+deltas are paired comparisons.
+
+\paragraph{Checkpoint and uncertainty controls.}
+The original \texttt{refined} checkpoint is epoch 28,170; the prespecified
+\texttt{fulldata} candidate is epoch 34,000 and trained on all original motion
+splits. Both are frozen for replay. Duration and motion coverage change
+together, preventing causal attribution. Each dataset has two original-checkpoint
+runs and one candidate run. Paired 95\% bootstrap intervals resample clips,
+retaining the full fixed body panel; they do not resample training seeds or
+unseen bodies. The report's ``beyond noise'' rule requires an interval excluding
+zero and a candidate delta larger in magnitude than the original-checkpoint
+rerun delta. With no checkpoint ladder, that comparison measures simulator
+variability only. Per-body regression intervals are exploratory and unadjusted
+for multiple testing.
+
+On all 256 clips, identical-checkpoint success labels agree on 99.33\% of
+inside and 98.68\% of outside pairs, versus 99.96\% in the control. Pooled
+success differs by at most 0.05 pp, but individual pairs can change by metres
+in peak error. Small pooled changes therefore coexist with local instability.
+Checkpoint hashes and the retained report are documented in
+Appendix~\ref{app:provenance}; complete per-body tables are in
+Appendix~\ref{app:unseen_tables}.
 
 \section{Results}\label{sec:results}
 We assess held-out tracking, distinguish trained-body coverage from unseen
 transfer, and use design comparisons and failures to delimit the claim.
 
-\subsection{Tracking held-out motions on trained bodies}\label{sec:test_results}
+\subsection{RQ1: Shared tracking across motions and bodies}\subsubsection{Held-out motions on selected trained bodies}\label{sec:test_results}
 
 The epoch-28,170 checkpoint was re-evaluated offline with a standalone
 streaming evaluator, once on the validation split and once on the
@@ -928,143 +1004,192 @@ revealed once and was not used to select the checkpoint. These scores concern
 selected pairs, not every body variant. Continuous pose errors and jerk
 complement the permissive 0.5\,m success threshold.
 
-\subsection{Tracking consistency across trained bodies}\label{sec:trained_consistency}
-The development replay covers 150 training clips on all 128 trained bodies
-(19,200 pairs), with zero failed episodes recorded in the physical analysis.
-It establishes broad execution on that training subset, not full-body
-coverage of held-out clips evaluated on one body each.
+\subsubsection{Coverage of trained bodies}\label{sec:trained_consistency}
+The new trained-body control crosses 150 training clips with all 128
+trained bodies (19,200 pairs) and reaches 99.29\% threshold success with the
+original checkpoint (Table~\ref{tab:unseen_v2}). This establishes broad
+tracking on that training subset, not full-body coverage of held-out clips.
+The separate exploratory physical replay also covers 150-by-128 pairs and
+records zero failed episodes under its diagnostic; that record is not
+interchangeable with the new replay's tracking-error criterion and does not
+establish 100\% threshold success.
 
 \pending{Replay a frozen held-out subset on all 128 trained bodies. Report
 per-clip success fraction, median and worst-body error, and the number of
 clips succeeding on every body. Add synchronized reference/controller views
 of the same clip across contrasting bodies.}
 
-\subsection{Generalization to unseen bodies}\label{sec:unseen_morphology}
-The original epoch-28,170 checkpoint is replayed on 32 bodies excluded from
-training: 16 new beta vectors in $[-3,3]^{10}$ instantiated in both male and
-female SMPL templates. The panel contains 1,024 clips on every body (32,768
-pairs): 932 original training clips isolate the body axis; 47 validation and
-45 test clips also have unseen motion identities. Mean-action replay uses
-matching assets, a 210-step cap, and the 0.5\,m maximum mean-body-position-error
-threshold. Episodes have approximately 198 steps. These references have
-frame-zero grounding rather than full training-reference refinement.
+
+\subsubsection{Residual held-out-motion failures}\label{sec:failures}
+Nine test pairs and 16 validation pairs fail the configured threshold.
+Caption joins suggest ground transitions (six test, five validation failures)
+and whole-body rotations (two test, four validation failures). These describe
+the failed sample rather than mechanical causes. Without class counts among
+successful clips they do not establish class-specific failure rates.
+
+Other captions describe turning, side-stepping, an abrupt stop, and a hand-held
+sparring stick absent from simulation. An omitted object does not establish
+missing load-bearing support. A clip with rounded peak error near 0.5\,m
+remains in the failure count pending exact threshold sensitivity. Failures in
+both orientations on different bodies do not isolate skill, morphology, or
+reference effects.
+
+\pending{Inspect synchronized rollouts and first-crossing traces, including
+successful variants of the same clips. Use population class denominators
+before claiming enrichment and interventions before assigning causes.}
+
+\subsection{RQ2: Unseen-body transfer and its limits}\label{sec:unseen_morphology}
+\subsubsection{High average transfer inside and outside the training range}
+The new evaluation crosses 233 training-split clips with all 128 bodies in
+each unseen panel, giving 29,824 pairs per panel. Table~\ref{tab:unseen_v2}
+includes every body and every failed pair. The original checkpoint reaches
+97.28\% inside-range and 97.15\% outside-range success. The trained-body
+control reaches 99.29\%, but uses different clips and a different refinement
+run; the approximately two-percentage-point gap is descriptive, not a
+matched estimate of the effect of changing bodies.
 
 \begin{table}[t]
 \centering\small
-\caption{Original-checkpoint unseen-body replay. The final two rows partition
-the full population; they are diagnostic subgroups. Errors are pair means in
-metres and radians.}\label{tab:unseen_population}
-\begin{tabularx}{\linewidth}{@{}Yrrrr@{}}
+\caption{Unseen-body headline and trained-body control, 9 October 2026.
+Unseen panels each contain the same 233 training-split clips on 128 bodies;
+the control has 150 training clips on 128 trained bodies. Deltas are paired
+within each dataset. Intervals resample clips with the body panel fixed.
+The rerun repeats the original checkpoint, not its training.}\label{tab:unseen_v2}
+\begin{tabularx}{\linewidth}{@{}YrrrY@{}}
 \toprule
-Population & Pairs & Success (\%) & Position & Rotation \\
+Panel & Refined (\%) & Full-data (\%) & Rerun $\Delta$ (pp) & Candidate $\Delta$ [95\% CI] (pp) \\
 \midrule
-All 32 bodies & 32,768 & 91.64 & 0.177 & 0.314 \\
-Seen clips, all 32 & 29,824 & 91.69 & 0.176 & 0.313 \\
-Held-out clips, all 32 & 2,944 & 91.07 & 0.181 & 0.324 \\
-Other 28 (all clips) & 28,672 & 99.74 & 0.093 & 0.201 \\
-Four severe (all clips) & 4,096 & 34.89 & 0.765 & 1.107 \\
+Inside unseen & 97.28 & 96.91 & $-0.02$ & $-0.37$ [$-0.57$, $-0.18$] \\
+Outside unseen & 97.15 & 97.57 & $+0.04$ & $+0.42$ [$+0.22$, $+0.61$] \\
+Trained control & 99.29 & 99.12 & $+0.02$ & $-0.17$ [$-0.37$, $-0.03$] \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-Overall success is 91.64\%. The other 28 bodies reach 99.74\%, but that
-subgroup includes a milder outlier, \texttt{male\_95749fe2}, at approximately
-96.3\%. Strong transfer is common but not uniform. The four severe cases
-remain part of the overall result.
+\subsubsection{Failures remain concentrated in individual bodies}
+High averages coexist with severe body-specific failures. Inside body
+\texttt{male\_669a0fb3} succeeds on 3.0\% of clips, and outside body
+\texttt{male\_1c099619} on 13.3\%. Another inside body,
+\texttt{male\_ec3bb7f8}, achieves 19.3\% despite an in-range mass of 42.7\,kg
+and height of 1.41\,m. Figure~\ref{fig:unseen_v2_shapes} exposes the full
+body distribution; Appendix~\ref{app:unseen_tables} reports every body,
+including successful cases. These failures cannot be explained simply by
+being outside the training coefficient box.
 
-\begin{table}[t]
-\centering\small
-\caption{Severe cases on 932 original training clips. Opposite-template
-variants share numeric beta vectors but differ in geometry and dynamics.}\label{tab:unseen_flagged}
-\begin{tabular}{lrr}
-\toprule
-Beta key & Severe case, success & Opposite-template success \\
-\midrule
-\texttt{a83170f5} & male: 58.3\% & female: 100.0\% \\
-\texttt{cf3d5ee7} & male: 46.8\% & female: 99.8\% \\
-\texttt{4d1b9df1} & female: 35.8\% & male: 99.8\% \\
-\texttt{1d4da893} & female: 0.1\% & male: 99.8\% \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The severe cases show tracking error without recorded termination. Success
-on the opposite template suggests a body-specific mechanism, but does not
-establish an asset defect: the coefficients map through different templates.
-Static inspection found substantial segment-mass differences for three cases,
-while \texttt{4d1b9df1} lacked that pattern. Dynamic traces and controlled
-interventions are needed to explain the failures.
+All failed rows have zero recorded termination flags. The report calls them
+silent drift, but these flags alone do not establish that no body fell:
+termination flags depend on the replay configuration, not an independent
+fall detector. We interpret them as threshold failures without recorded
+termination, pending synchronized rollouts and contact/root-height traces.
 
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}
-\begin{axis}[
- width=0.9\linewidth,height=5.2cm,
- xlabel={Nearest trained body, raw beta distance},ylabel={Success (\%)},
- xmin=2.4,xmax=5.2,ymin=-5,ymax=105,
- legend pos=south east,legend style={font=\small},
- tick label style={font=\small},label style={font=\small}]
-\addplot[only marks,mark=*,blue!70!black] coordinates {
-(4.0932,99.7070)
-(2.5827,99.8047)
-(4.6459,99.8047)
-(4.0570,100.0000)
-(4.3938,100.0000)
-(4.6785,99.9023)
-(4.9430,99.9023)
-(4.4515,100.0000)
-(3.2395,100.0000)
-(5.0481,99.9023)
-(2.7052,99.9023)
-(3.5273,99.8047)
-(3.1343,100.0000)
-(4.5587,100.0000)
-(4.0932,99.9023)
-(2.5827,99.5117)
-(3.6670,99.8047)
-(4.6459,99.8047)
-(3.5304,99.8047)
-(4.0570,100.0000)
-(4.3938,100.0000)
-(4.6785,99.9023)
-(4.9430,99.8047)
-(4.4515,96.2891)
-(5.0481,99.9023)
-(2.7052,100.0000)
-(3.1343,99.7070)
-(4.5587,99.6094)
-};
-\addlegendentry{Other 28 bodies}
-\addplot[only marks,mark=x,mark size=3pt,thick,red!70!black] coordinates {
-(3.6670,0.0977)
-(3.5304,35.6445)
-(3.2395,57.5195)
-(3.5273,46.2891)
-};
-\addlegendentry{Four severe cases}
-\end{axis}
-\end{tikzpicture}
-\caption{All 32 unseen bodies, each evaluated on the same 1,024 clips.
-Distance uses the nearest trained body of the same SMPL template. The four
-severe cases are retained, and success is not uniformly high over the panel.}
-\label{fig:unseen_distance}
+\begin{axis}[width=0.94\linewidth,height=5.2cm,
+xlabel={Body rank within each panel (lowest success first)},
+ylabel={Refined success (\%)},xmin=1,xmax=128,ymin=0,ymax=102,
+legend pos=south east,legend style={font=\small},grid=major]
+
+\addplot[only marks,mark=*,mark size=1.2pt,blue] coordinates {
+(1,3.00) (2,19.31) (3,38.20) (4,85.41) (5,87.55) (6,87.98) (7,89.27) (8,91.42) (9,92.27) (10,92.27) (11,96.14) (12,97.00) (13,97.85) (14,97.85) (15,98.28) (16,98.28) (17,98.71) (18,99.14) (19,99.14) (20,99.14) (21,99.14) (22,99.57) (23,99.57) (24,99.57) (25,99.57) (26,99.57) (27,99.57) (28,99.57) (29,99.57) (30,99.57) (31,99.57) (32,99.57) (33,99.57) (34,99.57) (35,99.57) (36,99.57) (37,99.57) (38,99.57) (39,99.57) (40,99.57) (41,99.57) (42,99.57) (43,99.57) (44,99.57) (45,99.57) (46,99.57) (47,99.57) (48,99.57) (49,99.57) (50,99.57) (51,99.57) (52,99.57) (53,99.57) (54,99.57) (55,99.57) (56,99.57) (57,100.00) (58,100.00) (59,100.00) (60,100.00) (61,100.00) (62,100.00) (63,100.00) (64,100.00) (65,100.00) (66,100.00) (67,100.00) (68,100.00) (69,100.00) (70,100.00) (71,100.00) (72,100.00) (73,100.00) (74,100.00) (75,100.00) (76,100.00) (77,100.00) (78,100.00) (79,100.00) (80,100.00) (81,100.00) (82,100.00) (83,100.00) (84,100.00) (85,100.00) (86,100.00) (87,100.00) (88,100.00) (89,100.00) (90,100.00) (91,100.00) (92,100.00) (93,100.00) (94,100.00) (95,100.00) (96,100.00) (97,100.00) (98,100.00) (99,100.00) (100,100.00) (101,100.00) (102,100.00) (103,100.00) (104,100.00) (105,100.00) (106,100.00) (107,100.00) (108,100.00) (109,100.00) (110,100.00) (111,100.00) (112,100.00) (113,100.00) (114,100.00) (115,100.00) (116,100.00) (117,100.00) (118,100.00) (119,100.00) (120,100.00) (121,100.00) (122,100.00) (123,100.00) (124,100.00) (125,100.00) (126,100.00) (127,100.00) (128,100.00)
+};\addlegendentry{Inside}
+\addplot[only marks,mark=triangle*,mark size=1.2pt,orange!80!black] coordinates {
+(1,13.30) (2,29.61) (3,63.95) (4,65.67) (5,67.81) (6,75.54) (7,81.97) (8,90.99) (9,92.70) (10,93.56) (11,94.42) (12,94.85) (13,95.71) (14,96.14) (15,97.42) (16,98.28) (17,98.28) (18,98.71) (19,98.71) (20,99.14) (21,99.14) (22,99.14) (23,99.14) (24,99.14) (25,99.14) (26,99.57) (27,99.57) (28,99.57) (29,99.57) (30,99.57) (31,99.57) (32,99.57) (33,99.57) (34,99.57) (35,99.57) (36,99.57) (37,99.57) (38,99.57) (39,99.57) (40,99.57) (41,99.57) (42,99.57) (43,100.00) (44,100.00) (45,100.00) (46,100.00) (47,100.00) (48,100.00) (49,100.00) (50,100.00) (51,100.00) (52,100.00) (53,100.00) (54,100.00) (55,100.00) (56,100.00) (57,100.00) (58,100.00) (59,100.00) (60,100.00) (61,100.00) (62,100.00) (63,100.00) (64,100.00) (65,100.00) (66,100.00) (67,100.00) (68,100.00) (69,100.00) (70,100.00) (71,100.00) (72,100.00) (73,100.00) (74,100.00) (75,100.00) (76,100.00) (77,100.00) (78,100.00) (79,100.00) (80,100.00) (81,100.00) (82,100.00) (83,100.00) (84,100.00) (85,100.00) (86,100.00) (87,100.00) (88,100.00) (89,100.00) (90,100.00) (91,100.00) (92,100.00) (93,100.00) (94,100.00) (95,100.00) (96,100.00) (97,100.00) (98,100.00) (99,100.00) (100,100.00) (101,100.00) (102,100.00) (103,100.00) (104,100.00) (105,100.00) (106,100.00) (107,100.00) (108,100.00) (109,100.00) (110,100.00) (111,100.00) (112,100.00) (113,100.00) (114,100.00) (115,100.00) (116,100.00) (117,100.00) (118,100.00) (119,100.00) (120,100.00) (121,100.00) (122,100.00) (123,100.00) (124,100.00) (125,100.00) (126,100.00) (127,100.00) (128,100.00)
+};\addlegendentry{Outside}
+\end{axis}\end{tikzpicture}
+\caption{All 128 bodies in each unseen panel, independently sorted by
+original-checkpoint success on the same 233 known clips. Ranking is
+panel-specific and does not pair inside and outside bodies. Severe failures
+are retained alongside the near-ceiling majority.}\label{fig:unseen_v2_shapes}
 \end{figure}
 
-Nearest-trained-body distances span approximately 2.58--5.05 in raw beta
-coordinates, comparing within template. Figure~\ref{fig:unseen_distance} shows all bodies. The successful subgroup has no clear
-descriptive decline over that range; this does not establish full-population
-invariance or extrapolation. Explicit conditioning is present, but this study
-does not isolate its benefit from shape information in state and references.
 
-\subsubsection{Pending full-data checkpoint comparison}
-\pending{Replay the preselected epoch-34,000 full-data checkpoint on the same
-32,768 pairs. Include all bodies and report recoveries, regressions, and error
-changes. Additional training includes all original motion splits on the
-original 128 bodies, so this tests unseen bodies on known motions. Add a
-matched trained-body control. No outcome is assumed while GPU evaluation is
-unavailable.}
+\subsubsection{Coefficient tiers and physical-property groups}
+\begin{table}[t]
+\centering\small
+\caption{Predefined outside coefficient tiers and descriptive simulated-mass
+bins on the 233-clip panel. Tier and mass rows overlap; each partition covers
+all 128 bodies. Mass thresholds are the trained-asset range. These are
+associations, not identified causes.}\label{tab:unseen_v2_groups}
+\begin{tabular}{lrrr}
+\toprule
+Group & Bodies & Refined (\%) & Full-data (\%) \\
+\midrule
+$\|\beta\|_\infty\in(3,3.5]$ & 32 & 99.03 & 99.46 \\
+$\|\beta\|_\infty\in(3.5,4]$ & 32 & 97.76 & 97.81 \\
+$\|\beta\|_\infty\in(4,4.5]$ & 32 & 95.33 & 95.12 \\
+$\|\beta\|_\infty\in(4.5,5]$ & 32 & 96.47 & 97.87 \\
+\midrule
+Mass $<26.4$ kg & 2 & 100.00 & 100.00 \\
+Mass $26.4$--$144.4$ kg & 118 & 98.33 & 98.13 \\
+Mass $>144.4$ kg & 8 & 79.02 & 88.62 \\
+\bottomrule
+\end{tabular}
+\end{table}
+Success does not decline monotonically across coefficient tiers
+(Table~\ref{tab:unseen_v2_groups}). The eight heaviest outside bodies have
+lower mean success, but small, overlapping property groups and paired
+male/female templates are not independent samples of physical-property
+space. Bodies outside the trained height range perform well on average
+(97.91\% outside; 96.42\% inside), while the tallest in-range bin is weaker
+(90.53\% outside; 88.75\% inside). Raw coefficient extremity, mass, and
+height therefore do not provide a simple ordering of transfer difficulty.
 
-\subsection{Architecture trade-offs across training seeds}\label{sec:architecture_results}
+\subsubsection{Checkpoint sensitivity: gains and regressions}
+Full-data changes exceed the identical-checkpoint rerun magnitude and have
+clip-bootstrap intervals excluding zero in all three headline populations.
+This supports a measurable change between these two checkpoints, not a
+causal claim about training duration or coverage, which changed together.
+Ordinary checkpoint variation remains unmeasured.
+
+Outside improvement is concentrated in the ten bodies outside the trained
+mass range ($+7.68$ pp, 95\% CI [$+6.39$, $+9.01$]) and the highest
+coefficient tier ($+1.39$ pp [$+1.07$, $+1.72$]). Yet outside mean position
+error increases by 2.4\,mm overall; inside and control increases are 5.0 and
+3.1\,mm. Threshold success and continuous tracking quality move differently.
+The gain therefore does not establish uniformly tighter tracking.
+
+\begin{table}[t]
+\centering\small
+\caption{All bodies whose paired success-change interval lies entirely below
+$-2$ percentage points on the 233-clip panel. These exploratory per-body
+intervals are not adjusted for multiple comparisons.}\label{tab:unseen_v2_regressions}
+\begin{tabular}{llrrr}
+\toprule
+Panel & Asset & Refined (\%) & Full-data (\%) & $\Delta$ (pp) \\
+\midrule
+Inside & \texttt{female\_e7bc8c92} & 92.3 & 79.0 & $-13.30$ \\
+Inside & \texttt{male\_6d81a8f6} & 97.9 & 85.0 & $-12.88$ \\
+Inside & \texttt{male\_ec3bb7f8} & 19.3 & 10.7 & $-8.58$ \\
+Outside & \texttt{female\_edcf2449} & 94.8 & 58.4 & $-36.48$ \\
+Outside & \texttt{male\_a7f6b877} & 65.7 & 40.8 & $-24.89$ \\
+Outside & \texttt{male\_edcf2449} & 82.0 & 67.0 & $-15.02$ \\
+Outside & \texttt{female\_e706da88} & 94.4 & 79.8 & $-14.59$ \\
+Outside & \texttt{female\_bd0ec1ce} & 63.9 & 52.8 & $-11.16$ \\
+Outside & \texttt{female\_f9bf3075} & 97.4 & 88.8 & $-8.58$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+Three inside and six outside bodies meet the regression rule
+(Table~\ref{tab:unseen_v2_regressions}); no trained control body does.
+Five outside bodies have intervals entirely above $+2$ pp, including
+\texttt{female\_98d4329d} (29.6\% to 94.8\%) and
+\texttt{male\_1c099619} (13.3\% to 71.2\%). The weakest inside body improves
+only to 8.6\%. Neither improved extremes nor a higher outside average
+justify calling full-data a uniformly better controller.
+
+The separate 23-clip validation/test subset gives inside success
+97.08\% versus 96.50\%, and outside 96.81\% versus 96.91\% for refined and
+full-data. Full-data trained on these identities; these values are diagnostic,
+not untouched motion generalisation, and are excluded from the headline.
+
+\pending{Audit per-asset reference feasibility and inspect first-threshold
+crossings on severe failures and successful counterparts. Add contact,
+root-height, and actuation traces before distinguishing reference,
+controller, or asset mechanisms.}
+
+\subsection{RQ3: Design support and trade-offs}
+\subsubsection{Architecture trade-offs across training seeds}\label{sec:architecture_results}
 Each refined-reference architecture has three seeds. Each run contributes
 one last-eight-evaluation summary (epochs 4,600--6,000); uncertainty below is
 sample standard deviation across three summaries. Seed-1/2 values were checked
@@ -1097,7 +1222,7 @@ These reruns support the already-trained full-scale model rather than
 establishing selection before training. Capacities and runtimes differ
 (Appendix~\ref{app:history}).
 
-\subsection{Reference refinement: artifact reduction and fidelity}\label{sec:refinement_results}
+\subsubsection{Reference refinement: artifact reduction and fidelity}\label{sec:refinement_results}
 
 A paired reference audit supports reduced sliding and penetration with
 small pose/root changes, at the cost of higher reference jerk. Policy
@@ -1165,162 +1290,108 @@ almost the whole distribution; position jerk rises across almost the whole
 distribution.}\label{fig:refine_dist}
 \end{figure}
 
-Refinement removes most ground penetration and about a third of the
-stance-foot sliding, while changing joint rotations by a tenth of a degree
-and the root path by millimetres, and leaving the cross-shape spread of
-per-shape knee kinematics essentially intact (variance ratio 0.94). The
-per-motion distributions (Figure~\ref{fig:refine_dist}) show these are not
-mean-only effects: stance-foot speed falls for 96\% of individual motions,
-across the full range rather than a few outliers, although the worst-sliding
-5\% of clips are barely improved. Penetration in the raw references is
-bimodal -- a large fraction of clips sit entirely below the floor, a
-whole-clip vertical mis-registration rather than per-frame jitter, which the
-clearance correction removes; clips that were already grounded stay grounded,
-so only 45\% of motions register a change. The cost is a roughly one-third
-increase in reference-domain position jerk that is broad rather than
-tail-driven: 79\% of motions get jerkier, and the effect is a clip property,
-not a shape property. Grouped by clip (150), the median jerk moves 30.8 to
-50.9 and the range spans 3.9--237 (unrefined) versus 3.4--246 (refined);
-grouped by body shape (128), the medians move 45.5 to 60.5 within a tight
-36--57 versus 51--74 band, so refinement raises jerk almost uniformly across
-morphologies. It is introduced by the per-window root-translation correction
-and the per-frame ground-clearance lift. Higher target jerk could contribute to the lower policy jerk of the
-unrefined slot/type seed-0 run, but different targets and training variability
-prevent attribution to references alone.
+Refinement lowers stance-foot speed from 0.055 to 0.038\,m/s, with 96\%
+of references improving, and below-floor frames from 39.6\% to 3.3\%.
+Small rotation/root changes and a knee-range variance ratio of 0.94 support
+preservation of the measured motion features, not equivalence of all
+kinematics. Only 45\% of references improve the below-floor measure because
+many were already grounded. The cost is higher reference jerk (45.2 to
+60.7\,m/s$^3$); 79\% of references worsen on that measure.
+Figure~\ref{fig:refine_dist} shows that both the sliding reduction and jerk
+increase extend across the distribution. Temporal root/clearance corrections
+are a candidate explanation for the jerk cost, but its contribution to
+policy smoothness is not isolated.
 
 The refined/unrefined pairs in Table~\ref{tab:ablation_results} track their
 own targets and have one seed per unrefined case. They describe different
 tasks. The reference audit justifies cleaning; a stronger policy-level claim
 requires a common-reference checkpoint comparison.
 
-\subsection{Residual failure patterns}\label{sec:failures}
-Nine test pairs and 16 validation pairs fail the configured threshold.
-Caption joins suggest ground transitions (six test, five validation failures)
-and whole-body rotations (two test, four validation failures). These describe
-the failed sample rather than mechanical causes. Without class counts among
-successful clips they do not establish class-specific failure rates.
 
-Other captions describe turning, side-stepping, an abrupt stop, and a hand-held
-sparring stick absent from simulation. An omitted object does not establish
-missing load-bearing support. A clip with rounded peak error near 0.5\,m
-remains in the failure count pending exact threshold sensitivity. Failures in
-both orientations on different bodies do not isolate skill, morphology, or
-reference effects.
-
-\pending{Inspect synchronized rollouts and first-crossing traces, including
-successful variants of the same clips. Use population class denominators
-before claiming enrichment and interventions before assigning causes.}
-
-\section{Exploratory Physical Analysis}\label{sec:physics}
-As a secondary question, we examine whether cross-body variability in
-control demand differs between dynamic and quasi-static motions. The original
-checkpoint is replayed over 150 development clips and all 128 trained bodies
-(19,200 pairs, zero recorded failed episodes). Torque, power, and jerk describe
-the configured simulation/controller, not calibrated human biomechanics.
-
-Inherited captions assign classes by keyword matching. Running, jumping,
-and kicking form a dynamic group (25 clips); standing and sitting form a
-quasi-static group (37 clips). Other clips are outside this pooled comparison.
-We subtract each clip's across-body mean before summarizing spread. A
-coefficient of variation is sensitive to small baseline demand, so absolute
-residuals are more interpretable for this question. This sensitivity alone
-does not prove that a relative difference is merely simulation noise.
-\begin{table}[t]
-\centering
-\small
-\caption{Cross-shape variability of control demand, dynamic
-(running~+~jumping~+~kicking, $n{=}25$ clips) vs.\ quasi-static
-(standing~+~sitting, $n{=}37$ clips) motion classes. Each cell is the
-standard deviation of the pooled, per-clip-demeaned residual (absolute
-units, clip baseline removed) with a 95\% bootstrap CI resampled at the
-clip level (10,000 resamples). The final column retains historical pooled-row Levene tests; correlated body rows prevent class-level interpretation of those values.}\label{tab:physical_analysis}
-\begin{tabularx}{\linewidth}{@{}Yrrr@{}}
-\toprule
-Metric & Dynamic std [95\% CI] & Quasi-static std [95\% CI] & Pooled-row $p$ \\
-\midrule
-Normalized torque (frac.\ effort limit) & $1.93$ [$1.71$, $2.21$] $\times10^{-4}$ & $2.06$ [$1.86$, $2.30$] $\times10^{-4}$ & $0.10$ \\
-Mass-normalized power & 0.292 [0.220, 0.370] & 0.259 [0.210, 0.323] & $1.1\times10^{-7}$ \\
-Normalized jerk & 350.2 [283.3, 416.9] & 403.2 [303.3, 513.5] & 0.33 \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-The descriptive spreads differ modestly and their separate confidence
-intervals overlap. Bootstrap intervals resample clips, while the recorded
-Levene tests pool correlated body rows. Neither pooled-row significance nor
-overlap of separate intervals settles the class-level contrast. The present
-analysis is descriptive, not a definitive positive or negative interaction result.
-
-\pending{Estimate the dynamic-minus-quasi-static spread contrast using
-clip-level resampling or a clip-level permutation test. Report its interval
-and effect size, and check units, class membership, and sensitivity to small
-classes before drawing an interaction conclusion.}
+\subsubsection{Explicit morphology conditioning: a missing causal control}
+Every architecture above receives morphology inputs in both actor and critic.
+The adaLN-Zero variant changes their use in the actor; it does not test their
+removal. Successful transfer therefore establishes a capability of the whole
+system, not that explicit coefficients cause it. Body-dependent state and
+reference targets also expose morphology.
+\pending{Train a matched controller without explicit morphology inputs using
+the same references, body panel, budget, and seeds. Evaluate both policies on
+fixed trained- and unseen-body panels. Inference-time masking or shuffling
+can supplement this test but introduces distribution shift and cannot replace
+it. A common-reference policy comparison is also needed to isolate the
+learning effect of refinement.}
 
 \section{Discussion and Limitations}\label{sec:discussion}
-The central result is a shared controller over a large paired motion/body
-corpus. The held-out-motion evaluation shows strong tracking on selected
-trained bodies. Unseen-body replay reveals a less uniform outcome: 91.64\%
-overall success, with most bodies transferring well and four exhibiting
-severe tracking errors. Both results characterize the system. Excluding
-those bodies would change the population rather than resolve its limitations.
+The three questions distinguish a capability from its coverage and mechanism.
+RQ1 establishes shared tracking of held-out motions on selected trained
+bodies and execution across all trained bodies on development clips. RQ2
+establishes high average transfer on both sides of the training coefficient
+boundary, while exposing bodies for which tracking largely fails. RQ3
+supports practical architecture and reference-processing choices, but not a
+causal explanation of transfer.
 
-\paragraph{Coverage and mechanism.}
-One body per held-out clip does not measure all-body consistency. Complete
-150-by-128 replay concerns training clips; the unseen-body panel contains
-only 92 held-out identities. Original/mirrored variants stay together, but
-splits are not demonstrated to be subject- or recording-disjoint.
-Morphology-input interventions or a matched policy without those inputs are
-needed to isolate their benefit: state and references also carry shape
-information. Transfer inside $[-3,3]^{10}$ does not establish extrapolation
-to arbitrary bodies or different skeletal topologies.
+\paragraph{Average transfer and individual robustness.}
+Similar inside/outside averages do not make body extrapolation uniformly
+reliable. Tier success is non-monotonic, and poor tracking occurs both beyond
+and within the training mass/height ranges. These simulated properties
+describe the tested assets; their associations do not identify failure causes.
+The later checkpoint recovers some bodies and substantially harms others.
+Its outside success gain accompanies a slight increase in mean position
+error, so threshold success alone would overstate the improvement.
 
-\paragraph{Design trade-offs.}
-Repeated runs support slot/type attention as a compromise, not a universal
-winner. Historical jerk ordering does not persist across seeds. Refinement
-reduces sliding and penetration while raising position jerk; comparisons
-against different targets establish neither causal learning benefit nor
-absence of cost. The physical analysis awaits a clip-level contrast before
-an interaction conclusion is warranted.
+\paragraph{Coverage and inference.}
+The unseen-body headline uses known motion identities to isolate body
+transfer. The separate 23 validation/test clips cannot provide an untouched
+motion test for the full-data checkpoint, which trained on them. The
+1,048-clip independent test uses one trained body per clip; a fixed
+held-out-motion panel crossed with all 128 trained bodies remains missing.
+Original/mirrored variants stay together, but the splits are not demonstrated
+to be subject- or recording-disjoint. Clip-bootstrap intervals hold the body
+panel fixed and do not quantify uncertainty over shape space. One full-scale
+training run and one candidate checkpoint do not measure training-seed or
+ordinary checkpoint variation. Identical-checkpoint reruns measure simulator
+variability, with nearly cancelling pooled changes but appreciable pair flips.
 
-\paragraph{Body-specific failures.}
-Opposite-template contrasts and static mass measurements identify candidate
-mechanisms, not verified defects. The fourth severe case lacks the same mass
-pattern. Unseen reference processing also differs from training. Dynamic
-traces, rendered comparisons, and controlled interventions are needed to
-separate reference, actuation, and controller effects.
+\paragraph{Mechanism and design.}
+State and reference observations already carry shape information. A matched
+policy without explicit morphology inputs is needed to attribute transfer to
+those inputs. The architecture comparison keeps them in every model and has
+unequal capacities. Refinement reduces contact artifacts with small pose
+changes but raises target jerk; policies evaluated against different targets
+do not isolate its learning benefit. The exploratory physical analysis in
+Appendix~\ref{sec:physics} remains descriptive pending a clip-level contrast.
 
-\paragraph{Physical and resource scope.}
+\paragraph{Failure diagnosis and scope.}
+The unseen-body runs detect error-threshold failures, and all failed rows have zero termination flags. Those flags alone do not
+prove absence of falls; their interpretation depends on the replay
+configuration. Synchronized rollouts, contact/root trajectories, and reference-quality
+audits are needed before assigning a failure mechanism. Extreme HUMOS
+references have been refined but lack per-asset feasibility validation.
 Estimated masses, collision proxies, and mass-scaled gains are modeling
-choices. Clearance correction is not dynamics optimization; success and
-jerk do not certify biomechanical realism. The flat-ground task excludes
-objects and partners. Caption-derived failure families are descriptions,
-not causal diagnoses. The corpus is derived: variants are combinations of
-clips and bodies, not independent captures. Caption alignment and
-redistribution permissions require auditing before a benchmark-release claim.
+choices; tracking success and jerk do not certify biomechanical realism.
+The short, reference-initialized flat-ground protocol excludes objects,
+partners, long-horizon recovery, skeletal-topology changes, and real robots.
 
-\paragraph{Pending checkpoint comparison.}
-The full-data polish checkpoint additionally trained on all original motion
-splits. Replaying the same unseen pairs with a trained-body control can test
-whether further training changes transfer. It cannot replace the original
-held-out-motion test or separate training-duration and motion-coverage effects.
-No result from that checkpoint is assumed here.
+The corpus is derived: clip/body variants are not independent captures.
+Caption alignment, immutable generation checksums, and redistribution
+permissions require auditing before a benchmark-release claim. A matched
+external tracker would strengthen comparative conclusions, but the published
+capability table alone cannot establish a performance advantage.
 
 \section{Conclusion}\label{sec:conclusion}
-We construct a paired multi-morphology corpus and train one physics-based
-controller while preserving correspondence between source clips, generated
-references, and simulation assets. The system integrates shape-conditioned
-generation, reference refinement, temporal slot/type attention, and streamed
-training across 128 body configurations.
-
-The original checkpoint achieves 99.14\% success on 1,048 independent test
-clips with one selected trained body each. A separate 32-body replay achieves
-91.64\% overall success, with strong transfer on 28 bodies and severe errors
-on four unresolved cases. This establishes substantial shared tracking and
-transfer within the sampled range while exposing non-uniform robustness.
-Repeated-seed comparisons and paired reference audits clarify the design
-trade-offs. Fixed all-body held-out coverage, causal conditioning controls,
-and resolution of body-specific failures are the next steps toward stronger
-generalization claims.
+We study shared physics-based imitation through paired morphology-specific
+references and assets, a temporal controller, and explicit separation of
+motion and body exposure. For RQ1, one policy trained across 128 bodies
+achieves 99.14\% success on held-out motions with one selected trained body
+per clip. For RQ2, it achieves 97.28\% inside-range and 97.15\% outside-range
+unseen-body success, but individual bodies can fail on most clips and a later
+checkpoint introduces both recoveries and regressions. For RQ3, repeated
+architecture comparisons and paired reference audits identify tracking,
+smoothness, and contact-quality trade-offs rather than a dominant design.
+The evidence supports strong average shared tracking and transfer within
+this protocol. All-body held-out-motion coverage, matched conditioning and
+external controls, and dynamic diagnosis of severe failures remain necessary
+for stronger claims about robustness and mechanism.
 
 
 \appendix
@@ -1465,12 +1536,26 @@ The principal implementation entry points are:
 \end{itemize}
 
 \subsection{Unseen-body and repeated-seed evidence}
-The original unseen-body replay uses
-\path{tools/analyze_unseen_morphology_generalization.py}, the
-\path{smpl_mor_interp/assets.yaml} asset manifest, and
-\path{data_cache/unseen_morphology_merged_0.pt}. Retained raw and joined
-CSV records define the 1,024-by-32 evaluation panel. The main population
-summaries include every pair and both successful and failed bodies.
+The sole unseen-body study is the inside/outside replay of 9 October 2026.
+Its source report is \path{r2:proto-data/unseen_shapes_v2/eval/REPORT.md};
+a local read-only snapshot is retained under
+\path{paper-draft/evidence/unseen_shapes_v2/}, including both 128-row
+per-shape CSVs, comparison summaries, checkpoint identities, and rerun checks.
+The evaluator is \path{tools/analyze_unseen_morphology_generalization.py};
+paired analysis uses \path{tools/compare_checkpoints_unseen_morphology.py}.
+The report records code revision \texttt{75324d9} at analysis time.
+
+Frozen checkpoint SHA-256 values are:
+\begin{quote}\footnotesize\ttfamily
+refined (epoch 28,170):\\
+\detokenize{4b83f20c93bf95fab389fc8935685ef8a2c7e46583f765e8c802421edb4479cb}\\
+fulldata (epoch 34,000):\\
+\detokenize{7b57de8ec047c390c2881f8a630d7196a09da6dd08bfbae743f36d6542cd2192}
+\end{quote}
+Each checkpoint has its own frozen resolved inference configuration.
+All per-pair outputs and logs remain on R2; the local small-artifact snapshot
+is not a copy of the complete rollout records. The 233/23 clip partition,
+body manifests, and physical-property groups are defined in the source report.
 
 Seed-1/2 architecture records are in the corresponding
 \path{results/hhi_150_evalfix_A_seed1} through
@@ -1478,11 +1563,6 @@ Seed-1/2 architecture records are in the corresponding
 must be joined by evaluation epoch before forming last-eight summaries.
 Across-seed standard deviation is computed from three run summaries, rather
 than from all scheduled evaluations pooled as independent observations.
-
-The full-data checkpoint is a separate experiment whose resolved motion
-manifest is \path{splits/hhi_stage2_v1/full_manifest.jsonl}. Its pending
-comparison must record checkpoint/configuration hashes and preserve the
-same references, assets, horizons, and threshold as the original replay.
 
 For each final experiment, retain the resolved configuration, code revision,
 model/checkpoint checksum, body coefficient and asset manifests, split hashes,
@@ -1499,7 +1579,8 @@ release of the retained per-motion evaluation records for the validation and
 test splits.}
 
 \section{Development and Training Provenance}\label{app:history}
-The main results use the original epoch-28,170 checkpoint. The monitoring
+RQ1 uses the original epoch-28,170 checkpoint; RQ2 also compares the frozen
+epoch-34,000 candidate. The monitoring
 snapshot below is a separate measurement at epoch 28,159. Historical
 single-seed comparisons and compute records are retained here to distinguish
 provenance from final performance.
@@ -1698,6 +1779,349 @@ Segment-level cost accounting remains incomplete. Approximate full-scale
 GPU-hours cannot establish superior compute efficiency against the smaller
 matched development runs.
 
+\section{Exploratory Physical Analysis}\label{sec:physics}
+As a secondary question, we examine whether cross-body variability in
+control demand differs between dynamic and quasi-static motions. The original
+checkpoint is replayed over 150 development clips and all 128 trained bodies
+(19,200 pairs, zero recorded failed episodes). Torque, power, and jerk describe
+the configured simulation/controller, not calibrated human biomechanics.
+
+Inherited captions assign classes by keyword matching. Running, jumping,
+and kicking form a dynamic group (25 clips); standing and sitting form a
+quasi-static group (37 clips). Other clips are outside this pooled comparison.
+We subtract each clip's across-body mean before summarizing spread. A
+coefficient of variation is sensitive to small baseline demand, so absolute
+residuals are more interpretable for this question. This sensitivity alone
+does not prove that a relative difference is merely simulation noise.
+\begin{table}[t]
+\centering
+\small
+\caption{Cross-shape variability of control demand, dynamic
+(running~+~jumping~+~kicking, $n{=}25$ clips) vs.\ quasi-static
+(standing~+~sitting, $n{=}37$ clips) motion classes. Each cell is the
+standard deviation of the pooled, per-clip-demeaned residual (absolute
+units, clip baseline removed) with a 95\% bootstrap CI resampled at the
+clip level (10,000 resamples). The final column retains historical pooled-row Levene tests; correlated body rows prevent class-level interpretation of those values.}\label{tab:physical_analysis}
+\begin{tabularx}{\linewidth}{@{}Yrrr@{}}
+\toprule
+Metric & Dynamic std [95\% CI] & Quasi-static std [95\% CI] & Pooled-row $p$ \\
+\midrule
+Normalized torque (frac.\ effort limit) & $1.93$ [$1.71$, $2.21$] $\times10^{-4}$ & $2.06$ [$1.86$, $2.30$] $\times10^{-4}$ & $0.10$ \\
+Mass-normalized power & 0.292 [0.220, 0.370] & 0.259 [0.210, 0.323] & $1.1\times10^{-7}$ \\
+Normalized jerk & 350.2 [283.3, 416.9] & 403.2 [303.3, 513.5] & 0.33 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The descriptive spreads differ modestly and their separate confidence
+intervals overlap. Bootstrap intervals resample clips, while the recorded
+Levene tests pool correlated body rows. Neither pooled-row significance nor
+overlap of separate intervals settles the class-level contrast. The present
+analysis is descriptive, not a definitive positive or negative interaction result.
+
+\pending{Estimate the dynamic-minus-quasi-static spread contrast using
+clip-level resampling or a clip-level permutation test. Report its interval
+and effect size, and check units, class membership, and sensitivity to small
+classes before drawing an interaction conclusion.}
+
+\section{Complete Unseen-Body Results}\label{app:unseen_tables}
+These tables contain every body from the new inside/outside study on the
+233 training-split clips. Success percentages and errors are generated from
+the retained per-shape CSVs; input fractions have four-decimal precision.
+Errors are per-pair time-averaged mean body-position errors including failures.
+Bodies share beta keys across male/female templates; rows are not independent
+training replicates. Full coefficient distances and physical properties are
+retained in the accompanying CSVs.
+
+\subsection{Inside panel}
+\begingroup\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{lrrrrrrr}
+\caption{Inside unseen bodies: mass in kg, height in m, success in \%,
+position error in m. R = refined; F = full-data.}\label{tab:all_inside}\\
+\toprule
+Asset & Tier & Mass & Height & R success & F success & R error & F error \\
+\midrule\endfirsthead
+\toprule
+Asset & Tier & Mass & Height & R success & F success & R error & F error \\
+\midrule\endhead
+\midrule\multicolumn{8}{r}{Continued on next page}\\\endfoot
+\bottomrule\endlastfoot
+
+\texttt{female\_0012b56d} & --- & 54.3 & 1.21 & 99.57 & 99.57 & 0.0844 & 0.0820 \\
+\texttt{female\_004f9229} & --- & 67.8 & 1.25 & 100.00 & 100.00 & 0.0711 & 0.0775 \\
+\texttt{female\_03b17a5c} & --- & 61.3 & 1.12 & 100.00 & 100.00 & 0.0734 & 0.0790 \\
+\texttt{female\_0cdfe35c} & --- & 74.1 & 1.37 & 100.00 & 99.57 & 0.0732 & 0.0696 \\
+\texttt{female\_0df54b49} & --- & 36.9 & 1.33 & 87.55 & 84.98 & 0.1513 & 0.2053 \\
+\texttt{female\_15ab6d4d} & --- & 73.8 & 1.17 & 100.00 & 100.00 & 0.1093 & 0.1103 \\
+\texttt{female\_16407809} & --- & 55.7 & 1.49 & 100.00 & 99.14 & 0.0676 & 0.0702 \\
+\texttt{female\_18ba29ff} & --- & 34.4 & 1.35 & 99.57 & 100.00 & 0.0697 & 0.0682 \\
+\texttt{female\_1a6e1d07} & --- & 72.5 & 1.20 & 99.57 & 99.57 & 0.0996 & 0.1011 \\
+\texttt{female\_1c7a626a} & --- & 47.3 & 1.24 & 85.41 & 89.27 & 0.1510 & 0.1452 \\
+\texttt{female\_1e156a55} & --- & 53.1 & 1.22 & 99.57 & 99.14 & 0.0737 & 0.0709 \\
+\texttt{female\_1fe45357} & --- & 43.6 & 1.21 & 98.28 & 99.57 & 0.1011 & 0.0896 \\
+\texttt{female\_24099a2a} & --- & 51.7 & 1.26 & 100.00 & 100.00 & 0.0620 & 0.0637 \\
+\texttt{female\_2ebacdbc} & --- & 79.9 & 1.39 & 100.00 & 100.00 & 0.0676 & 0.0663 \\
+\texttt{female\_2ef69857} & --- & 52.1 & 1.31 & 99.57 & 99.57 & 0.0755 & 0.0683 \\
+\texttt{female\_2f5af13e} & --- & 44.1 & 1.23 & 100.00 & 100.00 & 0.0597 & 0.0581 \\
+\texttt{female\_31c52305} & --- & 30.3 & 1.24 & 100.00 & 100.00 & 0.0743 & 0.0713 \\
+\texttt{female\_33c4b70d} & --- & 36.8 & 1.21 & 100.00 & 100.00 & 0.0633 & 0.0672 \\
+\texttt{female\_3c31fbf0} & --- & 136.4 & 1.45 & 100.00 & 100.00 & 0.0871 & 0.0881 \\
+\texttt{female\_434ee660} & --- & 99.5 & 1.34 & 100.00 & 99.57 & 0.1381 & 0.1339 \\
+\texttt{female\_45b559cc} & --- & 32.9 & 1.16 & 100.00 & 100.00 & 0.0750 & 0.0773 \\
+\texttt{female\_4ff946fb} & --- & 51.9 & 1.41 & 99.57 & 99.14 & 0.0702 & 0.0770 \\
+\texttt{female\_5175aa4d} & --- & 86.0 & 1.23 & 99.57 & 100.00 & 0.0834 & 0.0817 \\
+\texttt{female\_56d0764a} & --- & 90.3 & 1.28 & 100.00 & 100.00 & 0.0800 & 0.0855 \\
+\texttt{female\_591e5402} & --- & 71.0 & 1.53 & 100.00 & 99.57 & 0.0746 & 0.0680 \\
+\texttt{female\_5d08dfec} & --- & 59.5 & 1.36 & 87.98 & 86.27 & 0.1449 & 0.1660 \\
+\texttt{female\_5e15544f} & --- & 37.5 & 1.29 & 100.00 & 99.57 & 0.0673 & 0.0687 \\
+\texttt{female\_5ff7533b} & --- & 35.8 & 1.24 & 99.57 & 100.00 & 0.0637 & 0.0631 \\
+\texttt{female\_5ff8516d} & --- & 88.8 & 1.31 & 100.00 & 100.00 & 0.0769 & 0.0853 \\
+\texttt{female\_669a0fb3} & --- & 57.4 & 1.21 & 99.57 & 99.57 & 0.0740 & 0.0770 \\
+\texttt{female\_672c8c6d} & --- & 56.6 & 1.34 & 100.00 & 100.00 & 0.0657 & 0.0634 \\
+\texttt{female\_6c43e677} & --- & 34.1 & 1.23 & 100.00 & 100.00 & 0.0628 & 0.0643 \\
+\texttt{female\_6d81a8f6} & --- & 95.4 & 1.50 & 99.57 & 99.14 & 0.0882 & 0.0936 \\
+\texttt{female\_70844ea8} & --- & 64.3 & 1.22 & 100.00 & 99.57 & 0.0785 & 0.0807 \\
+\texttt{female\_762ebd03} & --- & 92.7 & 1.39 & 100.00 & 100.00 & 0.0768 & 0.0806 \\
+\texttt{female\_790287d8} & --- & 102.9 & 1.32 & 99.57 & 100.00 & 0.0874 & 0.0903 \\
+\texttt{female\_826291a7} & --- & 63.2 & 1.10 & 100.00 & 100.00 & 0.0709 & 0.0796 \\
+\texttt{female\_8cd58f76} & --- & 30.5 & 1.30 & 100.00 & 99.14 & 0.1017 & 0.1054 \\
+\texttt{female\_8e871d31} & --- & 67.8 & 1.47 & 99.14 & 100.00 & 0.0726 & 0.0698 \\
+\texttt{female\_98cc6e5a} & --- & 39.7 & 1.28 & 100.00 & 100.00 & 0.0650 & 0.0651 \\
+\texttt{female\_99c4b6d5} & --- & 57.5 & 1.23 & 99.57 & 99.57 & 0.0912 & 0.0864 \\
+\texttt{female\_9ae68e9d} & --- & 78.8 & 1.28 & 100.00 & 100.00 & 0.0724 & 0.0791 \\
+\texttt{female\_9d5ef2c8} & --- & 68.5 & 1.35 & 99.57 & 99.14 & 0.0684 & 0.0639 \\
+\texttt{female\_a32ceac3} & --- & 139.3 & 1.45 & 100.00 & 100.00 & 0.0879 & 0.0860 \\
+\texttt{female\_bbc77826} & --- & 70.8 & 1.31 & 100.00 & 99.57 & 0.0674 & 0.0734 \\
+\texttt{female\_bd1f406b} & --- & 64.2 & 1.45 & 100.00 & 99.57 & 0.0711 & 0.0691 \\
+\texttt{female\_cfc560dc} & --- & 68.8 & 1.13 & 89.27 & 98.28 & 0.1559 & 0.1114 \\
+\texttt{female\_cfcf0261} & --- & 66.4 & 1.49 & 100.00 & 100.00 & 0.0698 & 0.0698 \\
+\texttt{female\_d2e840d7} & --- & 57.2 & 1.27 & 38.20 & 43.35 & 0.5665 & 0.6623 \\
+\texttt{female\_d6e4c929} & --- & 96.0 & 1.35 & 100.00 & 100.00 & 0.0826 & 0.0933 \\
+\texttt{female\_dba89a6b} & --- & 63.2 & 1.54 & 99.57 & 100.00 & 0.0728 & 0.0675 \\
+\texttt{female\_dbdef8ed} & --- & 79.7 & 1.41 & 100.00 & 99.14 & 0.0727 & 0.0824 \\
+\texttt{female\_dd2cbc2b} & --- & 77.7 & 1.34 & 99.57 & 99.57 & 0.0740 & 0.0813 \\
+\texttt{female\_dfabb96c} & --- & 60.3 & 1.30 & 100.00 & 100.00 & 0.0691 & 0.0709 \\
+\texttt{female\_dff75a62} & --- & 104.1 & 1.46 & 99.57 & 99.14 & 0.0887 & 0.0947 \\
+\texttt{female\_e0f2d3b0} & --- & 46.6 & 1.40 & 100.00 & 100.00 & 0.0680 & 0.0655 \\
+\texttt{female\_e32ea98f} & --- & 27.7 & 1.26 & 100.00 & 100.00 & 0.0622 & 0.0644 \\
+\texttt{female\_e7bc8c92} & --- & 79.5 & 1.32 & 92.27 & 78.97 & 0.1507 & 0.2894 \\
+\texttt{female\_ec3bb7f8} & --- & 40.1 & 1.43 & 99.57 & 99.14 & 0.0679 & 0.0691 \\
+\texttt{female\_efac05ec} & --- & 97.5 & 1.49 & 100.00 & 100.00 & 0.0713 & 0.0787 \\
+\texttt{female\_f523cce1} & --- & 47.3 & 1.34 & 100.00 & 99.57 & 0.1633 & 0.1723 \\
+\texttt{female\_fa7276c6} & --- & 112.0 & 1.43 & 100.00 & 99.57 & 0.0802 & 0.0901 \\
+\texttt{female\_fd468447} & --- & 60.6 & 1.29 & 99.57 & 98.28 & 0.0827 & 0.0866 \\
+\texttt{female\_feab73b2} & --- & 45.0 & 1.36 & 98.71 & 97.42 & 0.0911 & 0.0836 \\
+\texttt{male\_0012b56d} & --- & 109.9 & 1.51 & 99.57 & 99.57 & 0.0736 & 0.0799 \\
+\texttt{male\_004f9229} & --- & 104.2 & 1.47 & 100.00 & 100.00 & 0.0752 & 0.0759 \\
+\texttt{male\_03b17a5c} & --- & 141.1 & 1.61 & 97.00 & 98.71 & 0.0992 & 0.0955 \\
+\texttt{male\_0cdfe35c} & --- & 88.2 & 1.48 & 100.00 & 99.57 & 0.0710 & 0.0716 \\
+\texttt{male\_0df54b49} & --- & 58.2 & 1.54 & 100.00 & 100.00 & 0.0733 & 0.0734 \\
+\texttt{male\_15ab6d4d} & --- & 131.9 & 1.53 & 100.00 & 100.00 & 0.0759 & 0.0768 \\
+\texttt{male\_16407809} & --- & 40.8 & 1.40 & 100.00 & 100.00 & 0.0653 & 0.0665 \\
+\texttt{male\_18ba29ff} & --- & 61.8 & 1.55 & 100.00 & 100.00 & 0.0718 & 0.0694 \\
+\texttt{male\_1a6e1d07} & --- & 139.8 & 1.55 & 99.57 & 99.57 & 0.0882 & 0.0873 \\
+\texttt{male\_1c7a626a} & --- & 94.3 & 1.55 & 99.57 & 99.14 & 0.0834 & 0.0834 \\
+\texttt{male\_1e156a55} & --- & 108.5 & 1.60 & 99.14 & 98.71 & 0.0817 & 0.0806 \\
+\texttt{male\_1fe45357} & --- & 102.7 & 1.56 & 99.57 & 98.71 & 0.0800 & 0.0801 \\
+\texttt{male\_24099a2a} & --- & 95.9 & 1.53 & 100.00 & 100.00 & 0.0715 & 0.0714 \\
+\texttt{male\_2ebacdbc} & --- & 75.1 & 1.43 & 100.00 & 99.57 & 0.0745 & 0.0717 \\
+\texttt{male\_2ef69857} & --- & 76.6 & 1.52 & 99.57 & 99.14 & 0.0802 & 0.0754 \\
+\texttt{male\_2f5af13e} & --- & 100.4 & 1.65 & 100.00 & 100.00 & 0.0899 & 0.0860 \\
+\texttt{male\_31c52305} & --- & 79.3 & 1.64 & 100.00 & 99.14 & 0.0844 & 0.0827 \\
+\texttt{male\_33c4b70d} & --- & 84.9 & 1.65 & 100.00 & 99.57 & 0.0721 & 0.0715 \\
+\texttt{male\_3c31fbf0} & --- & 99.0 & 1.29 & 96.14 & 98.28 & 0.1060 & 0.0978 \\
+\texttt{male\_434ee660} & --- & 96.4 & 1.39 & 100.00 & 99.57 & 0.0758 & 0.0794 \\
+\texttt{male\_45b559cc} & --- & 103.4 & 1.67 & 100.00 & 99.14 & 0.0786 & 0.0815 \\
+\texttt{male\_4ff946fb} & --- & 50.9 & 1.40 & 100.00 & 99.14 & 0.0713 & 0.0721 \\
+\texttt{male\_5175aa4d} & --- & 137.0 & 1.53 & 99.57 & 99.57 & 0.0885 & 0.0840 \\
+\texttt{male\_56d0764a} & --- & 112.5 & 1.48 & 100.00 & 99.57 & 0.0796 & 0.0808 \\
+\texttt{male\_591e5402} & --- & 44.3 & 1.35 & 100.00 & 99.14 & 0.0722 & 0.0764 \\
+\texttt{male\_5d08dfec} & --- & 72.2 & 1.44 & 99.57 & 98.71 & 0.0813 & 0.0865 \\
+\texttt{male\_5e15544f} & --- & 86.0 & 1.60 & 100.00 & 99.57 & 0.0804 & 0.0824 \\
+\texttt{male\_5ff7533b} & --- & 84.5 & 1.59 & 100.00 & 99.57 & 0.0778 & 0.0755 \\
+\texttt{male\_5ff8516d} & --- & 100.3 & 1.40 & 99.57 & 99.14 & 0.0754 & 0.0806 \\
+\texttt{male\_669a0fb3} & --- & 127.2 & 1.64 & 3.00 & 8.58 & 0.9323 & 0.9842 \\
+\texttt{male\_672c8c6d} & --- & 78.3 & 1.52 & 100.00 & 99.57 & 0.0820 & 0.0745 \\
+\texttt{male\_6c43e677} & --- & 77.9 & 1.57 & 97.85 & 97.42 & 0.0919 & 0.0913 \\
+\texttt{male\_6d81a8f6} & --- & 56.3 & 1.29 & 97.85 & 84.98 & 0.1050 & 0.1339 \\
+\texttt{male\_70844ea8} & --- & 116.2 & 1.59 & 99.57 & 99.14 & 0.0800 & 0.0865 \\
+\texttt{male\_762ebd03} & --- & 87.4 & 1.39 & 100.00 & 100.00 & 0.0744 & 0.0744 \\
+\texttt{male\_790287d8} & --- & 89.9 & 1.36 & 92.27 & 87.55 & 0.1095 & 0.1402 \\
+\texttt{male\_826291a7} & --- & 154.5 & 1.58 & 91.42 & 86.27 & 0.1718 & 0.2029 \\
+\texttt{male\_8cd58f76} & --- & 72.4 & 1.61 & 99.57 & 99.57 & 0.0770 & 0.0737 \\
+\texttt{male\_8e871d31} & --- & 43.7 & 1.35 & 99.57 & 100.00 & 0.0729 & 0.0776 \\
+\texttt{male\_98cc6e5a} & --- & 86.1 & 1.63 & 99.14 & 98.28 & 0.1074 & 0.1137 \\
+\texttt{male\_99c4b6d5} & --- & 99.8 & 1.54 & 99.57 & 99.14 & 0.0741 & 0.0735 \\
+\texttt{male\_9ae68e9d} & --- & 97.3 & 1.42 & 100.00 & 99.57 & 0.0729 & 0.0741 \\
+\texttt{male\_9d5ef2c8} & --- & 84.3 & 1.50 & 99.57 & 99.14 & 0.0754 & 0.0736 \\
+\texttt{male\_a32ceac3} & --- & 88.0 & 1.31 & 98.28 & 97.00 & 0.1480 & 0.1455 \\
+\texttt{male\_bbc77826} & --- & 110.2 & 1.52 & 99.57 & 99.57 & 0.0793 & 0.0809 \\
+\texttt{male\_bd1f406b} & --- & 54.7 & 1.34 & 100.00 & 99.14 & 0.0732 & 0.0715 \\
+\texttt{male\_cfc560dc} & --- & 133.6 & 1.58 & 100.00 & 100.00 & 0.0803 & 0.0802 \\
+\texttt{male\_cfcf0261} & --- & 48.0 & 1.30 & 100.00 & 100.00 & 0.0666 & 0.0727 \\
+\texttt{male\_d2e840d7} & --- & 88.3 & 1.50 & 99.14 & 99.14 & 0.0802 & 0.0761 \\
+\texttt{male\_d6e4c929} & --- & 98.9 & 1.45 & 100.00 & 100.00 & 0.0805 & 0.0812 \\
+\texttt{male\_dba89a6b} & --- & 40.9 & 1.36 & 99.57 & 100.00 & 0.0742 & 0.0712 \\
+\texttt{male\_dbdef8ed} & --- & 69.6 & 1.36 & 100.00 & 99.14 & 0.0923 & 0.0902 \\
+\texttt{male\_dd2cbc2b} & --- & 99.1 & 1.42 & 100.00 & 99.57 & 0.0764 & 0.0767 \\
+\texttt{male\_dfabb96c} & --- & 97.4 & 1.52 & 100.00 & 100.00 & 0.0747 & 0.0775 \\
+\texttt{male\_dff75a62} & --- & 69.1 & 1.29 & 100.00 & 99.14 & 0.0794 & 0.0730 \\
+\texttt{male\_e0f2d3b0} & --- & 50.4 & 1.44 & 100.00 & 100.00 & 0.0705 & 0.0713 \\
+\texttt{male\_e32ea98f} & --- & 80.4 & 1.67 & 100.00 & 100.00 & 0.0674 & 0.0645 \\
+\texttt{male\_e7bc8c92} & --- & 97.1 & 1.48 & 100.00 & 100.00 & 0.0770 & 0.0759 \\
+\texttt{male\_ec3bb7f8} & --- & 42.7 & 1.41 & 19.31 & 10.73 & 0.7352 & 0.9032 \\
+\texttt{male\_efac05ec} & --- & 70.8 & 1.33 & 100.00 & 100.00 & 0.0722 & 0.0725 \\
+\texttt{male\_f523cce1} & --- & 70.8 & 1.53 & 100.00 & 98.71 & 0.0830 & 0.0811 \\
+\texttt{male\_fa7276c6} & --- & 85.5 & 1.37 & 99.57 & 100.00 & 0.0739 & 0.0736 \\
+\texttt{male\_fd468447} & --- & 91.9 & 1.57 & 100.00 & 98.71 & 0.0803 & 0.0762 \\
+\texttt{male\_feab73b2} & --- & 68.9 & 1.54 & 99.57 & 99.57 & 0.0708 & 0.0693 \\
+\end{longtable}\endgroup
+\subsection{Outside panel}
+\begingroup\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{lrrrrrrr}
+\caption{Outside unseen bodies: mass in kg, height in m, success in \%,
+position error in m. R = refined; F = full-data.}\label{tab:all_outside}\\
+\toprule
+Asset & Tier & Mass & Height & R success & F success & R error & F error \\
+\midrule\endfirsthead
+\toprule
+Asset & Tier & Mass & Height & R success & F success & R error & F error \\
+\midrule\endhead
+\midrule\multicolumn{8}{r}{Continued on next page}\\\endfoot
+\bottomrule\endlastfoot
+
+\texttt{female\_04eeada2} & 3 & 139.2 & 1.33 & 100.00 & 99.57 & 0.0891 & 0.0980 \\
+\texttt{female\_0d9c1fcb} & 1 & 43.9 & 1.29 & 100.00 & 100.00 & 0.0599 & 0.0568 \\
+\texttt{female\_0dadc36f} & 2 & 48.3 & 1.33 & 100.00 & 100.00 & 0.0762 & 0.0626 \\
+\texttt{female\_100d2a25} & 2 & 122.8 & 1.35 & 100.00 & 100.00 & 0.1013 & 0.0980 \\
+\texttt{female\_1523ce94} & 1 & 95.7 & 1.24 & 100.00 & 99.57 & 0.1033 & 0.1161 \\
+\texttt{female\_15a56096} & 2 & 66.7 & 1.59 & 100.00 & 100.00 & 0.0685 & 0.0663 \\
+\texttt{female\_15f6b7c1} & 2 & 51.8 & 1.24 & 100.00 & 100.00 & 0.0662 & 0.0707 \\
+\texttt{female\_1b5f1e4c} & 1 & 115.8 & 1.29 & 67.81 & 82.40 & 0.3291 & 0.2335 \\
+\texttt{female\_1c099619} & 3 & 87.7 & 1.08 & 92.70 & 100.00 & 0.1457 & 0.0939 \\
+\texttt{female\_1d24c6b5} & 3 & 26.2 & 1.25 & 100.00 & 100.00 & 0.0689 & 0.0707 \\
+\texttt{female\_1f74efe3} & 0 & 81.8 & 1.47 & 100.00 & 99.57 & 0.0738 & 0.0714 \\
+\texttt{female\_1f926647} & 1 & 130.5 & 1.31 & 100.00 & 100.00 & 0.0900 & 0.0923 \\
+\texttt{female\_26b2c805} & 3 & 21.9 & 1.07 & 100.00 & 100.00 & 0.0594 & 0.0608 \\
+\texttt{female\_283d67c0} & 3 & 45.1 & 1.43 & 98.28 & 97.42 & 0.0920 & 0.0836 \\
+\texttt{female\_28bcbf4e} & 3 & 95.2 & 1.65 & 100.00 & 100.00 & 0.0813 & 0.0746 \\
+\texttt{female\_2af367c5} & 2 & 63.9 & 1.14 & 100.00 & 100.00 & 0.0669 & 0.0737 \\
+\texttt{female\_2bbeae15} & 2 & 71.2 & 1.46 & 100.00 & 99.14 & 0.0734 & 0.0768 \\
+\texttt{female\_2dbed010} & 1 & 133.8 & 1.54 & 100.00 & 100.00 & 0.0863 & 0.0909 \\
+\texttt{female\_33a58f09} & 2 & 36.1 & 1.43 & 99.57 & 99.57 & 0.0703 & 0.0730 \\
+\texttt{female\_33cc784f} & 0 & 86.6 & 1.29 & 75.54 & 91.42 & 0.2184 & 0.1899 \\
+\texttt{female\_393c49c9} & 1 & 63.2 & 1.62 & 98.28 & 100.00 & 0.0827 & 0.0761 \\
+\texttt{female\_3aa8b433} & 0 & 69.5 & 1.11 & 100.00 & 100.00 & 0.0743 & 0.0800 \\
+\texttt{female\_3e1d7add} & 3 & 56.9 & 1.34 & 100.00 & 100.00 & 0.0615 & 0.0625 \\
+\texttt{female\_400a9a92} & 0 & 75.6 & 1.32 & 100.00 & 100.00 & 0.0721 & 0.0799 \\
+\texttt{female\_419de3a0} & 2 & 31.2 & 1.30 & 100.00 & 100.00 & 0.0679 & 0.0673 \\
+\texttt{female\_42001c1b} & 1 & 68.7 & 1.46 & 100.00 & 99.57 & 0.0679 & 0.0705 \\
+\texttt{female\_430bdfbe} & 1 & 53.5 & 1.39 & 100.00 & 100.00 & 0.0638 & 0.0632 \\
+\texttt{female\_44a17e37} & 0 & 77.7 & 1.36 & 99.57 & 99.57 & 0.0668 & 0.0663 \\
+\texttt{female\_4adc1af1} & 2 & 70.8 & 1.11 & 93.56 & 98.71 & 0.1594 & 0.1523 \\
+\texttt{female\_4c9586b5} & 2 & 48.6 & 1.37 & 100.00 & 100.00 & 0.0639 & 0.0715 \\
+\texttt{female\_4ee058c0} & 1 & 28.1 & 1.14 & 100.00 & 99.57 & 0.0590 & 0.0662 \\
+\texttt{female\_532322ef} & 0 & 65.1 & 1.32 & 100.00 & 100.00 & 0.0675 & 0.0632 \\
+\texttt{female\_563ad060} & 0 & 58.1 & 1.39 & 99.57 & 99.57 & 0.0928 & 0.0900 \\
+\texttt{female\_66bd203d} & 1 & 49.8 & 1.22 & 100.00 & 100.00 & 0.0638 & 0.0560 \\
+\texttt{female\_6dd6a450} & 0 & 60.3 & 1.28 & 100.00 & 100.00 & 0.0642 & 0.0621 \\
+\texttt{female\_7d42cfbb} & 1 & 58.4 & 1.26 & 100.00 & 99.57 & 0.0796 & 0.0798 \\
+\texttt{female\_919422f8} & 3 & 116.0 & 1.51 & 99.57 & 100.00 & 0.0805 & 0.0884 \\
+\texttt{female\_98d4329d} & 2 & 159.0 & 1.48 & 29.61 & 94.85 & 0.3476 & 0.1905 \\
+\texttt{female\_9ff89f78} & 2 & 80.1 & 1.50 & 100.00 & 100.00 & 0.0681 & 0.0620 \\
+\texttt{female\_a7f6b877} & 2 & 50.7 & 1.28 & 100.00 & 100.00 & 0.0590 & 0.0563 \\
+\texttt{female\_a92d8548} & 3 & 57.3 & 1.48 & 99.57 & 100.00 & 0.0736 & 0.0683 \\
+\texttt{female\_ab860e44} & 0 & 52.7 & 1.19 & 100.00 & 100.00 & 0.0615 & 0.0634 \\
+\texttt{female\_ac835352} & 0 & 121.1 & 1.47 & 100.00 & 99.57 & 0.0900 & 0.0941 \\
+\texttt{female\_b366326b} & 1 & 61.4 & 1.55 & 100.00 & 100.00 & 0.0714 & 0.0706 \\
+\texttt{female\_b9940dc1} & 3 & 92.5 & 1.57 & 100.00 & 99.14 & 0.0887 & 0.0916 \\
+\texttt{female\_bd0ec1ce} & 1 & 56.4 & 1.48 & 63.95 & 52.79 & 0.3412 & 0.5180 \\
+\texttt{female\_c3af729f} & 3 & 66.8 & 1.33 & 100.00 & 99.57 & 0.1147 & 0.1085 \\
+\texttt{female\_c6865ef1} & 3 & 46.9 & 1.23 & 99.57 & 100.00 & 0.0680 & 0.0672 \\
+\texttt{female\_cb12afb9} & 0 & 119.6 & 1.48 & 99.57 & 100.00 & 0.1006 & 0.0923 \\
+\texttt{female\_ce6c5b43} & 3 & 31.6 & 1.30 & 100.00 & 100.00 & 0.0591 & 0.0644 \\
+\texttt{female\_d01709ba} & 3 & 63.5 & 1.42 & 98.71 & 100.00 & 0.1320 & 0.0866 \\
+\texttt{female\_d159eeee} & 0 & 71.4 & 1.38 & 100.00 & 100.00 & 0.0704 & 0.0684 \\
+\texttt{female\_d24a2ef4} & 2 & 36.8 & 1.20 & 100.00 & 99.57 & 0.0704 & 0.0673 \\
+\texttt{female\_dae673d8} & 0 & 75.6 & 1.21 & 100.00 & 100.00 & 0.0678 & 0.0743 \\
+\texttt{female\_daff329a} & 0 & 101.4 & 1.27 & 99.57 & 99.57 & 0.0861 & 0.0915 \\
+\texttt{female\_e3794a01} & 1 & 109.7 & 1.30 & 100.00 & 100.00 & 0.0867 & 0.1009 \\
+\texttt{female\_e4cdc1c2} & 2 & 52.2 & 1.52 & 100.00 & 100.00 & 0.0741 & 0.0670 \\
+\texttt{female\_e706da88} & 3 & 75.3 & 1.63 & 94.42 & 79.83 & 0.1108 & 0.2545 \\
+\texttt{female\_ed79b65a} & 1 & 37.3 & 1.35 & 100.00 & 100.00 & 0.0666 & 0.0660 \\
+\texttt{female\_edcf2449} & 2 & 181.4 & 1.51 & 94.85 & 58.37 & 0.2440 & 0.3871 \\
+\texttt{female\_f45cb9cf} & 0 & 146.9 & 1.47 & 99.14 & 100.00 & 0.1019 & 0.0957 \\
+\texttt{female\_f9bf3075} & 3 & 207.1 & 1.58 & 97.42 & 88.84 & 0.1269 & 0.1701 \\
+\texttt{female\_faaedd30} & 1 & 56.1 & 1.44 & 100.00 & 99.57 & 0.0915 & 0.0887 \\
+\texttt{female\_fec41668} & 0 & 83.1 & 1.50 & 100.00 & 100.00 & 0.0755 & 0.0785 \\
+\texttt{male\_04eeada2} & 3 & 140.6 & 1.45 & 100.00 & 100.00 & 0.0768 & 0.0752 \\
+\texttt{male\_0d9c1fcb} & 1 & 86.2 & 1.65 & 99.57 & 99.14 & 0.0744 & 0.0700 \\
+\texttt{male\_0dadc36f} & 2 & 73.9 & 1.48 & 99.57 & 100.00 & 0.0752 & 0.0689 \\
+\texttt{male\_100d2a25} & 2 & 111.3 & 1.31 & 100.00 & 100.00 & 0.0943 & 0.0805 \\
+\texttt{male\_1523ce94} & 1 & 113.0 & 1.40 & 100.00 & 100.00 & 0.0699 & 0.0757 \\
+\texttt{male\_15a56096} & 2 & 32.1 & 1.19 & 100.00 & 100.00 & 0.0645 & 0.0689 \\
+\texttt{male\_15f6b7c1} & 2 & 102.9 & 1.51 & 100.00 & 100.00 & 0.0816 & 0.0826 \\
+\texttt{male\_1b5f1e4c} & 1 & 116.0 & 1.39 & 100.00 & 99.57 & 0.1336 & 0.1155 \\
+\texttt{male\_1c099619} & 3 & 211.1 & 1.62 & 13.30 & 71.24 & 0.4388 & 0.2742 \\
+\texttt{male\_1d24c6b5} & 3 & 68.6 & 1.57 & 100.00 & 100.00 & 0.0784 & 0.0789 \\
+\texttt{male\_1f74efe3} & 0 & 56.0 & 1.32 & 100.00 & 100.00 & 0.0713 & 0.0720 \\
+\texttt{male\_1f926647} & 1 & 123.7 & 1.39 & 100.00 & 100.00 & 0.0760 & 0.0765 \\
+\texttt{male\_26b2c805} & 3 & 142.6 & 1.82 & 99.14 & 100.00 & 0.0761 & 0.0681 \\
+\texttt{male\_283d67c0} & 3 & 45.7 & 1.53 & 100.00 & 99.57 & 0.0703 & 0.0735 \\
+\texttt{male\_28bcbf4e} & 3 & 30.2 & 1.16 & 100.00 & 100.00 & 0.0708 & 0.0832 \\
+\texttt{male\_2af367c5} & 2 & 154.9 & 1.66 & 100.00 & 99.57 & 0.0911 & 0.1241 \\
+\texttt{male\_2bbeae15} & 2 & 43.5 & 1.29 & 100.00 & 99.57 & 0.0645 & 0.0630 \\
+\texttt{male\_2dbed010} & 1 & 58.6 & 1.23 & 100.00 & 100.00 & 0.0682 & 0.0702 \\
+\texttt{male\_33a58f09} & 2 & 40.7 & 1.46 & 100.00 & 100.00 & 0.0778 & 0.0839 \\
+\texttt{male\_33cc784f} & 0 & 103.8 & 1.46 & 100.00 & 99.57 & 0.0781 & 0.0823 \\
+\texttt{male\_393c49c9} & 1 & 26.5 & 1.25 & 99.57 & 100.00 & 0.1173 & 0.1500 \\
+\texttt{male\_3aa8b433} & 0 & 171.4 & 1.63 & 98.71 & 98.71 & 0.0988 & 0.0972 \\
+\texttt{male\_3e1d7add} & 3 & 78.7 & 1.49 & 100.00 & 99.57 & 0.0770 & 0.0745 \\
+\texttt{male\_400a9a92} & 0 & 99.8 & 1.51 & 100.00 & 99.57 & 0.0792 & 0.0786 \\
+\texttt{male\_419de3a0} & 2 & 64.2 & 1.62 & 99.57 & 99.57 & 0.0724 & 0.0750 \\
+\texttt{male\_42001c1b} & 1 & 48.1 & 1.33 & 100.00 & 99.57 & 0.0717 & 0.0690 \\
+\texttt{male\_430bdfbe} & 1 & 63.4 & 1.53 & 100.00 & 100.00 & 0.0628 & 0.0622 \\
+\texttt{male\_44a17e37} & 0 & 90.0 & 1.46 & 99.14 & 100.00 & 0.0774 & 0.0739 \\
+\texttt{male\_4adc1af1} & 2 & 181.8 & 1.64 & 99.14 & 97.42 & 0.0780 & 0.0990 \\
+\texttt{male\_4c9586b5} & 2 & 80.6 & 1.53 & 100.00 & 100.00 & 0.0632 & 0.0639 \\
+\texttt{male\_4ee058c0} & 1 & 111.6 & 1.71 & 100.00 & 100.00 & 0.0685 & 0.0664 \\
+\texttt{male\_532322ef} & 0 & 74.3 & 1.46 & 99.57 & 100.00 & 0.0810 & 0.0719 \\
+\texttt{male\_563ad060} & 0 & 58.4 & 1.43 & 100.00 & 99.57 & 0.0730 & 0.0722 \\
+\texttt{male\_66bd203d} & 1 & 102.8 & 1.65 & 99.57 & 99.57 & 0.0751 & 0.0762 \\
+\texttt{male\_6dd6a450} & 0 & 96.4 & 1.60 & 100.00 & 99.57 & 0.0842 & 0.0767 \\
+\texttt{male\_7d42cfbb} & 1 & 107.8 & 1.53 & 100.00 & 100.00 & 0.0735 & 0.0707 \\
+\texttt{male\_919422f8} & 3 & 50.9 & 1.22 & 100.00 & 100.00 & 0.0696 & 0.0676 \\
+\texttt{male\_98d4329d} & 2 & 79.6 & 1.15 & 90.99 & 94.85 & 0.1416 & 0.1010 \\
+\texttt{male\_9ff89f78} & 2 & 46.1 & 1.26 & 100.00 & 100.00 & 0.0724 & 0.0684 \\
+\texttt{male\_a7f6b877} & 2 & 94.3 & 1.62 & 65.67 & 40.77 & 0.3225 & 0.6687 \\
+\texttt{male\_a92d8548} & 3 & 50.7 & 1.46 & 99.14 & 100.00 & 0.0818 & 0.0960 \\
+\texttt{male\_ab860e44} & 0 & 108.4 & 1.59 & 100.00 & 99.14 & 0.0767 & 0.0757 \\
+\texttt{male\_ac835352} & 0 & 66.1 & 1.29 & 100.00 & 100.00 & 0.0714 & 0.0682 \\
+\texttt{male\_b366326b} & 1 & 45.2 & 1.35 & 100.00 & 100.00 & 0.0656 & 0.0695 \\
+\texttt{male\_b9940dc1} & 3 & 34.3 & 1.15 & 95.71 & 98.71 & 0.1332 & 0.0836 \\
+\texttt{male\_bd0ec1ce} & 1 & 42.3 & 1.36 & 100.00 & 100.00 & 0.0777 & 0.0823 \\
+\texttt{male\_c3af729f} & 3 & 69.7 & 1.41 & 100.00 & 99.57 & 0.0675 & 0.0701 \\
+\texttt{male\_c6865ef1} & 3 & 112.2 & 1.61 & 100.00 & 99.57 & 0.0774 & 0.0736 \\
+\texttt{male\_cb12afb9} & 0 & 72.3 & 1.33 & 100.00 & 100.00 & 0.0893 & 0.0819 \\
+\texttt{male\_ce6c5b43} & 3 & 83.6 & 1.63 & 100.00 & 100.00 & 0.0672 & 0.0683 \\
+\texttt{male\_d01709ba} & 3 & 61.7 & 1.38 & 100.00 & 99.14 & 0.0749 & 0.0697 \\
+\texttt{male\_d159eeee} & 0 & 78.5 & 1.48 & 100.00 & 100.00 & 0.0785 & 0.0767 \\
+\texttt{male\_d24a2ef4} & 2 & 80.9 & 1.55 & 96.14 & 94.85 & 0.1141 & 0.1125 \\
+\texttt{male\_dae673d8} & 0 & 142.2 & 1.61 & 99.14 & 100.00 & 0.0861 & 0.0847 \\
+\texttt{male\_daff329a} & 0 & 128.5 & 1.46 & 99.57 & 98.71 & 0.0970 & 0.0897 \\
+\texttt{male\_e3794a01} & 1 & 108.8 & 1.42 & 100.00 & 99.14 & 0.0802 & 0.0776 \\
+\texttt{male\_e4cdc1c2} & 2 & 41.3 & 1.39 & 100.00 & 100.00 & 0.0668 & 0.0727 \\
+\texttt{male\_e706da88} & 3 & 30.9 & 1.33 & 99.57 & 100.00 & 0.0955 & 0.0859 \\
+\texttt{male\_ed79b65a} & 1 & 59.3 & 1.60 & 99.57 & 100.00 & 0.0723 & 0.0713 \\
+\texttt{male\_edcf2449} & 2 & 76.3 & 1.14 & 81.97 & 66.95 & 0.2740 & 0.2804 \\
+\texttt{male\_f45cb9cf} & 0 & 83.6 & 1.28 & 100.00 & 98.71 & 0.0734 & 0.0898 \\
+\texttt{male\_f9bf3075} & 3 & 70.5 & 1.11 & 100.00 & 100.00 & 0.0641 & 0.0645 \\
+\texttt{male\_faaedd30} & 1 & 52.4 & 1.39 & 100.00 & 100.00 & 0.0709 & 0.0931 \\
+\texttt{male\_fec41668} & 0 & 51.8 & 1.24 & 100.00 & 100.00 & 0.0657 & 0.0680 \\
+\end{longtable}\endgroup
+
 % Bibliography is kept in LaTeX to preserve the source-only update scope.
 % Primary papers and official software repositories; checked during drafting.
 \begin{thebibliography}{99}
@@ -1738,9 +2162,15 @@ In \emph{ICCV}, 2023.
 \href{https://openaccess.thecvf.com/content/ICCV2023/html/Luo_Perpetual_Humanoid_Control_for_Real-time_Simulated_Avatars_ICCV_2023_paper.html}
 {CVF Open Access paper}.
 
+\bibitem{ase}
+Xue Bin Peng, Yunrong Guo, Lina Halper, Sergey Levine, and Sanja Fidler.
+ASE: Large-Scale Reusable Adversarial Skill Embeddings for Physically
+Simulated Characters. \emph{ACM Transactions on Graphics}, 41(4), Article 94, 2022.
+\url{https://arxiv.org/abs/2205.01906v2}.
+
 \bibitem{protomotions}
 The ProtoMotions contributors.
-ProtoMotions.
+ProtoMotions (official ProtoMotions 3 README, accessed 10 October 2026).
 Open-source software for physics-based character animation and humanoid control.
 \url{https://github.com/NVlabs/ProtoMotions}.
 

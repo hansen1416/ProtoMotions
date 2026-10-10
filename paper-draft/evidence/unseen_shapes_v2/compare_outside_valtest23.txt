@@ -1,0 +1,173 @@
+Runs: ['refined_run1', 'fulldata', 'refined_run2']
+Paired grid: 23 clips x 128 shapes (clips dropped for incomplete rows: 0)
+
+=== Group-level paired deltas vs baseline (percentage points for success) ===
+group                      run              shapes   base%    run%   d_succ            95% CI  fixed  broke   d_gt(m)  d_gr(rad)
+outside_tier0              fulldata             32  99.18   99.86    +0.68  [ +0.27, +1.22]      6      1   -0.0001    -0.0031  CANDIDATE
+outside_tier0              refined_run2         32  99.18   98.78    -0.41  [ -1.22, +0.41]      4      7   -0.0009    -0.0002  reference
+outside_tier1              fulldata             32  97.28   97.01    -0.27  [ -0.95, +0.54]      4      6   +0.0035    +0.0049  CANDIDATE
+outside_tier1              refined_run2         32  97.28   97.83    +0.54  [ -0.27, +1.36]      7      3   +0.0049    +0.0001  reference
+outside_tier2              fulldata             32  94.57   94.02    -0.54  [ -2.17, +1.09]     25     29   +0.0105    +0.0213  CANDIDATE
+outside_tier2              refined_run2         32  94.57   94.84    +0.27  [ -0.82, +1.36]      8      6   +0.0003    +0.0006  reference
+outside_tier3              fulldata             32  96.20   96.74    +0.54  [ -0.68, +1.63]     17     13   +0.0014    +0.0076  CANDIDATE
+outside_tier3              refined_run2         32  96.20   96.20    +0.00  [ -0.82, +0.82]      5      5   +0.0052    +0.0039  reference
+outside_ratio_out          fulldata             26  94.65   94.31    -0.33  [ -2.17, +1.67]     23     25   +0.0070    +0.0210  CANDIDATE
+outside_ratio_out          refined_run2         26  94.65   94.65    +0.00  [ -1.34, +1.34]      7      7   +0.0032    +0.0031  reference
+outside_mass_out           fulldata             10  81.74   89.57    +7.83  [ +3.91,+11.32]     31     13   -0.0024    +0.0322  CANDIDATE
+outside_mass_out           refined_run2         10  81.74   81.30    -0.43  [ -3.49, +3.04]      6      7   +0.0113    +0.0133  reference
+outside_height_out         fulldata              7  97.52   99.38    +1.86  [ -0.62, +4.35]      4      1   -0.0097    -0.0191  CANDIDATE
+outside_height_out         refined_run2          7  97.52   98.14    +0.62  [ -1.24, +2.48]      2      1   +0.0180    +0.0090  reference
+bottom8_by_baseline        fulldata              8  58.15   65.22    +7.07  [ -2.17,+15.76]     38     25   +0.0299    +0.0697  CANDIDATE
+bottom8_by_baseline        refined_run2          8  58.15   58.70    +0.54  [ -4.89, +5.43]     14     13   +0.0265    +0.0108  reference
+all                        fulldata            128  96.81   96.91    +0.10  [ -0.51, +0.71]     52     49   +0.0038    +0.0077  CANDIDATE
+all                        refined_run2        128  96.81   96.91    +0.10  [ -0.41, +0.65]     24     21   +0.0024    +0.0011  reference
+
+=== Candidate vs noise band (success delta, percentage points) ===
+outside_tier0              cand   +0.68  max|ref|   0.41  CI excludes 0: True   beyond noise band: True
+outside_tier1              cand   -0.27  max|ref|   0.54  CI excludes 0: False  beyond noise band: False
+outside_tier2              cand   -0.54  max|ref|   0.27  CI excludes 0: False  beyond noise band: False
+outside_tier3              cand   +0.54  max|ref|   0.00  CI excludes 0: False  beyond noise band: False
+outside_ratio_out          cand   -0.33  max|ref|   0.00  CI excludes 0: False  beyond noise band: False
+outside_mass_out           cand   +7.83  max|ref|   0.43  CI excludes 0: True   beyond noise band: True
+outside_height_out         cand   +1.86  max|ref|   0.62  CI excludes 0: False  beyond noise band: False
+bottom8_by_baseline        cand   +7.07  max|ref|   0.54  CI excludes 0: False  beyond noise band: False
+all                        cand   +0.10  max|ref|   0.10  CI excludes 0: False  beyond noise band: False
+
+=== Per-shape, fulldata vs refined_run1 (lowest baseline success first, showing 128 of 128) ===
+shape                  group        base%   cand%   d_succ            95% CI  fixed  broke
+male_1c099619          outside_tier3  17.39   56.52   +39.13  [+17.39,+60.87]     10      1
+female_98d4329d        outside_tier2  26.09  100.00   +73.91  [+56.52,+91.30]     17      0
+female_bd0ec1ce        outside_tier1  52.17   43.48    -8.70  [-21.74, +0.00]      0      2
+male_a7f6b877          outside_tier2  65.22   30.43   -34.78  [-56.52,-13.04]      1      9
+female_1b5f1e4c        outside_tier1  65.22   65.22    +0.00  [-21.74,+21.74]      3      3
+male_edcf2449          outside_tier2  69.57   43.48   -26.09  [-47.83, -4.35]      1      7
+female_33cc784f        outside_tier0  82.61  100.00   +17.39  [ +4.35,+34.78]      4      0
+female_f9bf3075        outside_tier3  86.96   82.61    -4.35  [-21.74,+13.04]      2      3
+male_3aa8b433          outside_tier0  91.30  100.00    +8.70  [ +0.00,+21.74]      2      0
+female_1c099619        outside_tier3  91.30  100.00    +8.70  [ +0.00,+21.74]      2      0
+female_4adc1af1        outside_tier2  91.30   95.65    +4.35  [ -8.70,+21.74]      2      1
+female_d01709ba        outside_tier3  95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+female_e706da88        outside_tier3  95.65   69.57   -26.09  [-43.48, -8.70]      0      6
+female_b9940dc1        outside_tier3  95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+male_d24a2ef4          outside_tier2  95.65   91.30    -4.35  [-13.04, +0.00]      0      1
+female_edcf2449        outside_tier2  95.65   65.22   -30.43  [-47.83,-13.04]      0      7
+male_e3794a01          outside_tier1  95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+female_15a56096        outside_tier2  95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+female_100d2a25        outside_tier2  95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+female_0dadc36f        outside_tier2  95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+male_98d4329d          outside_tier2  95.65   95.65    +0.00  [-13.04,+13.04]      1      1
+female_283d67c0        outside_tier3  95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+male_42001c1b          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_419de3a0          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_430bdfbe          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_44a17e37          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_400a9a92          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_04eeada2        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_393c49c9          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_33cc784f          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_33a58f09          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_2dbed010          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_2bbeae15          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_2af367c5          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_28bcbf4e          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_283d67c0          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_26b2c805          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_1f926647          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_1f74efe3          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_1d24c6b5          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_3e1d7add          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_4adc1af1          outside_tier2 100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+male_7d42cfbb          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_4ee058c0          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_f9bf3075          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_f45cb9cf          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_ed79b65a          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_e706da88          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_e4cdc1c2          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_daff329a          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_dae673d8          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_d159eeee          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_d01709ba          outside_tier3 100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+male_ce6c5b43          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_cb12afb9          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_c6865ef1          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_c3af729f          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_bd0ec1ce          outside_tier1 100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+male_b9940dc1          outside_tier3 100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+male_b366326b          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_ac835352          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_ab860e44          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_a92d8548          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_9ff89f78          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_919422f8          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_6dd6a450          outside_tier0 100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+male_66bd203d          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_563ad060          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_532322ef          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_4c9586b5          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_1b5f1e4c          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_fec41668        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_15a56096          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_563ad060        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_532322ef        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_4ee058c0        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_4c9586b5        outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_44a17e37        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_430bdfbe        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_42001c1b        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_419de3a0        outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_400a9a92        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_3e1d7add        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_3aa8b433        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_66bd203d        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_393c49c9        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_2dbed010        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_2bbeae15        outside_tier2 100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+female_2af367c5        outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_28bcbf4e        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_26b2c805        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_1f926647        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_1f74efe3        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_1d24c6b5        outside_tier3 100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+female_15f6b7c1        outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_1523ce94        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_0d9c1fcb        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_33a58f09        outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_6dd6a450        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_7d42cfbb        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_919422f8        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_1523ce94          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_100d2a25          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_0dadc36f          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_0d9c1fcb          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_04eeada2          outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_faaedd30          outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_faaedd30        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_f45cb9cf        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_ed79b65a        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_e4cdc1c2        outside_tier2 100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+female_e3794a01        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_daff329a        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_dae673d8        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_d24a2ef4        outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_d159eeee        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_ce6c5b43        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_cb12afb9        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_c6865ef1        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_c3af729f        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_b366326b        outside_tier1 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_ac835352        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_ab860e44        outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_a92d8548        outside_tier3 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_a7f6b877        outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_9ff89f78        outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_15f6b7c1          outside_tier2 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_fec41668          outside_tier0 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+
+Shapes whose success CI lies entirely below -2 pp (regression candidates): 4
+  male_a7f6b877: -34.78 pp  [-56.52,-13.04]
+  male_edcf2449: -26.09 pp  [-47.83,-4.35]
+  female_e706da88: -26.09 pp  [-43.48,-8.70]
+  female_edcf2449: -30.43 pp  [-47.83,-13.04]
+Wrote results/analysis/unseen_v2_2026-10-09/compare_outside_valtest23.groups.csv
+Wrote results/analysis/unseen_v2_2026-10-09/compare_outside_valtest23.per_shape.csv

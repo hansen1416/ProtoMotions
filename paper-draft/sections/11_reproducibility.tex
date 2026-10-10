@@ -139,12 +139,26 @@ The principal implementation entry points are:
 \end{itemize}
 
 \subsection{Unseen-body and repeated-seed evidence}
-The original unseen-body replay uses
-\path{tools/analyze_unseen_morphology_generalization.py}, the
-\path{smpl_mor_interp/assets.yaml} asset manifest, and
-\path{data_cache/unseen_morphology_merged_0.pt}. Retained raw and joined
-CSV records define the 1,024-by-32 evaluation panel. The main population
-summaries include every pair and both successful and failed bodies.
+The sole unseen-body study is the inside/outside replay of 9 October 2026.
+Its source report is \path{r2:proto-data/unseen_shapes_v2/eval/REPORT.md};
+a local read-only snapshot is retained under
+\path{paper-draft/evidence/unseen_shapes_v2/}, including both 128-row
+per-shape CSVs, comparison summaries, checkpoint identities, and rerun checks.
+The evaluator is \path{tools/analyze_unseen_morphology_generalization.py};
+paired analysis uses \path{tools/compare_checkpoints_unseen_morphology.py}.
+The report records code revision \texttt{75324d9} at analysis time.
+
+Frozen checkpoint SHA-256 values are:
+\begin{quote}\footnotesize\ttfamily
+refined (epoch 28,170):\\
+\detokenize{4b83f20c93bf95fab389fc8935685ef8a2c7e46583f765e8c802421edb4479cb}\\
+fulldata (epoch 34,000):\\
+\detokenize{7b57de8ec047c390c2881f8a630d7196a09da6dd08bfbae743f36d6542cd2192}
+\end{quote}
+Each checkpoint has its own frozen resolved inference configuration.
+All per-pair outputs and logs remain on R2; the local small-artifact snapshot
+is not a copy of the complete rollout records. The 233/23 clip partition,
+body manifests, and physical-property groups are defined in the source report.
 
 Seed-1/2 architecture records are in the corresponding
 \path{results/hhi_150_evalfix_A_seed1} through
@@ -152,11 +166,6 @@ Seed-1/2 architecture records are in the corresponding
 must be joined by evaluation epoch before forming last-eight summaries.
 Across-seed standard deviation is computed from three run summaries, rather
 than from all scheduled evaluations pooled as independent observations.
-
-The full-data checkpoint is a separate experiment whose resolved motion
-manifest is \path{splits/hhi_stage2_v1/full_manifest.jsonl}. Its pending
-comparison must record checkpoint/configuration hashes and preserve the
-same references, assets, horizons, and threshold as the original replay.
 
 For each final experiment, retain the resolved configuration, code revision,
 model/checkpoint checksum, body coefficient and asset manifests, split hashes,

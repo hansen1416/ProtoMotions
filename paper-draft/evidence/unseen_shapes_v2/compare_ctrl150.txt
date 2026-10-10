@@ -1,0 +1,40 @@
+Runs: ['refined_run1', 'fulldata', 'refined_run2']
+Paired grid: 150 clips x 128 shapes (clips dropped for incomplete rows: 0)
+
+=== Group-level paired deltas vs baseline (percentage points for success) ===
+group                      run              shapes   base%    run%   d_succ            95% CI  fixed  broke   d_gt(m)  d_gr(rad)
+bottom8_by_baseline        fulldata              8  98.67   98.83    +0.17  [ +0.00, +0.42]      2      0   +0.0074    +0.0003  CANDIDATE
+bottom8_by_baseline        refined_run2          8  98.67   99.17    +0.50  [ +0.00, +1.17]      6      0   -0.0008    -0.0014  reference
+all                        fulldata            128  99.29   99.12    -0.17  [ -0.37, -0.03]      2     34   +0.0031    -0.0019  CANDIDATE
+all                        refined_run2        128  99.29   99.31    +0.02  [ -0.01, +0.06]      6      2   +0.0000    +0.0000  reference
+
+=== Candidate vs noise band (success delta, percentage points) ===
+bottom8_by_baseline        cand   +0.17  max|ref|   0.50  CI excludes 0: False  beyond noise band: False
+all                        cand   -0.17  max|ref|   0.02  CI excludes 0: True   beyond noise band: True
+
+=== Per-shape, fulldata vs refined_run1 (lowest baseline success first, showing 20 of 128) ===
+shape                  group        base%   cand%   d_succ            95% CI  fixed  broke
+female_fb454239                    98.67   98.67    +0.00  [ +0.00, +0.00]      0      0
+female_da7b9ae1                    98.67   98.67    +0.00  [ +0.00, +0.00]      0      0
+female_ad5728e1                    98.67   98.67    +0.00  [ +0.00, +0.00]      0      0
+male_09a0fcbd                      98.67   99.33    +0.67  [ +0.00, +2.00]      1      0
+female_7b3c6576                    98.67   98.67    +0.00  [ +0.00, +0.00]      0      0
+female_4de6c13b                    98.67   98.67    +0.00  [ +0.00, +0.00]      0      0
+male_7f246a41                      98.67   99.33    +0.67  [ +0.00, +2.00]      1      0
+female_0f05fd5a                    98.67   98.67    +0.00  [ +0.00, +0.00]      0      0
+female_09a0fcbd                    98.67   98.00    -0.67  [ -2.00, +0.00]      0      1
+male_da7b9ae1                      99.33   99.33    +0.00  [ +0.00, +0.00]      0      0
+male_724d4ad2                      99.33   99.33    +0.00  [ +0.00, +0.00]      0      0
+male_71fbbe41                      99.33   98.67    -0.67  [ -2.00, +0.00]      0      1
+male_653185e6                      99.33   98.67    -0.67  [ -2.00, +0.00]      0      1
+male_546170ba                      99.33   98.00    -1.33  [ -3.33, +0.00]      0      2
+male_e5c9712a                      99.33   99.33    +0.00  [ +0.00, +0.00]      0      0
+male_52d9e1de                      99.33   98.67    -0.67  [ -2.00, +0.00]      0      1
+male_4de6c13b                      99.33   99.33    +0.00  [ +0.00, +0.00]      0      0
+male_4dd55cac                      99.33   99.33    +0.00  [ +0.00, +0.00]      0      0
+male_443d6b3e                      99.33   99.33    +0.00  [ +0.00, +0.00]      0      0
+male_42909c1b                      99.33   98.67    -0.67  [ -2.00, +0.00]      0      1
+
+Shapes whose success CI lies entirely below -2 pp (regression candidates): 0
+Wrote results/analysis/unseen_v2_2026-10-09/compare_ctrl150.groups.csv
+Wrote results/analysis/unseen_v2_2026-10-09/compare_ctrl150.per_shape.csv

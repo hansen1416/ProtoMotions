@@ -1,20 +1,21 @@
 \begin{abstract}
-Physics-based imitation across body shapes requires consistent references
-and simulated dynamics. We construct a corpus linking 20,951 AMASS-derived
-HumanML3D clip identities to HUMOS-generated references and matching
-SMPL-based assets for 128 body configurations, yielding 2,681,728 variants.
-Contact-aware refinement reduces sliding and ground penetration with small
-pose changes, at the cost of higher reference position jerk. One
-morphology-conditioned temporal controller is trained directly on 18,855
-clips across all 128 bodies using streamed motion residency. Standalone
-original-checkpoint evaluation achieves 98.47\% validation and 99.14\% test
-success on 1,048 held-out clips per split, with one selected trained body per
-clip. A separate replay of 1,024 clips across 32 unseen bodies achieves
-91.64\% overall success: 28 bodies track at 99.74\%, while four have severe
-tracking failures with unresolved causes. Three-seed development comparisons
-support slot/type attention as a practical trade-off, without a consistent
-advantage on all measures. These results establish large-scale shared
-imitation and substantial but non-uniform transfer within the sampled body
-range; they do not establish all-body held-out-motion coverage or isolate
-the benefit of explicit morphology conditioning.
+Learning one physics-based motion controller across bodies requires both
+shared control and references consistent with each body's geometry. We study
+this problem through three questions: shared tracking, unseen-body transfer,
+and the design choices supporting them. A paired corpus links 20,951
+HumanML3D clip identities to HUMOS references and matching simulated assets
+for 128 body configurations. One morphology-conditioned temporal controller
+trains on 18,855 clips across those bodies. It achieves 99.14\% tracking
+success on 1,048 held-out motions, with one selected trained body per clip.
+On 233 training-split clips replayed across each of two 128-body unseen
+panels, success is 97.28\% inside the training coefficient range and 97.15\%
+outside it. These averages coexist with individual-body success as low as
+3.0\% and 13.3\%, respectively. A later checkpoint improves outside-panel
+success but worsens inside-panel success, with substantial individual
+regressions. Three-seed architecture comparisons reveal trade-offs between
+tracking and smoothness; paired reference refinement reduces sliding and
+penetration while increasing reference jerk. The evidence supports shared
+learning and strong average transfer within the evaluated domain, while
+leaving all-body held-out-motion coverage, the causal value of explicit
+morphology inputs, and the mechanisms of severe failures unresolved.
 \end{abstract}

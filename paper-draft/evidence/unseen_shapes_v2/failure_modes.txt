@@ -1,0 +1,6 @@
+inside   refined_run1  rows= 29824 failures=  810  of which terminated=1:     0  terminated=0 (silent drift):   810
+inside   fulldata      rows= 29824 failures=  921  of which terminated=1:     0  terminated=0 (silent drift):   921
+outside  refined_run1  rows= 29824 failures=  850  of which terminated=1:     0  terminated=0 (silent drift):   850
+outside  fulldata      rows= 29824 failures=  726  of which terminated=1:     0  terminated=0 (silent drift):   726
+ctrl     refined_run1  rows= 19200 failures=  137  of which terminated=1:     0  terminated=0 (silent drift):   137
+ctrl     fulldata      rows= 19200 failures=  169  of which terminated=1:     0  terminated=0 (silent drift):   169

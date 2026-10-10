@@ -193,27 +193,65 @@ fixed convention. The accompanying high-jerk statistic is the percentage
 of windows in which any body exceeds threshold 6,500; the logger calls it
 a frame percentage, but it is window-based.
 
-\subsection{Populations and generalization axes}
-Table~\ref{tab:evidence_populations} separates the evaluated populations.
-The development corpus is drawn from training. Unseen references have
-frame-zero grounding but not the full training-reference refinement.
 
+\subsection{Research questions, populations, and checkpoint scope}
+Table~\ref{tab:evidence_populations} maps the evidence to the three questions.
+Held-out identity is clip-grouped, not a demonstrated subject/recording split.
 \begin{table}[t]
 \centering\small
-\caption{Original-checkpoint evaluation populations. Held-out clip identity
-does not imply subject- or source-recording-disjoint splits.}\label{tab:evidence_populations}
+\caption{Evaluation populations and their inference scope. Each unseen panel
+has 128 bodies; the 233-clip and 23-clip subsets partition its 256 clips.}
+\label{tab:evidence_populations}
 \begin{tabularx}{\linewidth}{@{}lYYr@{}}
 \toprule
-Population & Motion exposure & Body exposure & Pairs \\
+Question & Motion exposure & Body exposure & Pairs \\
 \midrule
-Validation / test & Held-out clips & Trained; one per clip & 1,048 each \\
-Development replay & Training clips & All 128 trained bodies & 19,200 \\
-Unseen bodies, original train & Seen clips & 32 unseen bodies & 29,824 \\
-Unseen bodies, original val/test & Held-out clips & 32 unseen bodies & 2,944 \\
+RQ1: validation / test & Held-out clips & Trained; one per clip & 1,048 each \\
+RQ1: development replay & 150 training clips & All 128 trained & 19,200 \\
+RQ2: inside / outside & 233 training clips & All 128 unseen per panel & 29,824 each \\
+RQ2: diagnostic subset & 23 val/test clips; seen by full-data & Same unseen panels & 2,944 each \\
+RQ2: trained control & 150 training clips & All 128 trained & 19,200 \\
+RQ3: design comparison & Development clips & Trained bodies & Three refined seeds \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-The pending full-data checkpoint comparison uses the same unseen references,
-but additional training includes all original motion splits. It tests unseen
-bodies on known motions and cannot replace the original held-out-motion result.
+\paragraph{Unseen-body construction and replay.}
+Each panel contains 64 new coefficient vectors instantiated on male and female
+SMPL templates. Inside vectors lie in $[-3,3]^{10}$; outside vectors have
+$\|\beta\|_\infty\in(3,5]$, with 16 vectors (32 bodies) in each of four
+half-unit tiers. Inside denotes membership of the training coefficient box,
+not demonstrated membership of the convex hull of trained bodies. Both
+panels use matching HUMOS references and assets, frame-zero offsets and
+full reference refinement. The build report records finite complete clip/body
+panels and zero penetration under its refinement diagnostic; it does not
+certify dynamic feasibility.
+
+All nine runs completed on an A40 on 9 October 2026. Replay uses mean actions,
+reference initialization, 32 environments per asset (4,096 environments),
+and at most 210 control steps (7\,s). Success follows Eq.~\eqref{eq:success}.
+The 233 training-split identities isolate the body axis; the other 23
+validation/test identities remain separate. The trained-body control uses a
+different 150-clip panel and refinement run, so only within-dataset checkpoint
+deltas are paired comparisons.
+
+\paragraph{Checkpoint and uncertainty controls.}
+The original \texttt{refined} checkpoint is epoch 28,170; the prespecified
+\texttt{fulldata} candidate is epoch 34,000 and trained on all original motion
+splits. Both are frozen for replay. Duration and motion coverage change
+together, preventing causal attribution. Each dataset has two original-checkpoint
+runs and one candidate run. Paired 95\% bootstrap intervals resample clips,
+retaining the full fixed body panel; they do not resample training seeds or
+unseen bodies. The report's ``beyond noise'' rule requires an interval excluding
+zero and a candidate delta larger in magnitude than the original-checkpoint
+rerun delta. With no checkpoint ladder, that comparison measures simulator
+variability only. Per-body regression intervals are exploratory and unadjusted
+for multiple testing.
+
+On all 256 clips, identical-checkpoint success labels agree on 99.33\% of
+inside and 98.68\% of outside pairs, versus 99.96\% in the control. Pooled
+success differs by at most 0.05 pp, but individual pairs can change by metres
+in peak error. Small pooled changes therefore coexist with local instability.
+Checkpoint hashes and the retained report are documented in
+Appendix~\ref{app:provenance}; complete per-body tables are in
+Appendix~\ref{app:unseen_tables}.

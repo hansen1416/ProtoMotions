@@ -1,16 +1,14 @@
 \section{Conclusion}\label{sec:conclusion}
-We construct a paired multi-morphology corpus and train one physics-based
-controller while preserving correspondence between source clips, generated
-references, and simulation assets. The system integrates shape-conditioned
-generation, reference refinement, temporal slot/type attention, and streamed
-training across 128 body configurations.
-
-The original checkpoint achieves 99.14\% success on 1,048 independent test
-clips with one selected trained body each. A separate 32-body replay achieves
-91.64\% overall success, with strong transfer on 28 bodies and severe errors
-on four unresolved cases. This establishes substantial shared tracking and
-transfer within the sampled range while exposing non-uniform robustness.
-Repeated-seed comparisons and paired reference audits clarify the design
-trade-offs. Fixed all-body held-out coverage, causal conditioning controls,
-and resolution of body-specific failures are the next steps toward stronger
-generalization claims.
+We study shared physics-based imitation through paired morphology-specific
+references and assets, a temporal controller, and explicit separation of
+motion and body exposure. For RQ1, one policy trained across 128 bodies
+achieves 99.14\% success on held-out motions with one selected trained body
+per clip. For RQ2, it achieves 97.28\% inside-range and 97.15\% outside-range
+unseen-body success, but individual bodies can fail on most clips and a later
+checkpoint introduces both recoveries and regressions. For RQ3, repeated
+architecture comparisons and paired reference audits identify tracking,
+smoothness, and contact-quality trade-offs rather than a dominant design.
+The evidence supports strong average shared tracking and transfer within
+this protocol. All-body held-out-motion coverage, matched conditioning and
+external controls, and dynamic diagnosis of severe failures remain necessary
+for stronger claims about robustness and mechanism.

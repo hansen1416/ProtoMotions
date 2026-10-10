@@ -1,47 +1,49 @@
 \section{Introduction}\label{sec:introduction}
-A physics-based motion controller should reproduce an action across bodies
-with different proportions and dynamics. Changing limb lengths, collision
-geometry, and mass distribution changes both a motion's spatial realization
-and the actuation needed to follow it. Kinematic retargeting alone is not
-sufficient: the reference must correspond to the simulated body, and a
-feedback policy must track it.
+A shared physics-based controller must reproduce actions on bodies with
+different proportions and dynamics. Changing limb lengths, collision
+geometry, and mass distribution changes both the spatial realization of a
+motion and the actuation needed to track it. The learning problem therefore
+has two coupled axes: variation in motion and variation in body. Good
+tracking on new motions for a familiar body does not establish transfer to
+a new body, and a high average over bodies can conceal severe failures.
 
-Large motion resources, shape-conditioned generation, and scalable imitation
-provide the building blocks~\cite{amass,humanml3d,humos,phc,protomotions}.
-Their combination raises a practical question: can one controller track a
-large collection of paired, morphology-specific motions across many bodies,
-and how reliably does it transfer to configurations absent from training?
-We address this through system construction and empirical evaluation.
-Morphology conditioning and temporal attention are established techniques;
-the contribution is a consistent paired-motion workflow at this scale and
-an evaluation distinguishing motion exposure from body exposure.
-
-HUMOS generates references for 128 configurations; simulation assets use
-the same SMPL parameters. Clip/body identities are preserved through
-conversion, refinement, training, and replay. Refinement reduces contact
-artifacts with explicit fidelity checks. A shared temporal slot/type-attention
-policy trains directly across bodies, with morphology in actor and critic
-and a streamed pool limiting resident memory. HumanML3D captions support
-descriptive analysis but are not policy inputs.
-
-We make three contributions:
+Large motion resources, shape-conditioned reference generation, and scalable
+imitation provide the building blocks~\cite{amass,humanml3d,humos,phc,protomotions}.
+Body-conditioned control is established~\cite{won2019}; PHC also supports
+body variation, although its quantitative evaluations use the mean SMPL
+body~\cite{phc}. Our question is how reliably one controller learns and
+transfers across a large corpus of explicitly paired motions and bodies.
+We address it through three research questions:
 \begin{enumerate}
-\item A paired corpus construction linking source identities, shape-specific
-references, matching assets, and deterministic clip-grouped splits across
-20,951 clips and 128 body configurations.
-\item A shared imitation system trained on 18,855 clips across all 128
-bodies, combining temporal observations, morphology inputs, reference
-processing, and memory-bounded motion streaming.
-\item An empirical assessment separating held-out tracking, trained-body
-coverage, and unseen-body transfer, with repeated-seed design comparisons
-and an explicit account of residual failures and evidence limits.
+\item \textbf{RQ1: Can one shared controller learn to track diverse motions
+across different bodies?} We distinguish held-out-motion performance on
+selected bodies from coverage of every trained body.
+\item \textbf{RQ2: How well does that capability generalise to unseen body
+shapes, and where does it fail?} We evaluate inside- and outside-range bodies,
+retain every shape, and examine checkpoint sensitivity.
+\item \textbf{RQ3: Which design choices support that capability, and what
+trade-offs do they introduce?} We compare temporal architectures and audit
+reference refinement, while identifying the missing conditioning control.
 \end{enumerate}
 
-The original checkpoint achieves 99.14\% success on the independent
-1,048-clip test split, with one selected trained body per clip. On a separate
-1,024-clip panel over 32 unseen bodies, overall success is 91.64\%: 28 bodies
-reach 99.74\% collectively, while four transfer poorly. The full-population
-score is central to the generalization claim. These findings support shared
-control over substantial motion and body variation, but also reveal limits
-that aggregate trained-body scores conceal. Fixed all-body held-out coverage
-and causal tests of morphology inputs are needed for stronger claims.
+Our contribution is a paired corpus and learning workflow that preserves
+clip/body identity from HUMOS generation through simulation and replay,
+together with an evaluation that separates motion exposure from body
+exposure. The corpus contains 20,951 clip identities and 128 body
+configurations. A shared temporal slot/type-attention controller trains
+directly on 18,855 clips across those bodies using streamed motion residency.
+We inherit the simulator integration, PPO machinery, and motion-tracking
+infrastructure from ProtoMotions; we do not claim these or morphology
+conditioning itself as new. HumanML3D captions are metadata, not policy
+inputs: this is reference-conditioned imitation, not text-conditioned control.
+
+The original checkpoint achieves 99.14\% success on 1,048 independent test
+clips, each paired with one selected trained body. On 233 training-split
+clips across 128 unseen inside-range bodies and 128 unseen outside-range
+bodies, success is 97.28\% and 97.15\%. Yet the worst bodies succeed on only
+3.0\% and 13.3\% of those clips. These findings support the central claim:
+\emph{one shared controller learns morphology-specific tracking with strong
+average transfer to unseen shapes, but uneven robustness across individual
+bodies}. The design evidence explains practical trade-offs; it does not yet
+isolate the benefit of explicit morphology inputs or establish uniform
+held-out-motion performance across all bodies.

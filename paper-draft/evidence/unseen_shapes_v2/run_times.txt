@@ -1,0 +1,9 @@
+19:26:20 ctrl refined_run1 rc=0 seconds=231 rows=19200
+19:32:34 inside refined_run1 rc=0 seconds=374 rows=32768
+19:38:41 inside refined_run2 rc=0 seconds=367 rows=32768
+19:44:51 outside refined_run1 rc=0 seconds=370 rows=32768
+19:50:53 outside refined_run2 rc=0 seconds=362 rows=32768
+19:54:45 ctrl refined_run2 rc=0 seconds=232 rows=19200
+20:39:12 inside fulldata rc=0 seconds=365 rows=32768
+20:45:32 outside fulldata rc=0 seconds=380 rows=32768
+20:49:40 ctrl fulldata rc=0 seconds=248 rows=19200

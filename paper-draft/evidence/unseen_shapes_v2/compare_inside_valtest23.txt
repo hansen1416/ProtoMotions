@@ -1,0 +1,159 @@
+Runs: ['refined_run1', 'fulldata', 'refined_run2']
+Paired grid: 23 clips x 128 shapes (clips dropped for incomplete rows: 0)
+
+=== Group-level paired deltas vs baseline (percentage points for success) ===
+group                      run              shapes   base%    run%   d_succ            95% CI  fixed  broke   d_gt(m)  d_gr(rad)
+inside_mass_out            fulldata              1  86.96   69.57   -17.39  [-39.13, +0.00]      1      5   +0.1560    +0.2364  CANDIDATE
+inside_mass_out            refined_run2          1  86.96   86.96    +0.00  [-13.04,+13.04]      1      1   -0.0049    -0.0008  reference
+inside_height_out          fulldata              3  98.55  100.00    +1.45  [ +0.00, +4.35]      1      0   +0.0019    -0.0019  CANDIDATE
+inside_height_out          refined_run2          3  98.55   98.55    +0.00  [ -4.35, +4.35]      1      1   +0.0016    -0.0023  reference
+rest                       fulldata            124  97.12   96.63    -0.49  [ -0.95, -0.04]     12     26   +0.0065    +0.0055  CANDIDATE
+rest                       refined_run2        124  97.12   97.09    -0.04  [ -0.28, +0.28]      7      8   +0.0007    +0.0007  reference
+bottom8_by_baseline        fulldata              8  58.70   53.80    -4.89  [-11.43, +1.09]      8     17   +0.0639    +0.1094  CANDIDATE
+bottom8_by_baseline        refined_run2          8  58.70   58.70    +0.00  [ -3.26, +3.80]      5      5   +0.0088    +0.0111  reference
+all                        fulldata            128  97.08   96.50    -0.58  [ -1.02, -0.14]     14     31   +0.0075    +0.0072  CANDIDATE
+all                        refined_run2        128  97.08   97.04    -0.03  [ -0.27, +0.24]      9     10   +0.0006    +0.0007  reference
+
+=== Candidate vs noise band (success delta, percentage points) ===
+inside_mass_out            cand  -17.39  max|ref|   0.00  CI excludes 0: False  beyond noise band: False
+inside_height_out          cand   +1.45  max|ref|   0.00  CI excludes 0: False  beyond noise band: False
+rest                       cand   -0.49  max|ref|   0.04  CI excludes 0: True   beyond noise band: True
+bottom8_by_baseline        cand   -4.89  max|ref|   0.00  CI excludes 0: False  beyond noise band: False
+all                        cand   -0.58  max|ref|   0.03  CI excludes 0: True   beyond noise band: True
+
+=== Per-shape, fulldata vs refined_run1 (lowest baseline success first, showing 128 of 128) ===
+shape                  group        base%   cand%   d_succ            95% CI  fixed  broke
+male_669a0fb3          rest         0.00    4.35    +4.35  [ +0.00,+13.04]      1      0
+male_ec3bb7f8          rest        13.04   13.04    +0.00  [-17.39,+17.39]      2      2
+female_d2e840d7        rest        47.83   30.43   -17.39  [-34.78, +4.35]      1      5
+female_1c7a626a        rest        78.26   78.26    +0.00  [-13.04,+13.04]      1      1
+female_e7bc8c92        rest        82.61   65.22   -17.39  [-34.78, -4.35]      0      4
+female_0df54b49        rest        82.61   78.26    -4.35  [-17.39, +8.70]      1      2
+female_5d08dfec        rest        82.61   73.91    -8.70  [-21.74, +0.00]      0      2
+male_790287d8          rest        82.61   86.96    +4.35  [ -8.70,+17.39]      2      1
+male_826291a7          inside_mass_out  86.96   69.57   -17.39  [-39.13, +0.00]      1      5
+male_3c31fbf0          rest        91.30  100.00    +8.70  [ +0.00,+21.74]      2      0
+male_03b17a5c          rest        95.65   95.65    +0.00  [ +0.00, +0.00]      0      0
+male_0012b56d          rest        95.65   95.65    +0.00  [ +0.00, +0.00]      0      0
+male_5ff7533b          rest        95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+female_cfc560dc        inside_height_out  95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+female_434ee660        rest        95.65  100.00    +4.35  [ +0.00,+13.04]      1      0
+male_591e5402          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_56d0764a          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_5175aa4d          rest       100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+male_4ff946fb          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_45b559cc          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_5d08dfec          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_5e15544f          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_0012b56d        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_5ff8516d          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_31c52305          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_2f5af13e          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_2ef69857          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_2ebacdbc          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_24099a2a          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_1fe45357          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_1e156a55          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_1c7a626a          rest       100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+male_1a6e1d07          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_18ba29ff          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_16407809          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_15ab6d4d          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_434ee660          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_33c4b70d          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_70844ea8          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_6c43e677          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_fa7276c6          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_f523cce1          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_efac05ec          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_e7bc8c92          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_e32ea98f          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_e0f2d3b0          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_dff75a62          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_dfabb96c          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_dd2cbc2b          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_dbdef8ed          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_dba89a6b          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_d6e4c929          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_672c8c6d          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_d2e840d7          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_cfc560dc          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_bd1f406b          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_bbc77826          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_a32ceac3          rest       100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+male_9d5ef2c8          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_9ae68e9d          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_99c4b6d5          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_98cc6e5a          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_8e871d31          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_8cd58f76          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_762ebd03          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_6d81a8f6          rest       100.00   78.26   -21.74  [-39.13, -8.70]      0      5
+male_cfcf0261          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_0df54b49          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_feab73b2        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_004f9229          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_672c8c6d        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_669a0fb3        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_5ff8516d        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_5ff7533b        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_5e15544f        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_591e5402        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_56d0764a        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_5175aa4d        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_4ff946fb        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_45b559cc        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_3c31fbf0        rest       100.00   95.65    -4.35  [-13.04, +0.00]      0      1
+female_33c4b70d        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_6c43e677        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_31c52305        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_2ef69857        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_2ebacdbc        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_24099a2a        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_1fe45357        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_1e156a55        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_1a6e1d07        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_18ba29ff        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_16407809        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_15ab6d4d        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_0cdfe35c        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_03b17a5c        inside_height_out 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_004f9229        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_2f5af13e        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_0cdfe35c          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_6d81a8f6        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_762ebd03        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_fd468447          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_fd468447        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_fa7276c6        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_f523cce1        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_efac05ec        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_ec3bb7f8        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_e32ea98f        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_e0f2d3b0        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_dff75a62        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_dfabb96c        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_dd2cbc2b        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_dbdef8ed        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_70844ea8        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_dba89a6b        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_cfcf0261        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_bd1f406b        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_bbc77826        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_a32ceac3        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_9d5ef2c8        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_9ae68e9d        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_99c4b6d5        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_98cc6e5a        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_8e871d31        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_8cd58f76        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_826291a7        inside_height_out 100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_790287d8        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+female_d6e4c929        rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+male_feab73b2          rest       100.00  100.00    +0.00  [ +0.00, +0.00]      0      0
+
+Shapes whose success CI lies entirely below -2 pp (regression candidates): 2
+  female_e7bc8c92: -17.39 pp  [-34.78,-4.35]
+  male_6d81a8f6: -21.74 pp  [-39.13,-8.70]
+Wrote results/analysis/unseen_v2_2026-10-09/compare_inside_valtest23.groups.csv
+Wrote results/analysis/unseen_v2_2026-10-09/compare_inside_valtest23.per_shape.csv
