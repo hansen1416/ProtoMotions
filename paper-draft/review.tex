@@ -1,4 +1,5 @@
-% Generated review copy; edit main.tex and sections.
+% Active standalone manuscript edited in place for The Visual Computer.
+% Do not regenerate from main.tex: it would overwrite the journal adjustments.
 \documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
@@ -13,48 +14,62 @@
 \usepgfplotslibrary{statistics}
 \usepackage[hidelinks]{hyperref}
 \urlstyle{same}
+% Permit long reproducibility paths to wrap within identifiers.
+\expandafter\def\expandafter\UrlBreaks\expandafter{\UrlBreaks
+\do\a\do\b\do\c\do\d\do\e\do\f\do\g\do\h\do\i\do\j\do\k\do\l\do\m
+\do\n\do\o\do\p\do\q\do\r\do\s\do\t\do\u\do\v\do\w\do\x\do\y\do\z}
+\setlength{\emergencystretch}{3em}
 
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
-\newcommand{\pending}[1]{\par\smallskip\noindent
-  \textit{Pending evidence. #1}\par\smallskip}
 \newcommand{\SO}{\mathrm{SO}}
 \newcommand{\R}{\mathbb{R}}
 
 \title{Morphology-Conditioned Physics-Based Motion Imitation\\
 Across 128 Body Shapes}
-\author{}
-\date{Connection Science working draft --- 10 October 2026}
+\author{[Author names and order]\\
+\small [Department and institution]\\
+\small [Corresponding author and email]}
+\date{}
 
-% Compile from paper-draft/. October revision; pending GPU evidence is marked.
+% Target: The Visual Computer. RQ1--RQ3 and all reported measurements are retained.
 
 \begin{document}
 \maketitle
 \begin{abstract}
-Learning one physics-based motion controller across bodies requires both
-shared control and references consistent with each body's geometry. We study
-this problem through three questions: shared tracking, unseen-body transfer,
-and the design choices supporting them. A paired corpus links 20,951
-HumanML3D clip identities to HUMOS references and matching simulated assets
-for 128 body configurations. One morphology-conditioned temporal controller
-trains on 18,855 clips across those bodies. It achieves 99.14\% tracking
-success on 1,048 held-out motions, with one selected trained body per clip.
-On 233 training-split clips replayed across each of two 128-body unseen
-panels, success is 97.28\% inside the training coefficient range and 97.15\%
-outside it. These averages coexist with individual-body success as low as
-3.0\% and 13.3\%, respectively. A later checkpoint improves outside-panel
-success but worsens inside-panel success, with substantial individual
-regressions. Three-seed architecture comparisons reveal trade-offs between
-tracking and smoothness; paired reference refinement reduces sliding and
-penetration while increasing reference jerk. The evidence supports shared
-learning and strong average transfer within the evaluated domain, while
-leaving all-body held-out-motion coverage, the causal value of explicit
-morphology inputs, and the mechanisms of severe failures unresolved.
+Animating digital humans with different body proportions requires references
+consistent with their geometry and a controller that tracks them in physics.
+We study shared tracking, unseen-body transfer, and network-design trade-offs
+using one morphology-conditioned temporal controller. A paired corpus links
+20,951 motion identities to body-conditioned references and matching
+simulation assets for 128 body configurations; training uses 18,855 identities
+across all bodies. The controller achieves 99.14\% tracking success on 1,048
+held-out motions, with one selected trained body per clip. On 233
+training-split clips replayed across each of two 128-body unseen panels,
+success is 97.28\% inside the training coefficient range and 97.15\% outside
+it. These averages coexist with individual-body success as low as 3.0\%
+and 13.3\%, respectively. A later checkpoint improves outside-panel success
+but introduces substantial individual regressions. Three-seed comparisons of
+temporal multilayer perceptron and attention architectures reveal trade-offs
+between tracking and smoothness. An offline reference audit measures reduced
+stance-foot sliding and below-floor body centres with small pose changes,
+at the cost of increased reference jerk. These reference measurements are
+distinct from simulated tracking accuracy and smoothness; rollout sliding
+and penetration have not been quantified. The results demonstrate strong
+average shared tracking and transfer within the evaluated domain, while
+leaving all-body held-out-motion coverage, the causal contribution of explicit
+morphology inputs, and severe failure mechanisms unresolved.
 \end{abstract}
+
+\noindent\textbf{Keywords:} Physics-based animation; Digital humans;
+Motion imitation; Morphology-conditioned control; Temporal attention.
+
 
 
 \section{Introduction}\label{sec:introduction}
-A shared physics-based controller must reproduce actions on bodies with
-different proportions and dynamics. Changing limb lengths, collision
+Physics-based character animation should reproduce actions on digital humans
+with different proportions and dynamics. A shared controller offers a way to
+reuse a motion repertoire across those bodies, provided that references and
+simulated assets remain consistent. Changing limb lengths, collision
 geometry, and mass distribution changes both the spatial realization of a
 motion and the actuation needed to track it. The learning problem therefore
 has two coupled axes: variation in motion and variation in body. Good
@@ -76,8 +91,8 @@ selected bodies from coverage of every trained body.
 shapes, and where does it fail?} We evaluate inside- and outside-range bodies,
 retain every shape, and examine checkpoint sensitivity.
 \item \textbf{RQ3: Which design choices support that capability, and what
-trade-offs do they introduce?} We compare temporal architectures and audit
-reference refinement, while identifying the missing conditioning control.
+trade-offs do they introduce?} We compare temporal network architectures and audit reference refinement,
+while delimiting what the evidence establishes about morphology conditioning.
 \end{enumerate}
 
 Our contribution is a paired corpus and learning workflow that preserves
@@ -1014,11 +1029,33 @@ records zero failed episodes under its diagnostic; that record is not
 interchangeable with the new replay's tracking-error criterion and does not
 establish 100\% threshold success.
 
-\pending{Replay a frozen held-out subset on all 128 trained bodies. Report
-per-clip success fraction, median and worst-body error, and the number of
-clips succeeding on every body. Add synchronized reference/controller views
-of the same clip across contrasting bodies.}
+All-body consistency on held-out motions remains unmeasured. A fixed
+held-out-motion panel crossed with all 128 trained bodies would be needed
+to quantify worst-body error and the fraction of clips succeeding on every body.
 
+The project demonstrations replay one motion simultaneously across 128
+trained body configurations with a shared controller
+(Figure~\ref{fig:trained_multibody_demo}). They illustrate multibody execution;
+they do not display the reference separately or quantify tracking, contact
+quality, or unseen-body transfer.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}[c][7.5cm][c]{0.94\linewidth}
+\centering\large Screenshot placeholder\\[0.8em]
+\normalsize One video frame showing the same motion\\
+executed simultaneously across 128 trained body configurations.\\[0.8em]
+\small Insert the original-resolution frame; record the clip ID,\\
+checkpoint and video timestamp in the caption.
+\end{minipage}}
+\caption{Qualitative illustration of one shared controller executing the
+same motion across 128 trained body configurations. The displayed geometry
+is the simulator collision representation. This trained-body demonstration
+accompanies RQ1; quantitative tracking and unseen-body results are reported
+separately.
+Clip: [ID]; checkpoint: [identifier]; video time: [seconds].}
+\label{fig:trained_multibody_demo}
+\end{figure}
 
 \subsubsection{Residual held-out-motion failures}\label{sec:failures}
 Nine test pairs and 16 validation pairs fail the configured threshold.
@@ -1034,9 +1071,9 @@ remains in the failure count pending exact threshold sensitivity. Failures in
 both orientations on different bodies do not isolate skill, morphology, or
 reference effects.
 
-\pending{Inspect synchronized rollouts and first-crossing traces, including
-successful variants of the same clips. Use population class denominators
-before claiming enrichment and interventions before assigning causes.}
+The caption analysis does not identify mechanical causes. Synchronized
+rollouts and first-threshold-crossing traces, including successful variants
+of the same clips, are needed for that diagnosis.
 
 \subsection{RQ2: Unseen-body transfer and its limits}\label{sec:unseen_morphology}
 \subsubsection{High average transfer inside and outside the training range}
@@ -1057,7 +1094,7 @@ within each dataset. Intervals resample clips with the body panel fixed.
 The rerun repeats the original checkpoint, not its training.}\label{tab:unseen_v2}
 \begin{tabularx}{\linewidth}{@{}YrrrY@{}}
 \toprule
-Panel & Refined (\%) & Full-data (\%) & Rerun $\Delta$ (pp) & Candidate $\Delta$ [95\% CI] (pp) \\
+Panel & \shortstack{Refined\\(\%)} & \shortstack{Full-data\\(\%)} & \shortstack{Rerun $\Delta$\\(pp)} & Candidate $\Delta$ [95\% CI] (pp) \\
 \midrule
 Inside unseen & 97.28 & 96.91 & $-0.02$ & $-0.37$ [$-0.57$, $-0.18$] \\
 Outside unseen & 97.15 & 97.57 & $+0.04$ & $+0.42$ [$+0.22$, $+0.61$] \\
@@ -1183,10 +1220,10 @@ The separate 23-clip validation/test subset gives inside success
 full-data. Full-data trained on these identities; these values are diagnostic,
 not untouched motion generalisation, and are excluded from the headline.
 
-\pending{Audit per-asset reference feasibility and inspect first-threshold
-crossings on severe failures and successful counterparts. Add contact,
-root-height, and actuation traces before distinguishing reference,
-controller, or asset mechanisms.}
+Severe failures remain unresolved because per-asset reference feasibility
+and synchronized contact, root-height, and actuation traces have not been
+audited. The present results cannot distinguish reference, controller, and
+asset mechanisms.
 
 \subsection{RQ3: Design support and trade-offs}
 \subsubsection{Architecture trade-offs across training seeds}\label{sec:architecture_results}
@@ -1224,7 +1261,7 @@ establishing selection before training. Capacities and runtimes differ
 
 \subsubsection{Reference refinement: artifact reduction and fidelity}\label{sec:refinement_results}
 
-A paired reference audit supports reduced sliding and penetration with
+A paired reference audit supports reduced sliding and below-floor body centres with
 small pose/root changes, at the cost of higher reference jerk. Policy
 comparisons do not establish a causal benefit or absence of quality cost.
 
@@ -1308,18 +1345,16 @@ tasks. The reference audit justifies cleaning; a stronger policy-level claim
 requires a common-reference checkpoint comparison.
 
 
-\subsubsection{Explicit morphology conditioning: a missing causal control}
+\subsubsection{Scope of the morphology-conditioning evidence}
 Every architecture above receives morphology inputs in both actor and critic.
 The adaLN-Zero variant changes their use in the actor; it does not test their
 removal. Successful transfer therefore establishes a capability of the whole
 system, not that explicit coefficients cause it. Body-dependent state and
 reference targets also expose morphology.
-\pending{Train a matched controller without explicit morphology inputs using
-the same references, body panel, budget, and seeds. Evaluate both policies on
-fixed trained- and unseen-body panels. Inference-time masking or shuffling
-can supplement this test but introduces distribution shift and cannot replace
-it. A common-reference policy comparison is also needed to isolate the
-learning effect of refinement.}
+A matched training comparison without explicit morphology inputs is absent.
+It would need the same references, body panel, budget, and seeds, followed by
+fixed trained- and unseen-body evaluation. Inference-time masking or shuffling
+would introduce distribution shift and cannot replace that comparison.
 
 \section{Discussion and Limitations}\label{sec:discussion}
 The three questions distinguish a capability from its coverage and mechanism.
@@ -1329,6 +1364,19 @@ establishes high average transfer on both sides of the training coefficient
 boundary, while exposing bodies for which tracking largely fails. RQ3
 supports practical architecture and reference-processing choices, but not a
 causal explanation of transfer.
+
+\paragraph{Implications for character animation.}
+The evaluated workflow combines body-specific references with one shared
+feedback controller, supporting reuse across the tested digital-human
+configurations. The reference audit documents reduced contact artifacts,
+while simulated-motion results document tracking accuracy and smoothness.
+These are complementary measurements: reference cleaning does not establish
+lower sliding or penetration in controller outputs. Those rollout measures
+and controlled reference-versus-simulation comparisons remain unassessed here.
+The multibody demonstration illustrates execution rather than comparative
+visual quality. High threshold success
+should therefore be interpreted as tracking capability, not a complete
+assessment of visual realism.
 
 \paragraph{Average transfer and individual robustness.}
 Similar inside/outside averages do not make body extrapolation uniformly
@@ -1379,7 +1427,7 @@ external tracker would strengthen comparative conclusions, but the published
 capability table alone cannot establish a performance advantage.
 
 \section{Conclusion}\label{sec:conclusion}
-We study shared physics-based imitation through paired morphology-specific
+We study shared physics-based character animation through paired morphology-specific
 references and assets, a temporal controller, and explicit separation of
 motion and body exposure. For RQ1, one policy trained across 128 bodies
 achieves 99.14\% success on held-out motions with one selected trained body
@@ -1393,6 +1441,41 @@ this protocol. All-body held-out-motion coverage, matched conditioning and
 external controls, and dynamic diagnosis of severe failures remain necessary
 for stronger claims about robustness and mechanism.
 
+
+\section*{Statements and Declarations}
+% Author metadata and declarations remain provisional at the authors' request.
+\paragraph{Funding}
+[Funding sources and grant identifiers, or a statement that no funding was received.]
+
+\paragraph{Competing interests}
+[Authors to declare any financial or non-financial competing interests,
+or confirm that none exist.]
+
+\paragraph{Author contributions}
+Hansen Han: conceptualization, methodology, software, validation, formal
+analysis, investigation, resources, data curation, visualization,
+writing---original draft, writing---review and editing, supervision,
+project administration, and funding acquisition.
+This provisional allocation will be confirmed and amended by the authors
+before submission.
+
+\paragraph{Data and code availability}
+The motion corpus derives from AMASS and HumanML3D and remains subject to
+the source datasets' access and licensing conditions. The research code
+repository is \url{https://github.com/hansen1416/ProtoMotions}; demonstrations
+are available at \url{https://hansen1416.github.io/morph_mimic/}.
+Evaluation summaries and per-body results used in this manuscript are
+retained with the research records.
+[Authors to specify the archival code version, evaluated checkpoints and
+assets, evaluation-data access location, and any restrictions on derived data.]
+
+\paragraph{AI assistance in manuscript preparation}
+An AI assistant was used to help restructure and draft manuscript text and
+check consistency with the recorded sources. Reported experimental
+measurements come from existing research records; this assistance did not
+produce new training or rollout results.
+% Submission package: authors to supply final affiliations, correspondence,
+% author biographies and portrait photographs separately.
 
 \appendix
 \section{Reproducibility Details}\label{app:reproducibility}
@@ -1573,10 +1656,9 @@ The main full-scale W\&B identifier is \texttt{3mvgad6f}; the corrected
 small-scale group is \texttt{hhi\_150\_evalfix\_comparison}.
 The evaluation/sampling correction is recorded in commit \texttt{3685247}.
 
-\pending{Two items remain before a finalized benchmark report: the immutable
-HUMOS/SMPLSim checksums (to be archived with the dataset release) and the
-release of the retained per-motion evaluation records for the validation and
-test splits.}
+Immutable HUMOS-checkpoint and SMPLSim-revision checksums and public release
+of the retained validation/test per-motion records remain incomplete. The
+present study therefore does not claim a fully released benchmark.
 
 \section{Development and Training Provenance}\label{app:history}
 RQ1 uses the original epoch-28,170 checkpoint; RQ2 also compares the frozen
@@ -1819,10 +1901,9 @@ Levene tests pool correlated body rows. Neither pooled-row significance nor
 overlap of separate intervals settles the class-level contrast. The present
 analysis is descriptive, not a definitive positive or negative interaction result.
 
-\pending{Estimate the dynamic-minus-quasi-static spread contrast using
-clip-level resampling or a clip-level permutation test. Report its interval
-and effect size, and check units, class membership, and sensitivity to small
-classes before drawing an interaction conclusion.}
+A direct dynamic-minus-quasi-static spread contrast with clip-level
+resampling has not been estimated. The reported summaries therefore support
+descriptive comparisons only, rather than a class-level interaction claim.
 
 \section{Complete Unseen-Body Results}\label{app:unseen_tables}
 These tables contain every body from the new inside/outside study on the
