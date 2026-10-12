@@ -55,7 +55,8 @@ and the configured success indicator is
 \end{equation}
 where $T_i$ is the evaluated horizon. This threshold is deliberately distinct
 from the smoother training reward, and passing it does not imply fine-grained
-pose accuracy or biomechanical realism. We also report time-averaged mean
+pose accuracy or biomechanical realism. We also report success at the stricter
+thresholds 0.3, 0.2, and 0.1\,m, time-averaged mean
 body-position error (the global MPJPE $E_{\text{g-mpjpe}}$ of Table~\ref{tab:capabilities}), mean global body-rotation geodesic error (not a local
 joint-angle error), the time average of the largest body-position error within
 each frame (the logged \emph{mean maximum-joint error}), and the windowed
@@ -84,9 +85,12 @@ test split was evaluated once and not used to select the checkpoint.
 \toprule
 Metric & Validation & Test \\
 \midrule
-Success rate (\%) $\uparrow$ & 98.47 & 99.14 \\
-Nominal 95\% Wilson interval (\%) & [97.53, 99.06] & [98.38, 99.55] \\
-Failure rate (gt err $>0.5$) (\%) $\downarrow$ & 1.53 & 0.86 \\
+Success at 0.5\,m (\%) $\uparrow$ & 98.47 & 99.14 \\
+Nominal 95\% Wilson interval, 0.5\,m (\%) & [97.53, 99.06] & [98.38, 99.55] \\
+Success at 0.3\,m (\%) $\uparrow$ & 95.52 & 96.28 \\
+Success at 0.2\,m (\%) $\uparrow$ & 84.83 & 85.97 \\
+Success at 0.1\,m (\%) $\uparrow$ & 37.88 & 38.55 \\
+Failure rate at 0.5\,m (\%) $\downarrow$ & 1.53 & 0.86 \\
 Mean body-position error (m) $\downarrow$ & 0.0699 & 0.0676 \\
 Mean global body-rotation error (rad) $\downarrow$ & 0.1738 & 0.1723 \\
 Mean maximum-joint position error (m) $\downarrow$ & 0.1419 & 0.1393 \\
@@ -97,9 +101,14 @@ Worst single clip, gt err max (m) & 3.79 & 1.67 \\
 \end{tabular}
 \end{table}
 
-Validation and test scores are similar (1,032 and 1,039 of 1,048 successes), and
-no significance claim is made from their difference. Continuous pose errors and
-jerk complement the permissive 0.5\,m threshold. The Wilson
+Validation and test scores are similar (1,032 and 1,039 of 1,048 successes at
+0.5\,m), and no significance claim is made from their difference. The 0.5\,m
+threshold is permissive, so the table also reports stricter thresholds and
+continuous errors: test success falls to 96.28\% at 0.3\,m, 85.97\% at 0.2\,m,
+and 38.55\% at 0.1\,m. Tight thresholds partly measure the references rather
+than the controller, because HUMOS generates them kinematically and they are
+not dynamically validated; the audit in Section~\ref{sec:refinement_results}
+finds residual contact artifacts even after refinement. The Wilson
 intervals~\cite{wilson1927} are nominal: they condition on the checkpoint and
 selected body panel and ignore dependence between related recordings or
 mirrored clips, training variability, and uncertainty across body selections.

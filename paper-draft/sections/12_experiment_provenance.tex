@@ -111,13 +111,17 @@ not a newly executed evaluation.
 
 
 \subsection{Historical single-seed reference grid}
-Cases A--D use refined references and E--H use unrefined references.
-Within-run variation must not be interpreted as uncertainty across training
-runs. The main architecture conclusion uses repeated refined runs instead.
+Table~\ref{tab:ablation_results} lists the seed-0 development grid. Cases A--D
+use refined references and E--H unrefined references, so the two groups track
+different targets. Success shows the variation across eight evaluations within
+each run, and the other columns are their means; this within-run variation must
+not be interpreted as uncertainty across training runs. The main architecture
+conclusion uses the repeated refined runs of Table~\ref{tab:architecture_seeds}
+instead.
 \begin{table}[t]
 \centering
 \small
-\caption{Historical seed-0 development grid. Success uncertainty is variation across eight evaluations within each run. Other columns are their means. Refined and unrefined policies track different targets. The three-seed comparison is in Table~\ref{tab:architecture_seeds}.}\label{tab:ablation_results}
+\caption{Historical seed-0 development grid.}\label{tab:ablation_results}
 \begin{tabularx}{\linewidth}{@{}llYrrrr@{}}
 \toprule
 Case & Architecture / data & Success (\%) & gt err & gr err & Jerk & HJ\% \\

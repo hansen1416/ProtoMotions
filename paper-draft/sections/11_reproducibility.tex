@@ -18,9 +18,7 @@ simplifications (\texttt{real\_weight}, \texttt{replace\_feet},
 \begin{table}[htbp]
 \centering
 \small
-\caption{Default settings of the current reference-refinement procedure.
-Frame counts refer to the 30\,Hz MotionLib representation. These are
-kinematic-processing settings, not physical constraints learned by the policy.}\label{tab:refinement_parameters}
+\caption{Default reference-refinement settings (frame counts at 30\,Hz).}\label{tab:refinement_parameters}
 \begin{tabularx}{\linewidth}{@{}lY@{}}
 \toprule
 Operation & Setting \\
@@ -106,12 +104,11 @@ asset must accompany a reproducible physical interpretation.
 \begin{table}[htbp]
 \centering
 \small
-\caption{Base PD and actuation values before per-body mass scaling.
-Stiffness and damping use the simulator's rotational PD units
-(Nm/rad and Nm\,s/rad); effort limits are in Nm and velocity limits in rad/s.}\label{tab:pd_parameters}
+\caption{Base PD gains and limits before per-body mass scaling.}\label{tab:pd_parameters}
 \begin{tabular}{lrrrr}
 \toprule
 Joint family & Stiffness & Damping & Effort limit & Velocity limit \\
+ & (Nm/rad) & (Nm\,s/rad) & (Nm) & (rad/s) \\
 \midrule
 Hip, knee, ankle & 800 & 80 & 500 & 100 \\
 Toe & 500 & 50 & 500 & 100 \\
