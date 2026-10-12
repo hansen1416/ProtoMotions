@@ -1,30 +1,29 @@
 \section{Paired Motion and Body Corpus}\label{sec:dataset}
 
-We construct a derived corpus in which a source clip identity connects a motion
-description, 128 generated motion variants, and their matching simulation
-assets. A \emph{clip} denotes a source segment, including a mirrored segment
-when present; a \emph{variant} denotes that clip on one body configuration.
-Figure~\ref{fig:data_pipeline} shows the construction paths.
+MorphMimic learns from references that match each body, so its corpus connects
+every source clip identity to a motion description, 128 generated motion
+variants, and their matching simulation assets. A \emph{clip} denotes a source
+segment, including a mirrored segment when present, and a \emph{variant}
+denotes that clip on one body configuration. Figure~\ref{fig:data_pipeline}
+shows the construction paths.
 
-\subsection{Source motion and body configurations}\label{sec:source_data}
-
-\paragraph{Motion.}
+\paragraph{Source motion.}
 We use the AMASS-derived motion portion of HumanML3D~\cite{amass,humanml3d},
 drawn from the 18 source collections listed in
 Appendix~\ref{app:preprocessing}. Source SMPL+H sequences are processed at
 20\,Hz, with clip extraction, temporal cropping, mirroring, and
 treadmill/skating cleanup following the HumanML3D/HUMOS pipeline, so
-HumanML3D identities are preserved. The pipeline produced 22,459 candidate
-clip identities, counting original and mirrored clips; a text-based filter
-removed 1,508 that appear to require external objects or environmental
-support, leaving 20,951 identities for flat-ground imitation. The filter is a
-task-scope heuristic and does not prove that every retained reference is
-support-free or dynamically feasible. HumanML3D descriptions stay associated
-with the variants of their source clip as metadata; their semantic fidelity is
-not audited (Appendix~\ref{app:captions}), and they supply keyword-based motion
-classes only for the exploratory analysis in Section~\ref{sec:physics}.
+HumanML3D identities are preserved. The pipeline produced 22,459 candidate clip
+identities, counting original and mirrored clips; a text-based filter removed
+1,508 that appear to require external objects or environmental support, leaving
+20,951 identities for flat-ground imitation. The filter is a task-scope
+heuristic and does not prove that every retained reference is support-free or
+dynamically feasible. HumanML3D descriptions stay associated with the variants
+of their source clip as metadata; their semantic fidelity is not audited
+(Appendix~\ref{app:captions}), and they supply keyword-based motion classes only
+for the exploratory analysis in Section~\ref{sec:physics}.
 
-\paragraph{Bodies.}
+\paragraph{Body configurations.}
 A body configuration is $b=(g,\boldsymbol{\beta})$, where $g$ identifies the
 female or male SMPL variant and $\boldsymbol{\beta}\in\R^{10}$ contains shape
 coefficients. We sample
@@ -43,34 +42,31 @@ For each clip, the pretrained HUMOS model~\cite{humos} receives the processed
 pose and root features and the target body parameters, and returns a
 shape-conditioned reference (root-relative 6D rotations with translation). In
 parallel, SMPL bodies~\cite{smpl} with identical parameters are converted to
-MJCF assets with SMPLSim~\cite{smplsim}, using mass estimation and hand and
-foot simplifications. Each asset has 24 rigid bodies and 69 actuated joint
+MJCF assets with SMPLSim~\cite{smplsim}, using mass estimation and hand and foot
+simplifications. Each asset has 24 rigid bodies and 69 actuated joint
 coordinates, with its own collision proxies, joint ranges, and estimated masses
-and inertias. These are simulation-model estimates, not measurements of human
+and inertias; these are simulation-model estimates, not measurements of human
 participants.
 
-\subsection{Reference conversion and refinement}\label{sec:refinement}
-
-Generated sequences are converted to ProtoMotions' Z-up convention and
+\paragraph{Reference refinement.}
+Generated sequences are then converted to ProtoMotions' Z-up convention and
 resampled from 20 to 30\,Hz. Forward kinematics (FK) uses the matching asset
 rather than a single neutral skeleton, and the packaged representation stores
 global body positions and rotations, local rotations, joint positions,
 velocities, and contact labels. Refinement is applied independently to each
 variant in five steps; default settings are in
-Table~\ref{tab:refinement_parameters}.
-
-\emph{Contacts.} Ankle and toe contacts are validated, or detected from foot
-position and velocity when labels are unusable; short gaps are closed and very
-short runs removed. These label candidate stance intervals and are not measured
-forces. \emph{Rotation filtering.} Joint rotations are filtered with
-sign-continuous quaternions, normalization, and a bounded geodesic correction;
-contact transitions divide the sequence into segments so that filtering does
-not average across a change of stance. \emph{Root correction.} A conservative
-least-squares root translation, anchored at each contact's median foot
-position, reduces horizontal stance sliding. It is temporally regularized and
-capped, so it does not guarantee exact foot locking and does not solve for new
-joint angles. \emph{Ground clearance.} With floor height zero and margin
-$\epsilon_z$, the lift required at frame $t$ is
+Table~\ref{tab:refinement_parameters}. \emph{Contacts:} ankle and toe contacts
+are validated, or detected from foot position and velocity when labels are
+unusable; short gaps are closed and very short runs removed. These label
+candidate stance intervals and are not measured forces. \emph{Rotation
+filtering:} joint rotations are filtered with sign-continuous quaternions,
+normalization, and a bounded geodesic correction, and contact transitions divide
+the sequence into segments so that filtering does not average across a change of
+stance. \emph{Root correction:} a conservative least-squares root translation,
+anchored at each contact's median foot position, reduces horizontal stance
+sliding; it is temporally regularized and capped, so it does not guarantee exact
+foot locking and does not solve for new joint angles. \emph{Ground clearance:}
+with floor height zero and margin $\epsilon_z$, the lift required at frame $t$ is
 \begin{equation}
     \ell_t^{\mathrm{req}}
       = \max\!\left(0,\epsilon_z-\min_{x\in\mathcal{C}_b(t)}x_z\right),
@@ -79,29 +75,26 @@ $\epsilon_z$, the lift required at frame $t$ is
 where $\mathcal{C}_b(t)$ is the collision geometry of body $b$, and a smoothed
 lift envelope stays above this requirement. This prevents penetration of the
 checked geometry in the reference; it does not establish balanced support,
-realistic impacts, or freedom from self-collision. \emph{Reconstruction.} FK
-and velocities are recomputed from the corrected root and rotations within
-each motion.
+realistic impacts, or freedom from self-collision. \emph{Reconstruction:} FK and
+velocities are recomputed from the corrected root and rotations within each
+motion. The objective is modest, to reduce measurable kinematic artifacts while
+preserving the generated motion, and Section~\ref{sec:refinement_results}
+reports artifact and fidelity measures; improved kinematics alone does not
+demonstrate improved policy learning or dynamic feasibility.
 
-The objective is modest: reduce measurable kinematic artifacts while preserving
-the generated motion. Section~\ref{sec:refinement_results} reports artifact and
-fidelity measures; improved kinematics alone does not demonstrate improved
-policy learning or dynamic feasibility.
-
-\subsection{Scale and splits}\label{sec:splits}
-
+\paragraph{Scale and splits.}
 Each per-clip file stores the 128 variants with frame counts, sampling rates,
 and the clip and asset identities needed to recover body parameters, so the
 training system can stream clip files without downloading the complete corpus.
 Splits are by clip identity: all variants of a clip, and original/mirrored
 partners, share a partition (Table~\ref{tab:dataset_counts}), and variants are
-generated combinations rather than independent captures. The split is
-versioned with seed 42 and roughly 90/5/5 proportions; the 150 development
-clips used for design comparisons and the reference audit are reserved within
-the training split (Appendix~\ref{app:provenance}), and the test manifest is
-never loaded by the training workflow. The splits test held-out clip identities
-on the trained body set. They have not been shown to be disjoint by subject or
-capture recording, which limits claims about broader motion generalization.
+generated combinations rather than independent captures. The split is versioned
+with seed 42 and roughly 90/5/5 proportions; the 150 development clips used for
+design comparisons and the reference audit are reserved within the training
+split (Appendix~\ref{app:provenance}), and the test manifest is never loaded by
+the training workflow. The splits test held-out clip identities on the trained
+body set. They have not been shown to be disjoint by subject or capture
+recording, which limits claims about broader motion generalization.
 
 \begin{table}[t]
 \centering

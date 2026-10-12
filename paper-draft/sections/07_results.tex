@@ -1,24 +1,85 @@
 \section{Results}\label{sec:results}
-We report held-out tracking, transfer to unseen bodies, and the design
-comparisons, and use per-body failures to delimit the claims.
+We evaluate MorphMimic on held-out motions, on trained bodies, and on unseen
+bodies, and use per-body failures to delimit the claims. Each reference is
+rolled out only in an environment using its exact asset identity, so a
+reference is never assigned to a different body. Evaluation uses the mean action
+and reference initialization, disables training termination, and records errors
+over the valid reference horizon, capped at 600 control steps (20\,s at 30\,Hz),
+so success refers to the evaluated horizon, not necessarily the whole source
+clip. Held-out evaluations select one body variant per clip with a deterministic
+hash of the clip identity (Appendix~\ref{app:reproducibility}), so the clip list
+is fixed while the body panel rotates across scheduled evaluations. Validation
+was monitored repeatedly and is not an untouched test set, whereas the
+clip-disjoint test manifest stays outside training and model selection and is
+evaluated once.
+
+Design comparisons run on a development corpus of 150 clips and all 128 body
+configurations (19,200 variants), reserved within the training split; it is not
+a held-out generalization benchmark. Because compute was limited, architecture
+and reference-processing choices are investigated on this subset with a fixed
+simulation budget, whereas the full-scale run trains on the 18,855 training
+clips (Table~\ref{tab:dataset_counts}). Table~\ref{tab:evidence_populations}
+lists all populations; held-out identity is clip-grouped, not a demonstrated
+subject or recording split.
+
+\begin{table}[!htb]
+\centering\small
+\caption{Evaluation populations; each unseen panel has 128 bodies.}
+\label{tab:evidence_populations}
+\begin{tabularx}{\linewidth}{@{}lYYr@{}}
+\toprule
+Evaluation & Motion exposure & Body exposure & Pairs \\
+\midrule
+Validation / test & Held-out clips & Trained; one per clip & 1,048 each \\
+Development replay & 150 training clips & All 128 trained & 19,200 \\
+Unseen inside / outside & 233 training clips & All 128 unseen per panel & 29,824 each \\
+Unseen diagnostic subset & 23 val/test clips; seen by full-data & Same unseen panels & 2,944 each \\
+Trained-body control & 150 training clips & All 128 trained & 19,200 \\
+Design comparison & Development clips & Trained bodies & Three refined seeds \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Metrics.}\label{sec:metrics}
+For each evaluated clip/shape pair $i$, the per-frame mean body position error is
+\begin{equation}
+    d_{i,t} = \frac{1}{B}\sum_{j=1}^{B}
+                 \|p_{i,t,j}-\hat{p}_{i,t,j}\|_2 ,
+\end{equation}
+and the configured success indicator is
+\begin{equation}
+    S_i = \mathbf{1}\!\left[
+             \max_{t<T_i}d_{i,t}\leq 0.5\ \mathrm{m}
+          \right],
+    \label{eq:success}
+\end{equation}
+where $T_i$ is the evaluated horizon. This threshold is deliberately distinct
+from the smoother training reward, and passing it does not imply fine-grained
+pose accuracy or biomechanical realism. We also report time-averaged mean
+body-position error, mean global body-rotation geodesic error (not a local
+joint-angle error), the time average of the largest body-position error within
+each frame (the logged \emph{mean maximum-joint error}), and the windowed
+normalized jerk of Appendix~\ref{app:smoothness}, whose high-jerk statistic is
+the percentage of windows in which any body exceeds 6,500. Errors are averaged
+over valid frames per motion and then over motions, including failed rollouts;
+offline comparisons aggregate saved per-motion records over unique clip/shape
+pairs.
 
 \subsection{Tracking across motions and bodies}\label{sec:tracking}
 
 \paragraph{Held-out motions on selected trained bodies.}\label{sec:test_results}
-The epoch-28,170 checkpoint was re-evaluated offline with a standalone
-evaluator, once on the validation split and once on the clip-disjoint test
-split, under the protocol of Section~\ref{sec:experiments}: one selected body per
-clip (shape panel index 110), the exact asset for each reference, and mean
-actions. All 1,048 clips of each split last about 6.6\,s (198 evaluated
-frames), so none reaches the 600-step cap. The test manifest is loaded only by
-this evaluator, which first verifies its hash, clip count, and disjointness from
-train and validation; the test split was evaluated once and not used to select
-the checkpoint.
+The epoch-28,170 MorphMimic checkpoint was re-evaluated offline with a
+standalone evaluator, once on the validation split and once on the clip-disjoint
+test split, with one selected body per clip (shape panel index 110). All 1,048
+clips of each split last about 6.6\,s (198 evaluated frames), so none reaches the
+600-step cap. The test manifest is loaded only by this evaluator, which first
+verifies its hash, clip count, and disjointness from train and validation; the
+test split was evaluated once and not used to select the checkpoint.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Offline evaluation of epoch 28,170 on validation and test splits.}\label{tab:test_results}
+\caption{Offline evaluation of MorphMimic (epoch 28,170) on validation and test splits.}\label{tab:test_results}
 \begin{tabular}{lrr}
 \toprule
 Metric & Validation & Test \\
@@ -36,9 +97,9 @@ Worst single clip, gt err max (m) & 3.79 & 1.67 \\
 \end{tabular}
 \end{table}
 
-Validation and test scores are similar (1,032 and 1,039 of 1,048 successes),
-and no significance claim is made from their difference. Continuous pose errors
-and jerk complement the permissive 0.5\,m threshold. The Wilson
+Validation and test scores are similar (1,032 and 1,039 of 1,048 successes), and
+no significance claim is made from their difference. Continuous pose errors and
+jerk complement the permissive 0.5\,m threshold. The Wilson
 intervals~\cite{wilson1927} are nominal: they condition on the checkpoint and
 selected body panel and ignore dependence between related recordings or
 mirrored clips, training variability, and uncertainty across body selections.
@@ -48,24 +109,9 @@ Replaying 150 training clips on all 128 trained bodies (19,200 pairs) reaches
 99.29\% success with the same checkpoint (Table~\ref{tab:unseen_v2}), which
 establishes broad tracking on that subset. All-body consistency on held-out
 motions remains unmeasured: it would need a held-out-motion panel crossed with
-all 128 bodies. Figure~\ref{fig:trained_multibody_demo} shows one motion executed
-across the 128 trained bodies; it illustrates execution and does not quantify
+all 128 bodies. Figure~\ref{fig:trained_multibody_demo} shows one motion tracked
+on the 128 trained bodies; it illustrates execution and does not quantify
 tracking, contact quality, or transfer.
-
-\begin{figure}[t]
-\centering
-\fbox{\begin{minipage}[c][7.5cm][c]{0.94\linewidth}
-\centering\large Screenshot placeholder\\[0.8em]
-\normalsize One video frame showing the same motion\\
-executed simultaneously across 128 trained body configurations.\\[0.8em]
-\small Insert the original-resolution frame; record the clip ID,\\
-checkpoint and video timestamp in the caption.
-\end{minipage}}
-\caption{One motion executed across 128 trained body configurations (simulator
-collision geometry). Clip: [ID]; checkpoint: [identifier]; video time:
-[seconds].}
-\label{fig:trained_multibody_demo}
-\end{figure}
 
 \paragraph{Residual failures.}\label{sec:failures}
 Nine test and 16 validation pairs fail the threshold. Their captions suggest
@@ -78,11 +124,26 @@ traces, including successful variants of the same clips.
 
 \subsection{Transfer to unseen bodies}\label{sec:unseen_morphology}
 
+\paragraph{Unseen-body panels.}
+Each panel contains 64 new coefficient vectors instantiated on male and female
+SMPL templates. Inside vectors lie in $[-3,3]^{10}$; outside vectors have
+$\|\beta\|_\infty\in(3,5]$, with 16 vectors (32 bodies) in each of four
+half-unit tiers. Inside denotes membership of the training coefficient box, not
+of the convex hull of trained bodies. Both panels use matching HUMOS references
+and assets, frame-zero offsets, and full reference refinement; the build report
+records zero penetration under its refinement diagnostic but does not certify
+dynamic feasibility. Replay uses mean actions, reference initialization, 32
+environments per asset, and at most 210 control steps (7\,s), with success as in
+Eq.~\eqref{eq:success}. The 233 training-split identities isolate the body axis,
+while the other 23 validation/test identities remain separate; the trained-body
+control uses a different 150-clip panel and refinement run, so only
+within-dataset checkpoint deltas are paired comparisons.
+
 \paragraph{High average transfer inside and outside the training range.}
-Crossing 233 training-split clips with all 128 bodies in each unseen panel gives
+Crossing the 233 training-split clips with all 128 bodies in each panel gives
 29,824 pairs per panel, and Table~\ref{tab:unseen_v2} includes every body and
-every failed pair. The original checkpoint reaches 97.28\% inside-range and
-97.15\% outside-range success. The trained-body control reaches 99.29\%, but uses
+every failed pair. MorphMimic's original checkpoint reaches 97.28\%
+inside-range and 97.15\% outside-range success. The trained-body control reaches 99.29\%, but uses
 different clips and a different refinement run, so the gap of roughly two
 percentage points is descriptive, not a matched estimate of the effect of
 changing bodies. Deltas are paired within each dataset, intervals resample clips
@@ -111,21 +172,20 @@ High averages coexist with severe body-specific failures. Inside body
 reaches only 19.3\% despite an in-range mass of 42.7\,kg and height of 1.41\,m.
 Figure~\ref{fig:unseen_v2_shapes} shows all 128 bodies of each panel, sorted
 independently by original-checkpoint success on the same 233 known clips (the
-ranking does not pair inside and outside bodies), and
-the Supplementary Material reports every body. Lying outside the training
-coefficient box does not explain these failures: success does not decline
-monotonically across the four outside coefficient tiers (99.03, 97.76, 95.33,
-and 96.47\%). Bodies outside the trained height range perform well on average
-(97.91\% outside; 96.42\% inside), while the tallest in-range bin is weaker
-(90.53\% outside; 88.75\% inside). The eight heaviest outside bodies, above
-144.4\,kg, average 79.02\%, but small overlapping property groups and paired
-male/female templates are not independent samples of physical-property space, so
-coefficient extremity, mass, and height give no simple ordering of transfer
-difficulty (tier and mass tables in Appendix~\ref{app:unseen_tables}). All failed
-rows have zero recorded termination flags; because flags depend on the replay
-configuration rather than an independent fall detector, we treat these as
-threshold failures pending synchronized rollouts and contact and root-height
-traces.
+ranking does not pair inside and outside bodies), and the Supplementary Material
+reports every body. Lying outside the training coefficient box does not explain
+these failures: success does not decline monotonically across the four outside
+coefficient tiers (99.03, 97.76, 95.33, and 96.47\%). Bodies outside the trained
+height range perform well on average (97.91\% outside; 96.42\% inside), while
+the tallest in-range bin is weaker (90.53\% outside; 88.75\% inside). The eight
+heaviest outside bodies, above 144.4\,kg, average 79.02\%, but small overlapping
+property groups and paired male/female templates are not independent samples of
+physical-property space, so coefficient extremity, mass, and height give no
+simple ordering of transfer difficulty (tier and mass tables in
+Appendix~\ref{app:unseen_tables}). All failed rows have zero recorded
+termination flags; because flags depend on the replay configuration rather than
+an independent fall detector, we treat these as threshold failures pending
+synchronized rollouts and contact and root-height traces.
 
 \begin{figure}[t]
 \centering
@@ -146,41 +206,50 @@ legend pos=south east,legend style={font=\small},grid=major]
 \end{figure}
 
 \paragraph{Checkpoint sensitivity.}
-The later full-data checkpoint (epoch 34,000) differs from the original by
-$-0.37$ pp inside and $+0.42$ pp outside (Table~\ref{tab:unseen_v2}); both exceed
-the identical-checkpoint rerun change, but duration and motion coverage changed
-together, so the change cannot be attributed to either, and ordinary checkpoint
-variation remains unmeasured. The outside gain is concentrated in the ten
-bodies beyond the trained mass range ($+7.68$ pp, 95\% CI [$+6.39$, $+9.01$])
-and the outermost coefficient tier ($+1.39$ pp [$+1.07$, $+1.72$]), while mean
-position error rises by 2.4, 5.0, and 3.1\,mm in the outside, inside, and
-control panels, so threshold success and continuous tracking move differently.
-Three inside and six outside bodies regress by more than 2 pp with intervals
-excluding zero, by up to 36.5 pp, and five outside bodies improve by more than
-2 pp, including \texttt{male\_1c099619} (13.3\% to 71.2\%)
-(Appendix~\ref{app:unseen_tables}); neither improved extremes nor a higher
-outside average justify calling the later checkpoint uniformly better. On the
-23-clip diagnostic subset, which the later checkpoint trained on, inside success
-is 97.08\% versus 96.50\% and outside 96.81\% versus 96.91\% for the original and
-later checkpoints; these values are excluded from the headline. Severe failures
-remain unresolved: per-asset reference feasibility and synchronized contact,
-root-height, and actuation traces have not been audited, so reference,
-controller, and asset mechanisms cannot be distinguished.
+The later full-data checkpoint (epoch 34,000) was trained on all original motion
+splits and differs from the original (epoch 28,170, distinct from the epoch-28,159
+monitoring snapshot of Appendix~\ref{app:history}) by $-0.37$ pp inside and
+$+0.42$ pp outside (Table~\ref{tab:unseen_v2}). Paired 95\% bootstrap intervals
+resample clips with the body panel fixed, not training seeds or unseen bodies,
+and a change counts as beyond noise only if its interval excludes zero and its
+magnitude exceeds the identical-checkpoint rerun delta; both changes qualify,
+but duration and motion coverage changed together, so they cannot be attributed
+to either, and without a checkpoint ladder ordinary checkpoint variation remains
+unmeasured. Identical-checkpoint reruns agree on 99.33\% of inside and 98.68\%
+of outside pair labels (99.96\% in the control), yet individual pairs can change
+by metres in peak error, so small pooled changes coexist with local instability.
+The outside gain is concentrated in the ten bodies beyond the trained mass range
+($+7.68$ pp, 95\% CI [$+6.39$, $+9.01$]) and the outermost coefficient tier
+($+1.39$ pp [$+1.07$, $+1.72$]), while mean position error rises by 2.4, 5.0, and
+3.1\,mm in the outside, inside, and control panels, so threshold success and
+continuous tracking move differently. Three inside and six outside bodies regress
+by more than 2 pp with intervals excluding zero, by up to 36.5 pp (per-body
+intervals are exploratory and unadjusted for multiple testing), and five outside
+bodies improve by more than 2 pp, including \texttt{male\_1c099619} (13.3\% to
+71.2\%) (Appendix~\ref{app:unseen_tables}); neither improved extremes nor a
+higher outside average justify calling the later checkpoint uniformly better. On
+the 23-clip diagnostic subset, which the later checkpoint trained on, inside
+success is 97.08\% versus 96.50\% and outside 96.81\% versus 96.91\% for the
+original and later checkpoints; these values are excluded from the headline.
+Severe failures remain unresolved: per-asset reference feasibility and
+synchronized contact, root-height, and actuation traces have not been audited, so
+reference, controller, and asset mechanisms cannot be distinguished.
 
 \subsection{Design comparisons}\label{sec:design}
 
 We compare four architectures: A, temporal MLP; B, temporal attention; C,
-attention with slot/type embeddings; and D, C with actor-only adaLN-Zero. All
-retain morphology inputs in actor and critic. Refined-reference runs use three
-seeds (0, 1, 2) and a matched 6,000-epoch budget on the development subset, and
-each run contributes one summary, the mean of its last eight evaluations
-(epochs 4,600--6,000); means and sample standard deviations are computed across
-the three run summaries, and within-run evaluations are not replicates. Seed-1/2
-values were checked against local TensorBoard records, whereas the original logs
-of the seed-0 values were not independently available. The full-scale model
-predates these reruns, which reassess its design rather than establish
-prospective selection. Cases E--H repeat A--D with unrefined references and one
-seed each (Appendix~\ref{app:history}).
+attention with slot/type embeddings, the architecture of MorphMimic; and D, C
+with actor-only adaLN-Zero. All retain morphology inputs in actor and critic.
+Refined-reference runs use three seeds (0, 1, 2) and a matched 6,000-epoch
+budget on the development subset, and each run contributes one summary, the mean
+of its last eight evaluations (epochs 4,600--6,000); means and sample standard
+deviations are computed across the three run summaries, and within-run
+evaluations are not replicates. Seed-1/2 values were checked against local
+TensorBoard records, whereas the original logs of the seed-0 values were not
+independently available. The full-scale MorphMimic model predates these reruns, which
+reassess its design rather than establish prospective selection. Cases E--H
+repeat A--D with unrefined references and one seed each
+(Appendix~\ref{app:history}).
 
 \begin{table}[t]
 \centering\small
@@ -207,8 +276,8 @@ the highest mean success and D the lowest position and rotation errors. A has
 the lowest mean jerk, but jerk differences between architectures are
 comparable to the seed-to-seed standard deviations (643--887), so the apparent
 factor-of-two jerk advantage in seed 0 is not a consistent architecture
-effect. Three seeds do not establish statistical superiority, and we retain C as
-a practical compromise.
+effect. Three seeds do not establish statistical superiority, and MorphMimic
+uses C as a practical compromise.
 
 \paragraph{Reference refinement.}\label{sec:refinement_results}
 A paired offline audit of all 19,200 development references (150 clips
@@ -261,9 +330,9 @@ training run without them, with the same references, body panel, budget, and
 seeds; inference-time masking or shuffling would introduce distribution shift
 and cannot replace that comparison.
 
-\subsection{Exploratory physical analysis}\label{sec:physics}
+\subsection{Physical analysis}\label{sec:physics}
 As a secondary question, we ask whether cross-body variability in control demand
-differs between dynamic and quasi-static motions. The original checkpoint is
+differs between dynamic and quasi-static motions. The original MorphMimic checkpoint is
 replayed over the 150 development clips and all 128 trained bodies (19,200
 pairs, zero recorded failed episodes under this analysis's own diagnostic).
 Keyword matching on the inherited captions assigns running, jumping, and

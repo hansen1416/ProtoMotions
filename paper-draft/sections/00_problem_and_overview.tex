@@ -1,22 +1,25 @@
-\section{Problem Formulation and System Overview}\label{sec:problem}
+\section{Overview}\label{sec:problem}
 A body configuration $b=(g,\boldsymbol{\beta})$ specifies a SMPL template
 and shape coefficients. For source clip $c$, HUMOS supplies a shape-specific
 reference $\hat{s}_{c,b}(t)$ and SMPLSim supplies the matching asset. Changing
 $b$ changes geometry, reference positions, mass/inertia, and mass-scaled
-actuation even though topology is shared. The task is to track these paired
-references with one policy, not impose identical world-space paths on all bodies.
+actuation even though topology is shared, so the task is to track these paired
+references with one policy rather than impose identical world-space paths on
+all bodies.
 
-We learn $\pi_\theta(a_t\mid o_t,b)$ using present state, history, future
-reference targets, and body information. The same parameters serve every
-body. Clips can change on reset while each environment retains its asset,
-and evaluation preserves reference/body identity. The flat-ground task has no
-external objects or partners, and captions are metadata, not controller input.
+MorphMimic learns $\pi_\theta(a_t\mid o_t,b)$ from the present state, history,
+future reference targets, and body information, with the same parameters
+serving every body. Clips can change on reset while each environment retains
+its asset, and evaluation preserves reference/body identity. The flat-ground
+task has no external objects or partners, and captions are metadata, not
+controller input.
 
 Figure~\ref{fig:data_pipeline} summarizes the system. Matching body parameters
 link generated references and simulation assets (Section~\ref{sec:dataset});
-one shared controller trains on the resulting pairs with streamed motion
-residency (Section~\ref{sec:method}); and fixed pairs with known motion and
-body exposure are replayed for evaluation (Section~\ref{sec:experiments}).
+the policy is defined in Section~\ref{sec:method} and trained on the resulting
+pairs with streamed motion residency (Section~\ref{sec:training}); and fixed
+pairs with known motion and body exposure are replayed for evaluation
+(Section~\ref{sec:results}).
 
 \begin{figure}[t]
 \centering

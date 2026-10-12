@@ -1,52 +1,50 @@
 \section{Discussion and Limitations}\label{sec:discussion}
-We studied shared physics-based character animation through paired
-morphology-specific references and assets, a temporal controller, and explicit
-separation of motion and body exposure. One policy trained across 128 bodies
-achieves 99.14\% success on held-out motions with one selected trained body per
-clip, and executes development clips across all trained bodies. It transfers to
-unseen bodies at 97.28\% inside and 97.15\% outside the training coefficient
-range, but individual bodies can fail on most clips, and a later checkpoint
-introduces both recoveries and regressions. Temporal attention improves tracking
-accuracy and seed stability over a temporal MLP without a consistent smoothness
-difference, and the reference audit shows reduced contact artifacts at the cost
-of higher reference jerk. These comparisons support practical architecture and
-reference-processing choices, but not a causal explanation of transfer.
+MorphMimic combines paired morphology-specific references and assets with one
+temporal controller and an evaluation that separates motion exposure from body
+exposure. Trained across 128 bodies, it achieves 99.14\% success on held-out
+motions with one selected trained body per clip and executes development clips
+across all trained bodies. It transfers to unseen bodies at 97.28\% inside and
+97.15\% outside the training coefficient range, but individual bodies can fail
+on most clips, and a later checkpoint introduces both recoveries and
+regressions. Temporal attention improves tracking accuracy and seed stability
+over a temporal MLP without a consistent smoothness difference, and the
+reference audit shows reduced contact artifacts at the cost of higher reference
+jerk. These comparisons support practical architecture and reference-processing
+choices, but not a causal explanation of transfer.
 
 \paragraph{Implications for character animation.}
-The evaluated workflow combines body-specific references with one shared
-feedback controller, supporting reuse across the tested digital-human
-configurations. The reference audit and the simulated-motion results are
-complementary measurements: reference cleaning does not establish lower sliding
-or penetration in controller outputs, which remain unassessed, and high
-threshold success is tracking capability, not a complete assessment of visual
-realism.
+Body-specific references and one shared feedback controller support reuse across
+the tested digital-human configurations. The reference audit and the
+simulated-motion results are complementary: reference cleaning does not
+establish lower sliding or penetration in controller outputs, which remain
+unassessed, and high threshold success is tracking capability, not a complete
+assessment of visual realism.
 
 \paragraph{Average transfer and individual robustness.}
 Similar inside and outside averages do not make body extrapolation uniformly
 reliable. Success is non-monotonic across coefficient tiers, and poor tracking
 occurs both beyond and within the training mass and height ranges; these
-associations describe the tested assets and do not identify failure causes.
-The later checkpoint recovers some bodies and harms others, so threshold
-success alone would overstate its improvement.
+associations describe the tested assets and do not identify failure causes. The
+later checkpoint recovers some bodies and harms others, so threshold success
+alone would overstate its improvement.
 
 \paragraph{Coverage and inference.}
 The unseen-body headline uses known motion identities to isolate body transfer,
 the 1,048-clip test uses one trained body per clip, and a fixed held-out-motion
 panel crossed with all 128 trained bodies remains missing. Original and mirrored
 variants stay together, but the splits are not shown to be subject- or
-recording-disjoint. Clip-bootstrap intervals hold the body panel fixed and do
-not quantify uncertainty over shape space, and one full-scale run with one
-candidate checkpoint does not measure training-seed or ordinary checkpoint
-variation.
+recording-disjoint. Clip-bootstrap intervals hold the body panel fixed and do not
+quantify uncertainty over shape space, and one full-scale run with one candidate
+checkpoint does not measure training-seed or ordinary checkpoint variation.
 
 \paragraph{Mechanism and design.}
-State and reference observations already carry shape information, so attributing
-transfer to explicit morphology inputs needs a matched policy without them. The
-architecture comparison keeps those inputs in every model and has unequal
-capacities, with the temporal MLP the largest. Refinement reduces contact
-artifacts with small pose changes but raises target jerk, and policies
-evaluated against different targets do not isolate its learning benefit. The
-exploratory physical analysis (Section~\ref{sec:physics}) remains descriptive.
+Attributing transfer to explicit morphology inputs needs the matched run
+described in Section~\ref{sec:design}; the architecture comparison keeps those
+inputs in every model and has unequal capacities, with the temporal MLP the
+largest. Refinement reduces contact artifacts with small pose changes but raises
+target jerk, and policies evaluated against different targets do not isolate its
+learning benefit. The exploratory physical analysis
+(Section~\ref{sec:physics}) remains descriptive.
 
 \paragraph{Failure diagnosis and scope.}
 Failures are error-threshold failures with zero termination flags, which alone

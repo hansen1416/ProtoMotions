@@ -1,11 +1,12 @@
 \begin{abstract}
 Animating digital humans with different body proportions requires references
 consistent with each body's geometry and a controller that tracks them in
-physics. We build a paired corpus that links 20,951 motion identities to
-body-conditioned references and matching simulation assets for 128 body
-configurations, and train one morphology-conditioned temporal controller on
-18,855 of these identities across all bodies. It achieves 99.14\% tracking
-success on 1,048 held-out motions, with one selected trained body per clip.
+physics. We present MorphMimic: a paired corpus that links 20,951 motion
+identities to body-conditioned references and matching simulation assets for
+128 body configurations, and one morphology-conditioned temporal controller
+trained on 18,855 of these identities across all bodies. MorphMimic achieves
+99.14\% tracking success on 1,048 held-out motions, with one selected trained
+body per clip.
 Replayed on 233 training-split clips across each of two panels of 128 unseen
 bodies, success is 97.28\% inside the training coefficient range and 97.15\%
 outside it, yet individual bodies succeed on as few as 3.0\% and 13.3\% of

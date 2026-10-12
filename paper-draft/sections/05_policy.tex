@@ -1,0 +1,181 @@
+\section{Policy Representation}\label{sec:method}
+MorphMimic's controller is the policy $\pi_\theta(a_t\mid o_t,b)$ of
+Section~\ref{sec:problem}: it maps the present state, history, future reference
+targets, and morphology to joint targets. This section defines its states and
+actions, network, and reward, and Section~\ref{sec:training} describes how it is
+trained.
+
+\subsection{States and actions}\label{sec:observations}
+
+\paragraph{State.}
+Experiments use the \texttt{smpl\_mor} assets in Isaac Gym through
+ProtoMotions~\cite{isaacgym,protomotions}, with simulation at 60\,Hz, two
+substeps, and control decimation two, giving a 30\,Hz policy rate. The
+observation combines the present state, history, future reference targets, a
+historical action, and explicit morphology information. Let $B=24$ denote the
+number of simulated bodies. The present state contains root height above
+ground, root-relative body positions excluding the root, 6D body rotations, and
+linear and angular velocities. Positions and velocities use a heading-aligned
+frame and rotations remove the root heading, which removes dependence on
+arbitrary global heading and horizontal origin while retaining height and body
+configuration. We add seven historical states at control-step offsets
+$\{1,2,3,4,8,16,32\}$, covering about 1.07\,s and each in its own root/heading
+frame, and four future reference slots at $\{1,2,4,8\}$, covering about
+0.27\,s. Future slots contain target positions relative to the current root,
+heading-aligned target rotations, position differences from the current body
+state, relative rotations $\smash{R_{t,j}^{-1}\hat{R}_{t+k,j}}$ (expressed with
+respect to the current body rotation), and heading-aligned linear and angular
+velocity differences. The history exposes recent changes and the future targets
+a short anticipation window; contact flags, an explicit phase scalar, text, and
+estimated physical feature vectors are not part of the observation.
+Table~\ref{tab:observations} summarizes the inputs of actor and critic, with
+dimensions per slot, positions in metres, linear velocities in m/s, angular
+velocities in rad/s, and dimensionless 6D rotations.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Observation inputs supplied to both actor and critic.}\label{tab:observations}
+\begin{tabularx}{\linewidth}{@{}lrlY@{}}
+\toprule
+Input & Dimension & Slots & Representation and path \\
+\midrule
+Current state & $15B-2=358$ & 1 &
+Height; $3(B-1)$ positions; $6B$ rotations; $3B$ linear and $3B$ angular
+velocities. Current-state encoder. \\
+History & $358$ & 7 &
+Same state representation at the seven past offsets. Shared history encoder. \\
+Future reference & $24B=576$ & 4 &
+Target and relative poses ($18B$), plus velocity differences ($6B$).
+Shared future encoder. \\
+Historical action & $D=69$ & 1 &
+A raw previous policy-action vector, before tanh and PD scaling.
+Bypasses attention. \\
+Morphology & $11$ & 1 &
+$[g,\beta_1,\ldots,\beta_{10}]$ from the assigned asset.
+Bypasses attention. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Action.}
+The policy outputs a raw action $a_t\in\R^D$ with $D=69$, mapped to joint
+targets by
+\begin{equation}
+    q_t^{\mathrm{target}}
+      = q^{\mathrm{offset}}
+        + q^{\mathrm{scale}}\odot\tanh(a_t),
+    \label{eq:action_mapping}
+\end{equation}
+with offsets and scales derived from the configured joint ranges. The targets
+drive the simulator's built-in position proportional--derivative (PD)
+controller; the action is not a residual added to the reference pose. PD
+stiffness, damping, and effort limits are scaled per joint by the mass of the
+associated rigid body relative to that body in the reference asset (base values
+in Table~\ref{tab:pd_parameters}). This body-level mass scaling is not a single
+scale based on total character mass, and it does not guarantee dynamically
+equivalent actuation across geometrically different bodies.
+
+\subsection{Network}\label{sec:architecture}
+
+MorphMimic uses temporal slot/type attention. Three observation encoders, one
+for the current state, one shared across history slots, and one shared across
+future slots, are MLPs with two 256-unit ReLU hidden layers and a
+256-dimensional token output, and their inputs use running mean/standard-deviation
+normalization with a magnitude clamp of five. The resulting 12 tokens (one
+current, seven historical, four future) enter a Transformer as
+\begin{equation}
+    z_i = E_{\tau(i)}(x_i)
+        + e_i^{\mathrm{slot}} + e_{\tau(i)}^{\mathrm{type}},
+    \qquad i=0,\ldots,11,
+    \label{eq:token_embedding}
+\end{equation}
+where $\tau(i)$ identifies the current, history, or future source: slot
+embeddings distinguish the configured temporal offsets, and type embeddings the
+observation sources. The Transformer has two layers, four attention heads, token
+width 256, and feed-forward width 1,024~\cite{attention}, and its current-state
+token supplies the pooled output after the configured output projection and
+activation. Figure~\ref{fig:network} traces the encoded observations through
+attention and the separate actor and critic heads, which share input categories
+but not parameters.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.94\linewidth}
+\small
+\begin{tabularx}{\linewidth}{@{}YcY@{}}
+Current state: $1\times358$ & $\longrightarrow$ &
+Current encoder: $1\times256$ token \\
+Past states: $7\times358$ & $\longrightarrow$ &
+History encoder: $7\times256$ tokens \\
+Future targets: $4\times576$ & $\longrightarrow$ &
+Future encoder: $4\times256$ tokens
+\end{tabularx}
+\begin{center}
+$\downarrow$\\
+12 tokens + learned temporal-slot and source-type embeddings\\
+$\downarrow$\\
+2 Transformer layers, 4 heads, width 256\\
+$\downarrow$\\
+Pool current token: $h_t\in\R^{256}$\\
+$\downarrow$\\
+Concatenate $[h_t,\ a^{\mathrm{hist}}_t,\ g,\boldsymbol{\beta}]$
+and normalize
+\end{center}
+\begin{tabularx}{\linewidth}{@{}YY@{}}
+\textbf{Actor:} six 2,896-unit layers
+$\longrightarrow$ 69 action means
+$\longrightarrow$ tanh/range scaling
+$\longrightarrow$ PD targets. &
+\textbf{Critic:} four 1,024-unit layers
+$\longrightarrow$ scalar state value.
+\end{tabularx}
+\smallskip
+The entire encoder/attention pathway is instantiated separately for actor
+and critic; the drawing summarizes the common design, not shared weights.
+Morphology and action bypass attention into each head. Text is absent.
+\end{minipage}}
+\caption{Temporal slot/type controller and separate actor/critic heads.}\label{fig:network}
+\end{figure}
+
+The final head input concatenates the 256-dimensional attention output, the
+historical raw action, and the 11-dimensional morphology vector; this
+336-dimensional input also uses running normalization and clamp five. Betas are
+not manually divided by three, embedded as a separate attention token, or used
+for adaLN modulation in the selected model. Actor and critic have separate token
+encoders, attention modules, slot/type embeddings, and MLP heads, with six
+hidden layers of width 2,896 for the actor and four of width 1,024 for the
+critic, all with ReLU activations; they output a Gaussian action mean and a
+scalar value, respectively. PPO samples actions with fixed diagonal log standard
+deviation $-2.9$, and evaluation uses the mean action.
+
+\subsection{Reward}\label{sec:reward}
+
+The training reward combines global body tracking and root-height tracking. For
+corresponding simulated and reference body positions $p_j,\hat{p}_j$, rotations
+$R_j,\hat{R}_j$, and velocities $v_j,\hat{v}_j$ and $\omega_j,\hat{\omega}_j$,
+define
+\begin{align}
+    e_p &= \frac{1}{3B}\sum_{j=1}^{B}\|p_j-\hat{p}_j\|_2^2,
+    \\
+    e_R &= \frac{1}{B}\sum_{j=1}^{B}
+                  d_{\SO(3)}(R_j,\hat{R}_j)^2, \\
+    e_v &= \frac{1}{3B}\sum_{j=1}^{B}\|v_j-\hat{v}_j\|_2^2,
+    \\
+    e_\omega &= \frac{1}{3B}\sum_{j=1}^{B}
+                     \|\omega_j-\hat{\omega}_j\|_2^2, \\
+    e_h &= (h-\hat{h})^2,
+\end{align}
+where $d_{\SO(3)}$ is the geodesic rotation angle in radians and the
+coordinate-wise means in the position and velocity errors match the implemented
+reductions. The reward is
+\begin{equation}
+\begin{split}
+    r_t ={}& 0.5\exp(-25e_p) + 0.3\exp(-5e_R)
+             + 0.1\exp(-0.5e_v)\\
+           &+0.2\exp(-0.1e_\omega) + 0.2\exp(-100e_h),
+\end{split}\label{eq:reward}
+\end{equation}
+with weights that are not normalized to sum to one. There is no explicit
+effort, action-smoothness, or contact-matching reward in this experiment, and no
+source-dependent switch between canonical and HUMOS reward functions.

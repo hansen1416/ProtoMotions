@@ -1,56 +1,64 @@
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\linewidth]{figures/rollout_128_bodies.png}
+\caption{One motion tracked by MorphMimic on 128 trained bodies (collision geometry).}
+\label{fig:trained_multibody_demo}
+\end{figure}
+
 \section{Introduction}\label{sec:introduction}
 Physics-based character animation should reproduce actions on digital humans
-with different proportions and dynamics. A shared controller offers a way to
-reuse a motion repertoire across those bodies, provided that references and
-simulated assets remain consistent. Changing limb lengths, collision
-geometry, and mass distribution changes both the spatial realization of a
-motion and the actuation needed to track it. The learning problem therefore
-has two coupled axes: variation in motion and variation in body. Good
-tracking on new motions for a familiar body does not establish transfer to
-a new body, and a high average over bodies can conceal severe failures.
+with different proportions and dynamics, and a shared controller offers a way
+to reuse one motion repertoire across those bodies, provided that references
+and simulated assets stay consistent. Limb lengths, collision geometry, and
+mass distribution change both the spatial realization of a motion and the
+actuation needed to track it, so the learning problem has two coupled axes:
+variation in motion and variation in body. Good tracking of new motions on a
+familiar body does not establish transfer to a new body, and a high average
+over bodies can conceal severe failures.
 
-Large motion resources, shape-conditioned reference generation, and scalable
-imitation provide the building blocks~\cite{amass,humanml3d,humos,phc,protomotions}.
-Body-conditioned control is established~\cite{won2019}. PHC and ASE learn from
-motion collections but report results on a single body shape; PHC supports
-body variation, although its quantitative evaluations use the mean SMPL
-body~\cite{phc,ase} (Section~\ref{sec:external_comparison}). Our question is
-how reliably one controller learns and transfers across a large corpus of
-explicitly paired motions and bodies.
+The building blocks exist: large motion resources, shape-conditioned reference
+generation, and scalable imitation~\cite{amass,humanml3d,humos,phc,protomotions}.
+Body-conditioned control is established~\cite{won2019}, but the large-scale
+trackers PHC and ASE learn from motion collections and report results on a
+single body shape; PHC supports body variation, although its quantitative
+evaluations use the mean SMPL body~\cite{phc,ase}
+(Section~\ref{sec:related_work}). What remains open is how reliably one
+controller learns and transfers across a large corpus of explicitly paired
+motions and bodies.
 
-We approach it with a paired corpus in which every clip/body identity is
-preserved from HUMOS generation through simulation and replay: 20,951 clip
-identities and 128 body configurations, on which one shared temporal
-slot/type-attention controller trains directly, using streamed motion
-residency, on 18,855 clips. Evaluation separates motion exposure from body
-exposure. The contributions are the paired corpus and workflow, the shared
-controller configuration with streamed residency, exposure-separated
-evaluation of trained and unseen bodies, and three-seed network comparisons
-together with a reference-refinement audit.
-We inherit the simulator integration, proximal policy optimization (PPO), and motion-tracking
-infrastructure from ProtoMotions; we do not claim these or morphology
-conditioning itself as new. HumanML3D captions are metadata, not policy
-inputs: this is reference-conditioned imitation, not text-conditioned control.
+We approach it with MorphMimic: a paired corpus in which every clip/body
+identity is preserved from HUMOS generation through simulation and replay
+(20,951 clip identities and 128 body configurations), and one shared temporal
+slot/type-attention controller that trains directly on 18,855 of those clips
+using streamed motion residency (Figure~\ref{fig:trained_multibody_demo}).
+Evaluation separates motion exposure from body exposure. The contributions are
+the paired corpus and workflow, the shared controller with streamed residency,
+exposure-separated evaluation of trained and unseen bodies, and three-seed
+network comparisons with a reference-refinement audit. We inherit the simulator
+integration, proximal policy optimization (PPO), and motion-tracking
+infrastructure from ProtoMotions and do not claim them, or morphology
+conditioning itself, as new. HumanML3D captions are metadata, not policy
+inputs: MorphMimic is reference-conditioned imitation, not text-conditioned
+control.
 
-The original checkpoint achieves 99.14\% success on 1,048 clip-disjoint test
-clips, each paired with one selected trained body. On 233 training-split
-clips across 128 unseen inside-range bodies and 128 unseen outside-range
-bodies, success is 97.28\% and 97.15\%. Yet the worst bodies succeed on only
-3.0\% and 13.3\% of those clips. These findings support the central claim:
-\emph{one shared controller learns morphology-specific tracking with strong
-average transfer to unseen shapes, but uneven robustness across individual
-bodies}. The design evidence explains practical trade-offs; it does not yet
-isolate the benefit of explicit morphology inputs or establish uniform
+The original MorphMimic checkpoint achieves 99.14\% success on 1,048
+clip-disjoint test clips, each paired with one selected trained body. On 233
+training-split clips across 128 unseen inside-range bodies and 128 unseen
+outside-range bodies, success is 97.28\% and 97.15\%, yet the worst bodies
+succeed on only 3.0\% and 13.3\% of those clips. These findings support the
+central claim: \emph{one shared controller learns morphology-specific tracking
+with strong average transfer to unseen shapes, but uneven robustness across
+individual bodies}. The design evidence explains practical trade-offs; it does
+not yet isolate the benefit of explicit morphology inputs or establish uniform
 held-out-motion performance across all bodies.
 
-The remainder of the paper is structured as follows.
-Section~\ref{sec:related_work} reviews related work;
-Section~\ref{sec:problem} defines the problem and system;
-Section~\ref{sec:dataset} presents the corpus;
-Section~\ref{sec:method} describes the proposed methodology;
-Section~\ref{sec:experiments} specifies evaluation;
-Section~\ref{sec:results} presents the results;
-and Section~\ref{sec:discussion} discusses limitations and concludes.
-The appendices provide reproducibility details,
-training provenance, and additional unseen-body results; the complete per-body
-tables are in the Supplementary Material.
+The remainder of the paper is organized as follows.
+Section~\ref{sec:related_work} reviews related work,
+Section~\ref{sec:problem} gives an overview of the system, and
+Section~\ref{sec:dataset} presents the corpus.
+Sections~\ref{sec:method} and~\ref{sec:training} describe the policy
+representation and its training, Section~\ref{sec:results} presents the
+evaluation and results, and Section~\ref{sec:discussion} discusses limitations
+and concludes. The appendices provide reproducibility details, training
+provenance, and additional unseen-body results; the complete per-body tables
+are in the Supplementary Material.

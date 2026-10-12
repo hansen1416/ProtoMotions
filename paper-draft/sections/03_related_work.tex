@@ -1,99 +1,67 @@
 \section{Related Work}\label{sec:related_work}
 
-\subsection{Physics-based motion imitation}
+\paragraph{Physics-based motion imitation.}
+DeepMimic showed that reference-guided reinforcement learning can produce
+simulated character skills~\cite{deepmimic}, and Perpetual Humanoid Control
+extended robust imitation to real-time simulated avatars~\cite{phc}. Both
+motivate learning a feedback controller rather than replaying a kinematic
+trajectory. PULSE learns a motion representation for humanoid control, OmniH2O,
+ExBody2, and GMT study large-scale control on robot
+platforms~\cite{pulse,omnih2o,exbody2,gmt}, and ASE learns reusable latent
+skills rather than exact clip tracking~\cite{ase}; their published scores do not
+measure our clip/body replay task. We build on ProtoMotions with Isaac Gym and
+PPO~\cite{protomotions,isaacgym,ppo}.
 
-DeepMimic demonstrated reference-guided reinforcement learning for simulated
-character skills~\cite{deepmimic}. Perpetual Humanoid Control developed robust
-humanoid imitation for real-time simulated avatars~\cite{phc}. These approaches
-motivate learning a feedback controller rather than directly replaying a
-kinematic trajectory. PULSE learns a motion representation for humanoid control, while OmniH2O,
-ExBody2, and GMT study large-scale control on robot platforms~\cite{pulse,omnih2o,exbody2,gmt}.
-ASE learns reusable latent skills and downstream task policies rather than
-requiring exact clip tracking~\cite{ase}. These objectives provide context,
-but their published scores do not measure our clip/body replay task.
-We implement our experiments in ProtoMotions with Isaac Gym and PPO
-optimization~\cite{protomotions,isaacgym,ppo}.
+\paragraph{Body variation and retargeting.}
+Body-shape variation has been studied in physics-based control. Won and Lee
+learned a parametric controller over character height, weight, and
+proportions~\cite{won2019}, and ShapeVerse trains characters with varied SMPL
+shape parameters to imitate walking and jogging~\cite{shapeverse}. Policies that
+transfer across changes in agent \emph{topology}, such as limb count, use shared
+modular sub-policies~\cite{smp2020}, a different axis from the continuous
+variation studied here. Morphology conditioning is therefore established and
+not claimed as new; we examine one controller over a large set of paired motions
+and bodies, with shape identity maintained through generation, simulation, and
+evaluation. Kinematic retargeting and dynamic tracking meet different
+requirements. SMPL gives a common parameterized body~\cite{smpl}, SMPLSim builds
+simulation-ready assets from it~\cite{smplsim}, and physics-based retargeting of
+motion capture to realistic body shapes has been studied with spacetime
+optimization~\cite{alborno2018}. A shared skeleton makes poses comparable but
+does not make global positions or required actuation independent of shape, so
+matching a reference to its simulation asset is part of the task definition.
 
-\subsection{Morphology-conditioned control and retargeting}
-
-Body-shape variation has already been studied in physics-based control:
-Won and Lee learned a parametric controller that accommodates variation in
-character height, weight, and proportions~\cite{won2019}. ShapeVerse trains
-physics-based characters with varied SMPL shape parameters to imitate walking
-and jogging~\cite{shapeverse}. A separate line of
-work learns policies that transfer across changes in agent \emph{topology} --
-limb count and skeletal structure -- through shared modular
-sub-policies~\cite{smp2020}, which is a different axis from the continuous
-anthropometric variation studied here. Morphology conditioning is therefore
-an established idea, and our work should not be interpreted as introducing it.
-We instead examine one controller over a large set of paired motions and
-bodies, with shape identity maintained throughout data generation,
-simulation, and evaluation.
-
-Kinematic retargeting and dynamic tracking address different requirements.
-SMPL provides a common parameterized body representation~\cite{smpl}, and
-SMPLSim constructs simulation-ready assets from these
-models~\cite{smplsim}. Physics-based retargeting of motion capture to
-realistic human body shapes has been studied with spacetime
-optimization~\cite{alborno2018}. A shared skeleton makes poses comparable, but does not
-make global positions or required actuation independent of shape. Matching a
-reference to its intended simulation asset is consequently part of the task
-definition, not an optional evaluation convenience.
-
-\subsection{Text-motion data, shape-conditioned generation, and refinement}
-
+\paragraph{Motion data and shape-conditioned generation.}
 AMASS consolidates motion capture in a common body-model
-representation~\cite{amass}. HumanML3D associates processed motion segments
-with natural-language descriptions~\cite{humanml3d}. We inherit those source
-identities and descriptions rather than claiming new motion capture or
-shape-specific language annotation.
+representation~\cite{amass}, and HumanML3D associates processed segments with
+natural-language descriptions~\cite{humanml3d}; we inherit these identities and
+descriptions rather than claim new capture or shape-specific annotation. HUMOS
+generates identity-conditioned motion with a cycle-consistent
+formulation~\cite{humos}, and we use its pretrained model to obtain
+shape-specific references, not as the controller. The sequences still need
+conversion to the simulator's skeleton and a feasibility check there, and our
+refinement is a deliberately limited kinematic post-process, not a new
+generative model or trajectory optimizer. The controller uses standard
+Transformer operations~\cite{attention}, and one ablation adapts the
+zero-initialized adaLN conditioning of Diffusion Transformers~\cite{dit} to
+actor-only morphology modulation; it tests a conditioning mechanism, not
+diffusion-based action generation.
 
-HUMOS generates identity-conditioned human motion using a cycle-consistent
-learning formulation~\cite{humos}. We use its pretrained model to obtain
-shape-specific references, not as the physics controller and not as a
-text-conditioned policy. The resulting sequences still require conversion to
-the simulator's skeleton and coordinate conventions, and their feasibility
-must be assessed in that simulator. Our refinement is a deliberately limited
-kinematic post-process; it is not a new generative model or a full dynamic
-trajectory optimizer.
-
-The controller uses standard Transformer operations~\cite{attention}.
-Learned slot and type embeddings identify temporal positions and observation
-sources. An ablation also investigates actor-only morphology modulation with
-adaLN-Zero, adapting the zero-initialized conditioning design used in
-Diffusion Transformers~\cite{dit}. That experiment tests a conditioning
-mechanism, not diffusion-based action generation.
-
-\subsection{Comparison with related systems}\label{sec:external_comparison}
+\paragraph{Comparison with related systems.}\label{sec:external_comparison}
 Table~\ref{tab:capabilities} compares the closest systems on the axis studied
 here: the number of body shapes in their published results. PHC, ASE, and
-ProtoMotions learn from motion collections (11,313 AMASS training sequences
-for PHC, 187 clips for ASE), but their reported results use a single body
-shape. PHC evaluates on the mean neutral SMPL body; its appendix describes
-optional training on randomly sampled AMASS shapes, and shape variation is
-shown only qualitatively~\cite{phc}. ASE reports experiments on one
-sword-and-shield humanoid~\cite{ase}. ProtoMotions supports configurable
-characters and robots, but its documentation describes no single policy trained
-across body-shape variants~\cite{protomotions}. Won and Lee directly establish
-parametric body control~\cite{won2019}; their experiments differ from our large
-clip-by-body imitation panels. Our distinction is therefore the combination of
-many motions and many body shapes under one controller, with references and
-assets paired per body and systematic inside- and outside-range replay, not
-priority for morphology conditioning.
-
-This is a comparison of published capabilities, not a performance ranking.
-``Not reported'' concerns the cited source and the specified unseen-body test,
-not impossibility. PHC is the closest reference-tracking comparator, but a
-matched comparison would require our shape-specific references, assets, clip
-splits, horizons, and success aggregation. ASE optimizes latent skills and
-downstream objectives rather than exact replay of designated clips, so its task
-scores are not interchangeable with tracking success. ProtoMotions supplies
-infrastructure and configurable trackers rather than a single published policy
-whose score can be compared directly with ours. These differences prevent
-direct use of published scores as matched baselines; they do not establish that
-the systems could not be adapted to this task. No external system has been
-rerun under our protocol. Our quantitative design comparison is therefore
-internal, and no performance advantage over these systems is claimed.
+ProtoMotions learn from motion collections (11,313 AMASS training sequences for
+PHC, 187 clips for ASE), but their reported results use a single body shape. PHC
+evaluates on the mean neutral SMPL body; its appendix describes optional
+training on randomly sampled AMASS shapes, and shape variation is shown only
+qualitatively~\cite{phc}. ASE reports experiments on one sword-and-shield
+humanoid~\cite{ase}, and ProtoMotions supports configurable characters and
+robots but documents no single policy trained across body-shape
+variants~\cite{protomotions}. Won and Lee establish parametric body
+control~\cite{won2019}, with experiments that differ from our large clip-by-body
+panels. MorphMimic's distinction is therefore the combination of many motions
+and many body shapes under one controller, with references and assets paired per
+body and systematic inside- and outside-range replay, not priority for
+morphology conditioning.
 
 \begin{table}[t]
 \centering\small
@@ -107,19 +75,27 @@ ASE~\cite{ase} & One: sword-and-shield humanoid & Not reported \\
 ProtoMotions 3~\cite{protomotions} & One per configured character or robot & Not reported \\
 Won \& Lee~\cite{won2019} & Many: one parametric controller over height, weight, and proportions & Novel and changing shapes demonstrated \\
 \midrule
-This study & Many: 128 trained bodies, one controller & 128 inside and 128 outside the training range; all reported \\
+MorphMimic & Many: 128 trained bodies, one controller & 128 inside and 128 outside the training range; all reported \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
+This is a comparison of published capabilities, not a performance ranking, and
+``not reported'' concerns the cited source and the unseen-body test, not
+impossibility. A matched comparison with PHC, the closest reference-tracking
+system, would need our shape-specific references, assets, clip splits, horizons,
+and success aggregation; ASE optimizes latent skills rather than exact replay,
+so its task scores are not interchangeable with tracking success; and
+ProtoMotions supplies infrastructure rather than a single published policy. No
+external system has been rerun under our protocol, so our quantitative design
+comparison is internal and no performance advantage is claimed.
+
 \paragraph{Inherited functions and study additions.}
-ProtoMotions provides the simulation abstraction, PPO training, motion-library
-and imitation infrastructure. HUMOS supplies the pretrained generator;
-SMPL/SMPLSim supply the body parameterization and asset construction. Our
-study adds the paired corpus assembly and identity checks, reference
-processing and fidelity audit, the evaluated temporal slot/type controller
-configuration, streamed clip residency, and exposure-separated evaluation.
-These are system and empirical contributions built on existing methods,
-not claims to invent attention, PPO, body models, or motion imitation.
-A directly comparable performance claim requires a matched external replay;
-none is made here.
+ProtoMotions provides the simulation abstraction, PPO training, and
+motion-library and imitation infrastructure, HUMOS supplies the pretrained
+generator, and SMPL and SMPLSim supply the body parameterization and assets. We
+add the paired corpus assembly and identity checks, the reference processing and
+fidelity audit, the evaluated slot/type controller configuration, streamed clip
+residency, and exposure-separated evaluation. These are system and empirical
+contributions built on existing methods, not claims to invent attention, PPO,
+body models, or motion imitation.
