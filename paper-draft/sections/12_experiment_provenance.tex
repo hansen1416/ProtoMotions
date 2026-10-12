@@ -11,13 +11,11 @@ recorded for the selected full-scale slot/type run, at epoch 28,159 after
 approximately 11.07 billion simulated frames. The separately downloaded
 checkpoint is from epoch 28,170. These values are post-correction,
 morphology-matched evaluations, not measurements of that later checkpoint
-or of the clip-disjoint test split.
-
-Recorded full-scale monitoring snapshot. Validation contains
-1,048 held-out clips; each evaluation uses one selected trained body per clip.
-The active resident pool is difficulty-biased. Values are the stored
-distributed logging summaries from run \texttt{3mvgad6f}, epoch 28,159;
-no confidence intervals or all-shape coverage are implied.
+or of the clip-disjoint test split. Validation contains 1,048 held-out clips,
+each evaluated on one selected trained body, while the resident pool is
+difficulty-biased. Values are the stored distributed logging summaries of run
+\texttt{3mvgad6f} at epoch 28,159, and no confidence intervals or all-shape
+coverage are implied.
 
 \begin{table}[t]
 \centering
@@ -45,8 +43,8 @@ rate should not be interpreted as the success rate of the entire training
 corpus, nor should the difference be described as validation outperforming
 an IID training sample.
 
-Figure~\ref{fig:learning_curve}: Scheduled success rate over training for the full-scale slot/type
-run (\texttt{3mvgad6f}). The step near epoch 16.9k is the morphology-matched
+Figure~\ref{fig:learning_curve} shows the scheduled success rate over training
+for the full-scale slot/type run (\texttt{3mvgad6f}). The step near epoch 16.9k is the morphology-matched
 evaluation correction plus its sampling change, not an instantaneous learning
 event; pre-correction points use the earlier, sometimes mismatched
 reference-to-asset assignment and are not comparable to the post-correction
@@ -117,7 +115,9 @@ different targets. Success shows the variation across eight evaluations within
 each run, and the other columns are their means; this within-run variation must
 not be interpreted as uncertainty across training runs. The main architecture
 conclusion uses the repeated refined runs of Table~\ref{tab:architecture_seeds}
-instead.
+instead. The columns gt err and gr err are the mean global body-position (m)
+and rotation (rad) errors, Jerk is the windowed normalized jerk, and HJ\% is
+the percentage of high-jerk windows.
 \begin{table}[t]
 \centering
 \small

@@ -57,7 +57,7 @@ where $T_i$ is the evaluated horizon. This threshold is deliberately distinct
 from the smoother training reward, and passing it does not imply fine-grained
 pose accuracy or biomechanical realism. We also report success at the stricter
 thresholds 0.3, 0.2, and 0.1\,m, time-averaged mean
-body-position error (the global MPJPE $E_{\text{g-mpjpe}}$ of Table~\ref{tab:capabilities}), mean global body-rotation geodesic error (not a local
+body-position error (the global mean per-joint position error $E_{\text{g-mpjpe}}$ of Table~\ref{tab:capabilities}), mean global body-rotation geodesic error (not a local
 joint-angle error), the time average of the largest body-position error within
 each frame (the logged \emph{mean maximum-joint error}), and the windowed
 normalized jerk of Appendix~\ref{app:smoothness}, whose high-jerk statistic is
@@ -71,7 +71,8 @@ pairs.
 \paragraph{Held-out motions on selected trained bodies.}\label{sec:test_results}
 The epoch-28,170 MorphMimic checkpoint was re-evaluated offline with a
 standalone evaluator, once on the validation split and once on the clip-disjoint
-test split, with one selected body per clip (shape panel index 110). All 1,048
+test split, with one selected body per clip (shape panel index 110;
+Table~\ref{tab:test_results}). All 1,048
 clips of each split last about 6.6\,s (198 evaluated frames), so none reaches the
 600-step cap. The test manifest is loaded only by this evaluator, which first
 verifies its hash, clip count, and disjointness from train and validation; the
@@ -154,8 +155,9 @@ Crossing the 233 training-split clips with all 128 bodies in each panel gives
 every failed pair. MorphMimic's original checkpoint reaches 97.28\%
 inside-range and 97.15\% outside-range success. The trained-body control reaches 99.29\%, but uses
 different clips and a different refinement run, so the gap of roughly two
-percentage points is descriptive, not a matched estimate of the effect of
-changing bodies. Deltas are paired within each dataset, intervals resample clips
+percentage points (pp) is descriptive, not a matched estimate of the effect of
+changing bodies. Deltas are paired within each dataset, 95\% confidence
+intervals (CI) resample clips
 with the body panel fixed, and the rerun repeats the original checkpoint, not its
 training.
 
@@ -181,8 +183,8 @@ High averages coexist with severe body-specific failures. Inside body
 reaches only 19.3\% despite an in-range mass of 42.7\,kg and height of 1.41\,m.
 Figure~\ref{fig:unseen_v2_shapes} shows all 128 bodies of each panel, sorted
 independently by original-checkpoint success on the same 233 known clips (the
-ranking does not pair inside and outside bodies), and the Supplementary Material
-reports every body. Lying outside the training coefficient box does not explain
+ranking does not pair inside and outside bodies), and Online Resource 1 reports
+every body. Lying outside the training coefficient box does not explain
 these failures: success does not decline monotonically across the four outside
 coefficient tiers (99.03, 97.76, 95.33, and 96.47\%). Bodies outside the trained
 height range perform well on average (97.91\% outside; 96.42\% inside), while
@@ -250,7 +252,8 @@ We compare four architectures: A, temporal MLP; B, temporal attention; C,
 attention with slot/type embeddings, the architecture of MorphMimic; and D, C
 with actor-only adaLN-Zero. All retain morphology inputs in actor and critic.
 Refined-reference runs use three seeds (0, 1, 2) and a matched 6,000-epoch
-budget on the development subset, and each run contributes one summary, the mean
+budget on the development subset (Table~\ref{tab:architecture_seeds}), and each
+run contributes one summary, the mean
 of its last eight evaluations (epochs 4,600--6,000); means and sample standard
 deviations are computed across the three run summaries, and within-run
 evaluations are not replicates. Seed-1/2 values were checked against local
@@ -262,7 +265,7 @@ repeat A--D with unrefined references and one seed each
 
 \begin{table}[t]
 \centering\small
-\caption{Three-seed refined-reference comparison, mean $\pm$ s.d.\ across seeds.}\label{tab:architecture_seeds}
+\caption{Three-seed refined-reference comparison, mean $\pm$ standard deviation across seeds.}\label{tab:architecture_seeds}
 \begin{tabularx}{\linewidth}{@{}Yrrrrr@{}}
 \toprule
 Architecture & Success (\%) & Pos. (m) & Rot. (rad) & Jerk & Params (M) \\

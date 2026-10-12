@@ -19,9 +19,10 @@ over bodies can conceal severe failures.
 The building blocks exist: large motion resources, shape-conditioned reference
 generation, and scalable imitation~\cite{amass,humanml3d,humos,phc,protomotions}.
 Body-conditioned control is established~\cite{won2019}, but the large-scale
-trackers PHC and ASE learn from motion collections and report results on a
-single body shape; PHC supports body variation, although its quantitative
-evaluations use the mean SMPL body~\cite{phc,ase}
+trackers Perpetual Humanoid Control (PHC) and Adversarial Skill Embeddings
+(ASE) learn from motion collections and report results on a single body shape;
+PHC supports body variation, although its quantitative evaluations use the mean
+body of the Skinned Multi-Person Linear model (SMPL)~\cite{phc,ase,smpl}
 (Section~\ref{sec:related_work}). What remains open is how reliably one
 controller learns and transfers across a large corpus of explicitly paired
 motions and bodies.
@@ -61,4 +62,4 @@ representation and its training, Section~\ref{sec:results} presents the
 evaluation and results, and Section~\ref{sec:discussion} discusses limitations
 and concludes. The appendices provide reproducibility details, training
 provenance, and additional unseen-body results; the complete per-body tables
-are in the Supplementary Material.
+are in Online Resource 1.

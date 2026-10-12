@@ -49,7 +49,7 @@ Future reference & $24B=576$ & 4 &
 Target and relative poses ($18B$), plus velocity differences ($6B$).
 Shared future encoder. \\
 Historical action & $D=69$ & 1 &
-A raw previous policy-action vector, before tanh and PD scaling.
+A raw previous policy-action vector, before the tanh and joint-target mapping.
 Bypasses attention. \\
 Morphology & $11$ & 1 &
 $[g,\beta_1,\ldots,\beta_{10}]$ from the assigned asset.
@@ -72,7 +72,7 @@ drive the simulator's built-in position proportional--derivative (PD)
 controller; the action is not a residual added to the reference pose. PD
 stiffness, damping, and effort limits are scaled per joint by the mass of the
 associated rigid body relative to that body in the reference asset (base values
-in Table~\ref{tab:pd_parameters}). This body-level mass scaling is not a single
+in Appendix~\ref{app:control}). This body-level mass scaling is not a single
 scale based on total character mass, and it does not guarantee dynamically
 equivalent actuation across geometrically different bodies.
 
@@ -80,8 +80,8 @@ equivalent actuation across geometrically different bodies.
 
 MorphMimic uses temporal slot/type attention. Three observation encoders, one
 for the current state, one shared across history slots, and one shared across
-future slots, are MLPs with two 256-unit ReLU hidden layers and a
-256-dimensional token output, and their inputs use running mean/standard-deviation
+future slots, are multilayer perceptrons (MLPs) with two 256-unit hidden layers,
+rectified linear unit (ReLU) activations, and a 256-dimensional token output, and their inputs use running mean/standard-deviation
 normalization with a magnitude clamp of five. The resulting 12 tokens (one
 current, seven historical, four future) enter a Transformer as
 \begin{equation}

@@ -42,20 +42,22 @@ conversion to the simulator's skeleton and a feasibility check there, and our
 refinement is a deliberately limited kinematic post-process, not a new
 generative model or trajectory optimizer. The controller uses standard
 Transformer operations~\cite{attention}, and one ablation adapts the
-zero-initialized adaLN conditioning of Diffusion Transformers~\cite{dit} to
+zero-initialized adaptive layer normalization (adaLN) conditioning of
+Diffusion Transformers~\cite{dit} to
 actor-only morphology modulation; it tests a conditioning mechanism, not
 diffusion-based action generation.
 
 \paragraph{Comparison with related systems.}\label{sec:external_comparison}
-Table~\ref{tab:capabilities} lists the reported tracking results of the closest
-systems beside MorphMimic's. PHC, ASE, and ProtoMotions learn from motion
+Table~\ref{tab:capabilities} lists the reported tracking results of PHC and
+ProtoMotions beside MorphMimic's. PHC, ASE, and ProtoMotions learn from motion
 collections but report results on a single body shape. PHC evaluates on the mean
 SMPL body, with optional shape-sampled training and no systematic unseen-body
 panel~\cite{phc}; ASE reports task returns on one sword-and-shield humanoid
 rather than tracking success~\cite{ase}; and ProtoMotions documents configurable
 characters and a fall-based success rate~\cite{protomotions}. Won and Lee
 establish parametric body control, with experiments that differ from our
-clip-by-body panels~\cite{won2019}. PHC's success criterion matches ours (joint
+clip-by-body panels~\cite{won2019}; as neither they nor ASE report a comparable
+tracking success, both are left out of the table. PHC's success criterion matches ours (joint
 error above 0.5\,m at any point), but motions, clip lengths, bodies, and reference sources (captured versus generated) differ,
 so the rows are not a ranking; no external system has been rerun under our
 protocol, our quantitative design comparison is internal, and no performance
@@ -64,29 +66,28 @@ motions and many body shapes under one controller, with references and assets
 paired per body and systematic inside- and outside-range replay.
 
 \begin{table}[t]
-\centering\small
-\caption{Reported tracking results of the closest systems and of MorphMimic.}\label{tab:capabilities}
-\begin{tabularx}{\linewidth}{@{}p{0.19\linewidth}Yrlrr@{}}
+\centering\small\setlength{\tabcolsep}{4pt}
+\caption{Reported tracking results of PHC, ProtoMotions, and MorphMimic.}\label{tab:capabilities}
+{\footnotesize
+\begin{tabularx}{\linewidth}{@{}p{0.165\linewidth}YrYYrr@{}}
 \toprule
-System & Evaluation set & Motions & Bodies & Succ.\ (\%) & $E_{\text{g-mpjpe}}$ (mm) \\
+System & Training set & Motions & Evaluated on & Bodies & \shortstack[r]{Succ.\\(\%)} & \shortstack[r]{$E_{\text{g-mpjpe}}$\\(mm)} \\
 \midrule
-PHC~\cite{phc} & AMASS-Train & 11,313 & 1 (mean SMPL) & 98.9 & 37.5 \\
- & AMASS-Test & 140 & 1 (mean SMPL) & 96.4 & 47.4 \\
-ASE~\cite{ase} & Task returns only & --- & 1 & --- & --- \\
-ProtoMotions~3~\cite{protomotions} & AMASS (docs) & 40+\,h & 1 per character & $\approx$99$^{\dagger}$ & --- \\
-Won \& Lee~\cite{won2019} & --- & --- & many & --- & --- \\
+PHC~\cite{phc} & AMASS & 11,313 & AMASS-Train & 1 (mean SMPL) & 98.9 & 37.5 \\
+ & & & AMASS-Test (140) & 1 (mean SMPL) & 96.4 & 47.4 \\
+ProtoMotions~3~\cite{protomotions} & AMASS & 40+\,h & AMASS (docs) & 1 per character & $\approx$99\textsuperscript{a} & --- \\
 \midrule
-MorphMimic & Held-out test & 1,048 & 128 (one per clip) & 99.14 & 67.6 \\
- & Unseen, inside range & 233 & 128 unseen & 97.28 & 98.8 \\
- & Unseen, outside range & 233 & 128 unseen & 97.15 & 95.1 \\
+MorphMimic & HUMOS references from AMASS & 18,855 & Held-out test (1,048) & 128 (one per clip) & 99.14 & 67.6 \\
+ & & & Inside range (233) & 128 unseen & 97.28 & 98.8 \\
+ & & & Outside range (233) & 128 unseen & 97.15 & 95.1 \\
 \bottomrule
-\end{tabularx}
+\end{tabularx}}
 
 \smallskip
 \begin{minipage}{\linewidth}\footnotesize
 Succ.: joint error $\le0.5$\,m at every frame (PHC's criterion; Eq.~\eqref{eq:success}).
 $E_{\text{g-mpjpe}}$: global mean per-joint position error, for MorphMimic over all
-clips including failures. $^{\dagger}$Fall-only criterion. ``---'': not reported.
+clips including failures. \textsuperscript{a}Fall-only criterion. ``---'': not reported.
 Both PHC and MorphMimic exclude object-interaction sequences.
 \end{minipage}
 \end{table}
