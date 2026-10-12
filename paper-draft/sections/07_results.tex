@@ -56,7 +56,7 @@ and the configured success indicator is
 where $T_i$ is the evaluated horizon. This threshold is deliberately distinct
 from the smoother training reward, and passing it does not imply fine-grained
 pose accuracy or biomechanical realism. We also report time-averaged mean
-body-position error, mean global body-rotation geodesic error (not a local
+body-position error (the global MPJPE $E_{\text{g-mpjpe}}$ of Table~\ref{tab:capabilities}), mean global body-rotation geodesic error (not a local
 joint-angle error), the time average of the largest body-position error within
 each frame (the logged \emph{mean maximum-joint error}), and the windowed
 normalized jerk of Appendix~\ref{app:smoothness}, whose high-jerk statistic is

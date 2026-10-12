@@ -47,48 +47,49 @@ actor-only morphology modulation; it tests a conditioning mechanism, not
 diffusion-based action generation.
 
 \paragraph{Comparison with related systems.}\label{sec:external_comparison}
-Table~\ref{tab:capabilities} compares the closest systems on the axis studied
-here: the number of body shapes in their published results. PHC, ASE, and
-ProtoMotions learn from motion collections (11,313 AMASS training sequences for
-PHC, 187 clips for ASE), but their reported results use a single body shape. PHC
-evaluates on the mean neutral SMPL body; its appendix describes optional
-training on randomly sampled AMASS shapes, and shape variation is shown only
-qualitatively~\cite{phc}. ASE reports experiments on one sword-and-shield
-humanoid~\cite{ase}, and ProtoMotions supports configurable characters and
-robots but documents no single policy trained across body-shape
-variants~\cite{protomotions}. Won and Lee establish parametric body
-control~\cite{won2019}, with experiments that differ from our large clip-by-body
-panels. MorphMimic's distinction is therefore the combination of many motions
-and many body shapes under one controller, with references and assets paired per
-body and systematic inside- and outside-range replay, not priority for
-morphology conditioning.
+Table~\ref{tab:capabilities} lists the reported tracking results of the closest
+systems beside MorphMimic's. PHC, ASE, and ProtoMotions learn from motion
+collections but report results on a single body shape. PHC evaluates on the mean
+SMPL body, with optional shape-sampled training and no systematic unseen-body
+panel~\cite{phc}; ASE reports task returns on one sword-and-shield humanoid
+rather than tracking success~\cite{ase}; and ProtoMotions documents configurable
+characters and a fall-based success rate~\cite{protomotions}. Won and Lee
+establish parametric body control, with experiments that differ from our
+clip-by-body panels~\cite{won2019}. PHC's success criterion matches ours (joint
+error above 0.5\,m at any point), but motions, clip lengths, and bodies differ,
+so the rows are not a ranking; no external system has been rerun under our
+protocol, our quantitative design comparison is internal, and no performance
+advantage is claimed. MorphMimic's distinction is the combination of many
+motions and many body shapes under one controller, with references and assets
+paired per body and systematic inside- and outside-range replay.
 
 \begin{table}[t]
 \centering\small
-\caption{Body shapes in the published results of the closest systems.}\label{tab:capabilities}
-\begin{tabularx}{\linewidth}{@{}p{0.2\linewidth}YY@{}}
+\caption{Reported tracking results of the closest systems and of MorphMimic.}\label{tab:capabilities}
+\begin{tabularx}{\linewidth}{@{}p{0.19\linewidth}Yrlrr@{}}
 \toprule
-System & Body shapes in reported results & Unseen-body evaluation \\
+System & Evaluation set & Motions & Bodies & Succ.\ (\%) & $E_{\text{g-mpjpe}}$ (mm) \\
 \midrule
-PHC~\cite{phc} & One: mean neutral SMPL body & No systematic panel reported \\
-ASE~\cite{ase} & One: sword-and-shield humanoid & Not reported \\
-ProtoMotions 3~\cite{protomotions} & One per configured character or robot & Not reported \\
-Won \& Lee~\cite{won2019} & Many: one parametric controller over height, weight, and proportions & Novel and changing shapes demonstrated \\
+PHC~\cite{phc} & AMASS-Train & 11,313 & 1 (mean SMPL) & 98.9 & 37.5 \\
+ & AMASS-Test & 140 & 1 (mean SMPL) & 96.4 & 47.4 \\
+ASE~\cite{ase} & Task returns only & --- & 1 & --- & --- \\
+ProtoMotions~3~\cite{protomotions} & AMASS (docs) & 40+\,h & 1 per character & $\approx$99$^{\dagger}$ & --- \\
+Won \& Lee~\cite{won2019} & --- & --- & many & --- & --- \\
 \midrule
-MorphMimic & Many: 128 trained bodies, one controller & 128 inside and 128 outside the training range; all reported \\
+MorphMimic & Held-out test & 1,048 & 128 (one per clip) & 99.14 & 67.6 \\
+ & Unseen, inside range & 233 & 128 unseen & 97.28 & 98.8 \\
+ & Unseen, outside range & 233 & 128 unseen & 97.15 & 95.1 \\
 \bottomrule
 \end{tabularx}
-\end{table}
 
-This is a comparison of published capabilities, not a performance ranking, and
-``not reported'' concerns the cited source and the unseen-body test, not
-impossibility. A matched comparison with PHC, the closest reference-tracking
-system, would need our shape-specific references, assets, clip splits, horizons,
-and success aggregation; ASE optimizes latent skills rather than exact replay,
-so its task scores are not interchangeable with tracking success; and
-ProtoMotions supplies infrastructure rather than a single published policy. No
-external system has been rerun under our protocol, so our quantitative design
-comparison is internal and no performance advantage is claimed.
+\smallskip
+\begin{minipage}{\linewidth}\footnotesize
+Succ.: joint error $\le0.5$\,m at every frame (PHC's criterion; Eq.~\eqref{eq:success}).
+$E_{\text{g-mpjpe}}$: global mean per-joint position error, for MorphMimic over all
+clips including failures. $^{\dagger}$Fall-only criterion. ``---'': not reported.
+Both PHC and MorphMimic exclude object-interaction sequences.
+\end{minipage}
+\end{table}
 
 \paragraph{Inherited functions and study additions.}
 ProtoMotions provides the simulation abstraction, PPO training, and
