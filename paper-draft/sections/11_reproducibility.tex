@@ -9,7 +9,11 @@ SFU, SSM\_synced, TCD\_handMocap, TotalCapture, and Transitions\_mocap.
 Source preparation operates at 20\,Hz; the final motion libraries use
 30\,Hz. Joint ordering and quaternion conventions must follow the matching
 asset and MotionLib conversion rather than be inferred from source array
-positions.
+positions. Body coefficients are sampled with NumPy's random number generator
+using seed 46, and bodies are identified by stable beta keys rather than
+content hashes. SMPLSim assets use mass estimation and hand and foot
+simplifications (\texttt{real\_weight}, \texttt{replace\_feet},
+\texttt{remove\_toe}, \texttt{freeze\_hand}).
 
 \begin{table}[htbp]
 \centering
@@ -31,6 +35,58 @@ Root XY correction & Median stance anchors; least-squares common translation \\
 Root correction regularization & 21-frame smoothing window; 0.10\,m displacement cap \\
 Ground clearance & 0.005\,m collision-geometry margin; 5-frame lift smoothing \\
 Final reconstruction & Per-asset FK and per-motion velocity recomputation \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Caption provenance}\label{app:captions}
+
+HumanML3D descriptions are available through a separate clip-ID lookup and the
+annotation metadata used by HUMOS. A description is associated with the
+variants of its source clip; it is not a new annotation for each generated body.
+A coarse check against a single-caption-per-clip lookup finds a caption for all
+20,951 clip identities, but semantic fidelity is not established: of the 9,579
+mirrored identities, 22\% carry a caption byte-identical to their un-mirrored
+source and 40\% contain an explicit left/right or clockwise term that mirroring
+inverts, so removing a mirror prefix does not establish a correct caption.
+Segment timing and multi-annotation coverage against the full HumanML3D
+annotation set are not audited, and the keyword-based motion classes used in
+Section~\ref{sec:physics} have not been manually validated. The retained and
+excluded ID lists provide the audit trail for the object-support filter.
+
+\subsection{Training configuration}\label{app:training}
+
+Table~\ref{tab:training_parameters} records the shared optimization settings and
+the environment and batch sizes actually used; run-specific resolved
+configurations take precedence over older launch examples. The full-scale frame
+count is a recorded stopping snapshot, not a budget matched to the development
+runs. Clip priority combines estimated difficulty, updated from training-pool
+evaluations with an exponential moving average of rate 0.1 and a floor of 0.05,
+and an exploration coefficient of 1.0; the pool is rebuilt every 256 epochs and
+a fraction 0.2 of slots is reserved for uniform selection.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Training configuration; environment and minibatch counts are per GPU.}\label{tab:training_parameters}
+\begin{tabularx}{\linewidth}{@{}lYY@{}}
+\toprule
+Setting & Corrected 150-clip runs & Full-scale selected run \\
+\midrule
+Parallel GPUs per policy & 1 & 6 \\
+Environments per GPU & 4,096 & 2,048 \\
+PPO minibatch size per GPU & 16,384 & 8,192 \\
+Rollout length & 32 control steps & 32 control steps \\
+Mini-epochs per update & 1 & 1 \\
+Actor / critic learning rates &
+$2\times10^{-5}$ / $10^{-4}$ & $2\times10^{-5}$ / $10^{-4}$ \\
+Discount / GAE / ratio clip & 0.99 / 0.95 / 0.2 & 0.99 / 0.95 / 0.2 \\
+Gradient norm clip & 50 & 50 \\
+Evaluation cadence & 200 epochs & 256 epochs \\
+Training seed & 0--2 (refined A--D); 0 (unrefined E--H) & 0 (saved run configuration) \\
+Reference residency & All 150 clips & 256, later 128 clips per GPU \\
+Training frames & 786,432,000 per run (6,000 epochs) & Approximately $11.07\times10^9$ recorded \\
+Status of reported evidence & Completed, Table~\ref{tab:architecture_seeds} & Epoch-28,170 checkpoint, Table~\ref{tab:test_results} \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -95,6 +151,27 @@ sample rate, window, units, regularizers, and aggregation fixed. Reference
 refinement reports also include raw jerk in m/s$^3$; those values are a
 different metric and cannot be compared numerically to this logged score.
 
+\subsection{Evaluation panel selection}\label{app:panel}
+
+Routine monitoring selects one variant per clip. With seed $s=42$, stable clip
+identity $c$, panel index $p$, and $N_c$ available variants, the choice is
+\begin{equation}
+    k(c,p) =
+    \left(
+       \operatorname{uint64}_{\mathrm{big}}
+       \bigl(\operatorname{SHA256}(s\!:\!c)_{0:8}\bigr)
+       +p
+    \right)\bmod N_c .
+    \label{eq:shape_panel}
+\end{equation}
+Here $s\!:\!c$ is the UTF-8 string \texttt{seed:clip\_id}. For scheduled
+monitoring, $p$ is the integer quotient of the checkpointed epoch and the
+evaluation cadence, which gives deterministic staggered shape choices that
+rotate across evaluations and remain reproducible after resume. The validation
+clip list is fixed while the selected shape panel changes, so successive scores
+are not repeated measurements on an identical set of clip/shape pairs. The
+standalone validation and test evaluations use panel index 110.
+
 \subsection{Split and experiment provenance}\label{app:provenance}
 
 The split metadata is stored in
@@ -106,9 +183,11 @@ split seed 42, and split identifier
 \end{quote}
 It records the source-manifest hash, training/validation/test manifest and
 ID-list hashes, difficulty information, and the forced training reservation.
-The generator uses 100 difficulty strata; the 150 requested development
-identities expand to 286 retained identities when existing mirrored partners
-are included. Checkpoint/run split provenance refers to these artifacts,
+The generator uses 100 difficulty strata. Its forced training reservation
+contains the 150 requested development identities and their existing mirrored
+partners, totalling 286 identities. This is a split-assignment count, distinct
+from the 150-clip development corpus used for the reported audit and design
+comparisons. Checkpoint/run split provenance refers to these artifacts,
 not just a verbal 90/5/5 ratio.
 
 The documented HUMOS configuration selects
@@ -142,7 +221,7 @@ The principal implementation entry points are:
 The sole unseen-body study is the inside/outside replay of 9 October 2026.
 Its source report is \path{r2:proto-data/unseen_shapes_v2/eval/REPORT.md};
 a local read-only snapshot is retained under
-\path{paper-draft/evidence/unseen_shapes_v2/}, including both 128-row
+\path{results/paper_evidence/unseen_shapes_v2/}, including both 128-row
 per-shape CSVs, comparison summaries, checkpoint identities, and rerun checks.
 The evaluator is \path{tools/analyze_unseen_morphology_generalization.py};
 paired analysis uses \path{tools/compare_checkpoints_unseen_morphology.py}.
@@ -176,7 +255,6 @@ The main full-scale W\&B identifier is \texttt{3mvgad6f}; the corrected
 small-scale group is \texttt{hhi\_150\_evalfix\_comparison}.
 The evaluation/sampling correction is recorded in commit \texttt{3685247}.
 
-\pending{Two items remain before a finalized benchmark report: the immutable
-HUMOS/SMPLSim checksums (to be archived with the dataset release) and the
-release of the retained per-motion evaluation records for the validation and
-test splits.}
+Immutable HUMOS-checkpoint and SMPLSim-revision checksums and public release
+of the retained validation/test per-motion records remain incomplete. The
+present study therefore does not claim a fully released benchmark.

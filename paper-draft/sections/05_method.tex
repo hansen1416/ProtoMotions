@@ -1,4 +1,4 @@
-\section{Shared Controller and Training}\label{sec:method}
+\section{Proposed Methodology: Shared Controller and Training}\label{sec:method}
 
 \subsection{Task, simulation, and actuation}
 
@@ -15,7 +15,8 @@ outputs a raw action $a_t\in\R^D$, where $D=69$. Joint targets are
     \label{eq:action_mapping}
 \end{equation}
 with offsets and scales derived from the configured joint ranges. These
-targets drive the simulator's built-in position PD controller. The action is
+targets drive the simulator's built-in position proportional--derivative (PD)
+controller. The action is
 not a residual added to the reference pose.
 
 PD stiffness, damping, and effort limits are scaled per joint by the mass of
@@ -47,13 +48,22 @@ heading-aligned linear/angular velocity differences. Thus relative rotations
 are expressed with respect to the current body rotation, not as another
 heading-frame position feature.
 
+
+
+The temporal context exposes both recent changes and more distant motion
+information, and the future targets provide a short anticipation window.
+Contact flags, an explicit phase scalar, text, and estimated physical
+feature vectors are not part of the selected observation.
+
+Table~\ref{tab:observations} summarizes the actor and critic inputs.
+Dimensions are per slot. Positions use metres, linear velocities m/s,
+angular velocities rad/s, and 6D rotations are dimensionless. Raw actions
+and morphology coefficients are not joint-angle measurements.
+
 \begin{table}[t]
 \centering
 \small
-\caption{Observation inputs supplied to both actor and critic. Dimensions are
-per slot. Positions/heights use meters, linear velocities m/s, angular
-velocities rad/s, and 6D rotations are dimensionless. Raw actions and
-morphology coefficients are not joint-angle measurements.}\label{tab:observations}
+\caption{Observation inputs supplied to both actor and critic.}\label{tab:observations}
 \begin{tabularx}{\linewidth}{@{}lrlY@{}}
 \toprule
 Input & Dimension & Slots & Representation and path \\
@@ -75,15 +85,6 @@ Bypasses attention. \\
 \bottomrule
 \end{tabularx}
 \end{table}
-
-The temporal context exposes both recent changes and more distant motion
-information; the future targets provide a short anticipation window.
-These are design motivations, not established ablation outcomes.
-History is initialized consistently with reference-state resets using
-available historical reference states; single-state initialization is the
-fallback when a trajectory history is unavailable.
-Contact flags, an explicit phase scalar, text, and estimated physical
-feature vectors are not part of the selected observation.
 
 \subsection{Temporal slot/type attention}\label{sec:architecture}
 
@@ -107,6 +108,10 @@ embeddings distinguish the observation sources. The Transformer has two
 layers, four attention heads, token width 256, and feed-forward width
 1,024~\cite{attention}. Its current-state token supplies the pooled output
 after the configured output projection and activation.
+
+Figure~\ref{fig:network} traces the encoded temporal observations through
+attention and the separate actor/critic heads. The networks receive the same
+input categories but have separate parameters.
 
 \begin{figure}[t]
 \centering
@@ -144,8 +149,7 @@ The entire encoder/attention pathway is instantiated separately for actor
 and critic; the drawing summarizes the common design, not shared weights.
 Morphology and action bypass attention into each head. Text is absent.
 \end{minipage}}
-\caption{Observation-to-action data flow of the selected slot/type policy.
-Both networks receive the same input categories but have separate parameters.}\label{fig:network}
+\caption{Temporal slot/type controller and separate actor/critic heads.}\label{fig:network}
 \end{figure}
 
 The final head input is the concatenation of the 256-dimensional attention
@@ -159,7 +163,7 @@ embeddings, and MLP heads. The actor head has six hidden layers of width
 2,896; the critic has four of width 1,024, all with ReLU activations.
 The outputs are a Gaussian action mean and a scalar value, respectively.
 PPO samples actions with fixed diagonal log standard deviation $-2.9$;
-evaluation uses the mean action. Figure~\ref{fig:network} summarizes the flow.
+evaluation uses the mean action.
 
 \subsection{Tracking reward, resets, and PPO}\label{sec:learning}
 
@@ -169,12 +173,14 @@ rotations $R_j,\hat{R}_j$, and velocities $v_j,\hat{v}_j$ and
 $\omega_j,\hat{\omega}_j$, define
 \begin{align}
     e_p &= \frac{1}{3B}\sum_{j=1}^{B}\|p_j-\hat{p}_j\|_2^2,
-    & e_R &= \frac{1}{B}\sum_{j=1}^{B}
+    \\
+    e_R &= \frac{1}{B}\sum_{j=1}^{B}
                   d_{\SO(3)}(R_j,\hat{R}_j)^2, \\
     e_v &= \frac{1}{3B}\sum_{j=1}^{B}\|v_j-\hat{v}_j\|_2^2,
-    & e_\omega &= \frac{1}{3B}\sum_{j=1}^{B}
+    \\
+    e_\omega &= \frac{1}{3B}\sum_{j=1}^{B}
                      \|\omega_j-\hat{\omega}_j\|_2^2, \\
-    e_h &= (h-\hat{h})^2, &&
+    e_h &= (h-\hat{h})^2.
 \end{align}
 where $d_{\SO(3)}$ is the geodesic rotation angle in radians.
 The coordinate-wise means in the position and velocity errors match the
@@ -202,31 +208,24 @@ We optimize using PPO~\cite{ppo}, with 32-step rollouts, discount 0.99,
 GAE parameter 0.95, policy-ratio clipping 0.2, and normalized advantages.
 Separate Adam optimizers use learning rates $2\times10^{-5}$ for the actor
 and $10^{-4}$ for the critic. Other configuration values and actual run
-budgets appear in Table~\ref{tab:training_parameters}. Evaluation rollouts
-use deterministic inference without gradient tracking.
+budgets appear in Table~\ref{tab:training_parameters}
+(Appendix~\ref{app:reproducibility}).
 
 \subsection{Direct multi-shape learning and streamed sampling}\label{sec:sampling}
 
 The final approach is direct multi-shape training on refined HUMOS
-references. A small static corpus supports initial development; the
-full-scale experiment streams per-clip files through \texttt{GlobalClipPool}.
-The training manifest is deterministically partitioned across GPU ranks.
-Each rank maintains a bounded resident pool containing all 128 variants
-of its selected clips. Environment-level motion sampling respects the
-assigned morphology.
+references, with no neutral pretraining stage. The full-scale experiment
+streams per-clip files through \texttt{GlobalClipPool}: the training manifest
+is deterministically partitioned across GPU ranks, and each rank keeps a
+bounded resident pool containing all 128 variants of its selected clips, with
+environment-level motion sampling respecting the assigned morphology.
 
-At each scheduled rebuild, most resident slots are selected by explicit
-top priority, combining estimated clip difficulty and an exploration bonus.
-A fraction 0.2 is reserved for uniform random selection, maintaining rehearsal
-outside the highest-priority set. Difficulty estimates are updated from
-training-pool evaluations with an exponential moving average of rate 0.1
-and a floor of 0.05. The exploration coefficient is 1.0.
-This is a training curriculum, not uniform sampling of the complete corpus.
-
-The resident pool is rebuilt every 256 epochs. The full-scale run initially
-used 256 clips per rank and was resumed with 128 after memory failures; the
-local cache multiplier was reduced to 1.0. These changes affect residency
-and memory demand, not the underlying training split. Validation membership
-is fixed independently of pool rebuilding, and validation evaluation does
-not update training sampling weights. We report resident-pool and validation
-metrics separately because they measure different populations.
+The pool is rebuilt every 256 epochs. Most resident slots are selected by
+priority, combining estimated clip difficulty and an exploration bonus, and a
+fraction 0.2 is reserved for uniform random selection to maintain rehearsal
+outside the highest-priority set. This is a training curriculum, not uniform
+sampling of the complete corpus. Validation membership is fixed independently
+of pool rebuilding and does not update sampling weights, so resident-pool and
+validation metrics measure different populations. Sampling constants and the
+pool size actually used are in Appendices~\ref{app:reproducibility}
+and~\ref{app:history}.

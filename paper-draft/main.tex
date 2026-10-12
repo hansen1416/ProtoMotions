@@ -1,3 +1,4 @@
+% Main manuscript source. Compile from paper-draft/ with the section files.
 \documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
@@ -12,19 +13,24 @@
 \usepgfplotslibrary{statistics}
 \usepackage[hidelinks]{hyperref}
 \urlstyle{same}
+% Permit long reproducibility paths to wrap within identifiers.
+\expandafter\def\expandafter\UrlBreaks\expandafter{\UrlBreaks
+\do\a\do\b\do\c\do\d\do\e\do\f\do\g\do\h\do\i\do\j\do\k\do\l\do\m
+\do\n\do\o\do\p\do\q\do\r\do\s\do\t\do\u\do\v\do\w\do\x\do\y\do\z}
+\setlength{\emergencystretch}{3em}
 
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
-\newcommand{\pending}[1]{\par\smallskip\noindent
-  \textit{Pending evidence. #1}\par\smallskip}
 \newcommand{\SO}{\mathrm{SO}}
 \newcommand{\R}{\mathbb{R}}
 
 \title{Morphology-Conditioned Physics-Based Motion Imitation\\
 Across 128 Body Shapes}
-\author{}
-\date{Connection Science working draft --- 10 October 2026}
+\author{[Author names and order]\\
+\small [Department and institution]\\
+\small [Corresponding author and email]}
+\date{}
 
-% Compile from paper-draft/. October revision; pending GPU evidence is marked.
+% Target: The Visual Computer. All reported measurements are retained.
 
 \begin{document}
 \maketitle
@@ -38,12 +44,11 @@ Across 128 Body Shapes}
 \input{sections/06_experimental_setup}
 \input{sections/07_results_and_failure_analysis}
 \input{sections/09_discussion}
-\input{sections/10_conclusion}
+\input{sections/15_declarations}
 
 \appendix
 \input{sections/11_reproducibility}
 \input{sections/12_experiment_provenance}
-\input{sections/08_physical_analysis}
 \input{sections/13_unseen_body_tables}
 \input{references}
 \end{document}

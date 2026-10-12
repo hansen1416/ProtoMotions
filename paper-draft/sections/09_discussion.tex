@@ -1,56 +1,69 @@
 \section{Discussion and Limitations}\label{sec:discussion}
-The three questions distinguish a capability from its coverage and mechanism.
-RQ1 establishes shared tracking of held-out motions on selected trained
-bodies and execution across all trained bodies on development clips. RQ2
-establishes high average transfer on both sides of the training coefficient
-boundary, while exposing bodies for which tracking largely fails. RQ3
-supports practical architecture and reference-processing choices, but not a
-causal explanation of transfer.
+We studied shared physics-based character animation through paired
+morphology-specific references and assets, a temporal controller, and explicit
+separation of motion and body exposure. One policy trained across 128 bodies
+achieves 99.14\% success on held-out motions with one selected trained body per
+clip, and executes development clips across all trained bodies. It transfers to
+unseen bodies at 97.28\% inside and 97.15\% outside the training coefficient
+range, but individual bodies can fail on most clips, and a later checkpoint
+introduces both recoveries and regressions. Temporal attention improves tracking
+accuracy and seed stability over a temporal MLP without a consistent smoothness
+difference, and the reference audit shows reduced contact artifacts at the cost
+of higher reference jerk. These comparisons support practical architecture and
+reference-processing choices, but not a causal explanation of transfer.
+
+\paragraph{Implications for character animation.}
+The evaluated workflow combines body-specific references with one shared
+feedback controller, supporting reuse across the tested digital-human
+configurations. The reference audit and the simulated-motion results are
+complementary measurements: reference cleaning does not establish lower sliding
+or penetration in controller outputs, which remain unassessed, and high
+threshold success is tracking capability, not a complete assessment of visual
+realism.
 
 \paragraph{Average transfer and individual robustness.}
-Similar inside/outside averages do not make body extrapolation uniformly
-reliable. Tier success is non-monotonic, and poor tracking occurs both beyond
-and within the training mass/height ranges. These simulated properties
-describe the tested assets; their associations do not identify failure causes.
-The later checkpoint recovers some bodies and substantially harms others.
-Its outside success gain accompanies a slight increase in mean position
-error, so threshold success alone would overstate the improvement.
+Similar inside and outside averages do not make body extrapolation uniformly
+reliable. Success is non-monotonic across coefficient tiers, and poor tracking
+occurs both beyond and within the training mass and height ranges; these
+associations describe the tested assets and do not identify failure causes.
+The later checkpoint recovers some bodies and harms others, so threshold
+success alone would overstate its improvement.
 
 \paragraph{Coverage and inference.}
-The unseen-body headline uses known motion identities to isolate body
-transfer. The separate 23 validation/test clips cannot provide an untouched
-motion test for the full-data checkpoint, which trained on them. The
-1,048-clip independent test uses one trained body per clip; a fixed
-held-out-motion panel crossed with all 128 trained bodies remains missing.
-Original/mirrored variants stay together, but the splits are not demonstrated
-to be subject- or recording-disjoint. Clip-bootstrap intervals hold the body
-panel fixed and do not quantify uncertainty over shape space. One full-scale
-training run and one candidate checkpoint do not measure training-seed or
-ordinary checkpoint variation. Identical-checkpoint reruns measure simulator
-variability, with nearly cancelling pooled changes but appreciable pair flips.
+The unseen-body headline uses known motion identities to isolate body transfer,
+the 1,048-clip test uses one trained body per clip, and a fixed held-out-motion
+panel crossed with all 128 trained bodies remains missing. Original and mirrored
+variants stay together, but the splits are not shown to be subject- or
+recording-disjoint. Clip-bootstrap intervals hold the body panel fixed and do
+not quantify uncertainty over shape space, and one full-scale run with one
+candidate checkpoint does not measure training-seed or ordinary checkpoint
+variation.
 
 \paragraph{Mechanism and design.}
-State and reference observations already carry shape information. A matched
-policy without explicit morphology inputs is needed to attribute transfer to
-those inputs. The architecture comparison keeps them in every model and has
-unequal capacities. Refinement reduces contact artifacts with small pose
-changes but raises target jerk; policies evaluated against different targets
-do not isolate its learning benefit. The exploratory physical analysis in
-Appendix~\ref{sec:physics} remains descriptive pending a clip-level contrast.
+State and reference observations already carry shape information, so attributing
+transfer to explicit morphology inputs needs a matched policy without them. The
+architecture comparison keeps those inputs in every model and has unequal
+capacities, with the temporal MLP the largest. Refinement reduces contact
+artifacts with small pose changes but raises target jerk, and policies
+evaluated against different targets do not isolate its learning benefit. The
+exploratory physical analysis (Section~\ref{sec:physics}) remains descriptive.
 
 \paragraph{Failure diagnosis and scope.}
-The unseen-body runs detect error-threshold failures, and all failed rows have zero termination flags. Those flags alone do not
-prove absence of falls; their interpretation depends on the replay
-configuration. Synchronized rollouts, contact/root trajectories, and reference-quality
-audits are needed before assigning a failure mechanism. Extreme HUMOS
-references have been refined but lack per-asset feasibility validation.
-Estimated masses, collision proxies, and mass-scaled gains are modeling
-choices; tracking success and jerk do not certify biomechanical realism.
-The short, reference-initialized flat-ground protocol excludes objects,
-partners, long-horizon recovery, skeletal-topology changes, and real robots.
+Failures are error-threshold failures with zero termination flags, which alone
+do not prove the absence of falls. Synchronized rollouts, contact and root
+trajectories, and per-asset feasibility audits are needed before assigning a
+mechanism; extreme HUMOS references have been refined but lack such validation.
+Estimated masses, collision proxies, and mass-scaled gains are modeling choices,
+and tracking success and jerk do not certify biomechanical realism. The short,
+reference-initialized flat-ground protocol excludes objects, partners,
+long-horizon recovery, skeletal-topology changes, and real robots. The corpus is
+derived, so clip/body variants are not independent captures, and caption
+alignment is not audited. A matched external tracker would strengthen
+comparative conclusions, but the published capability comparison alone cannot
+establish a performance advantage.
 
-The corpus is derived: clip/body variants are not independent captures.
-Caption alignment, immutable generation checksums, and redistribution
-permissions require auditing before a benchmark-release claim. A matched
-external tracker would strengthen comparative conclusions, but the published
-capability table alone cannot establish a performance advantage.
+\paragraph{Summary and outlook.}
+The evidence supports strong average shared tracking and transfer within this
+protocol. All-body held-out-motion coverage, matched conditioning and external
+controls, and dynamic diagnosis of severe failures remain necessary for
+stronger claims about robustness and mechanism.

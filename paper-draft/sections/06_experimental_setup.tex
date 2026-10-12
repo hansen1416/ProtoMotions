@@ -1,167 +1,87 @@
 \section{Evaluation Protocol}\label{sec:experiments}
 
-\subsection{Development subset and full-scale protocol}
-
-The development corpus contains 150 clips and all 128 body configurations,
-for 19,200 variants. These clips are reserved within the full training split
-and are not a held-out generalization benchmark. Small-scale experiments
-investigate architecture and reference-processing choices with a fixed
-simulation budget. The full-scale run uses the 18,855 training clips in
-Table~\ref{tab:dataset_counts}, with validation membership fixed throughout.
-
-The selected full-scale experiment is slot/type attention trained directly on
-refined references. Its code retains a historical \texttt{stage2} name, but
-this run does not use neutral pretraining followed by shape transfer.
-Table~\ref{tab:training_parameters} records the shared optimization settings
-and the actual environment/batch sizes used after the initial memory-related
-launch adjustments. Run-specific resolved configurations take precedence
-over older launch examples.
-
-\begin{table}[t]
-\centering
-\small
-\caption{Training configuration and budgets. Environment and minibatch counts
-are per GPU. The full-scale frame count is a recorded stopping snapshot,
-not a budget matched to the development runs.}\label{tab:training_parameters}
-\begin{tabularx}{\linewidth}{@{}lYY@{}}
-\toprule
-Setting & Corrected 150-clip runs & Full-scale selected run \\
-\midrule
-Parallel GPUs per policy & 1 & 6 \\
-Environments per GPU & 4,096 & 2,048 \\
-PPO minibatch size per GPU & 16,384 & 8,192 \\
-Rollout length & 32 control steps & 32 control steps \\
-Mini-epochs per update & 1 & 1 \\
-Actor / critic learning rates &
-$2\times10^{-5}$ / $10^{-4}$ & $2\times10^{-5}$ / $10^{-4}$ \\
-Discount / GAE / ratio clip & 0.99 / 0.95 / 0.2 & 0.99 / 0.95 / 0.2 \\
-Gradient norm clip & 50 & 50 \\
-Evaluation cadence & 200 epochs & 256 epochs \\
-Training seed & 0--2 (refined A--D); 0 (unrefined E--H) & Recorded in saved run configuration \\
-Reference residency & All 150 clips & 256, later 128 clips per GPU \\
-Training frames & 786,432,000 per run (6,000 epochs) & Approximately $11.07\times10^9$ recorded \\
-Status of reported evidence & Completed, Table~\ref{tab:architecture_seeds} & Epoch-28,170 checkpoint, Table~\ref{tab:test_results} \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\subsection{Design comparisons and aggregation}\label{sec:ablation_design}
-We compare four architectures: A, temporal MLP; B, temporal attention; C,
-attention with slot/type embeddings; and D, C with actor-only adaLN-Zero.
-All retain morphology inputs in actor and critic. Refined-reference runs
-use three seeds (0, 1, 2), a matched 6,000-epoch budget, and the same cadence.
-Each run is summarized by its last eight evaluations (epochs 4,600--6,000);
-architecture means and sample standard deviations are then computed across
-three run summaries. Within-run evaluations are not training replicates.
-
-The full-scale model predates these supporting reruns. They reassess its
-design rather than establish prospective selection or statistical superiority.
-Models differ in parameter count; compute details are in Appendix~\ref{app:history}.
-The original seed-0 grid is retained in Table~\ref{tab:ablation_results}.
-Unrefined cases E--H have one seed each. Refined and unrefined policies track
-their own targets, preventing a causal policy-level refinement conclusion.
-The paired offline reference audit provides the evidence for artifact reduction.
-\begin{table}[t]
-\centering
-\small
-\caption{Corrected 150-clip grid: four architectures $\times$ two reference
-versions, seed 0. Refined A--D also have seed-1/2 repeats in Table~\ref{tab:architecture_seeds}.}\label{tab:ablations}
-\begin{tabularx}{\linewidth}{@{}llYY@{}}
-\toprule
-Case & References & Architecture & Comparison purpose \\
-\midrule
-A & Refined & Wide temporal MLP; beta concatenation &
-Temporal MLP baseline. \\
-B & Refined & Basic temporal attention &
-Attention versus flattened temporal input. \\
-C & Refined & Attention with slot/type embeddings &
-Explicit temporal/source identity. \\
-D & Refined & C + actor-only adaLN-Zero &
-Morphology modulation with critic unchanged. \\
-E & Unrefined & As C &
-Reference version at fixed architecture (slot/type). \\
-F & Unrefined & As A &
-Reference version at fixed architecture (temporal MLP). \\
-G & Unrefined & As B &
-Reference version at fixed architecture (attention). \\
-H & Unrefined & As D &
-Reference version at fixed architecture (slot/type + adaLN). \\
-\bottomrule
-\end{tabularx}
-\end{table}
-\subsection{Morphology-matched evaluation and checkpoint scope}\label{sec:evaluation_protocol}
+\subsection{Populations and body-matched replay}\label{sec:evaluation_protocol}
 
 Each reference is rolled out only in an environment using its exact asset
-identity (Figure~\ref{fig:evaluation_protocol}). A selected reference
-therefore cannot be assigned to a different body simply because an
-environment slot is available. Multiple rollout batches may be needed when
-several references require the same body.
+identity, so a reference is never assigned to a different body. Evaluation
+uses the mean action and reference initialization, disables training
+termination, and records errors over the valid reference horizon, capped at 600
+control steps (20\,s at 30\,Hz); success therefore refers to the evaluated
+horizon, not necessarily the whole source clip. Routine monitoring and the
+held-out evaluation select one body variant per clip with a deterministic hash
+of the clip identity (Appendix~\ref{app:reproducibility}), so the clip list is
+fixed while the body panel rotates across scheduled evaluations. Validation has
+been monitored repeatedly and is not an untouched test set; the clip-disjoint
+test manifest stays outside training and model selection and is evaluated once
+(Section~\ref{sec:test_results}).
 
-Routine monitoring selects one variant per clip. With seed $s=42$, stable
-clip identity $c$, panel index $p$, and $N_c$ available variants, the choice is
-\begin{equation}
-    k(c,p) =
-    \left(
-       \operatorname{uint64}_{\mathrm{big}}
-       \bigl(\operatorname{SHA256}(s\!:\!c)_{0:8}\bigr)
-       +p
-    \right)\bmod N_c .
-    \label{eq:shape_panel}
-\end{equation}
-Here $s\!:\!c$ is the UTF-8 string formed as \texttt{seed:clip\_id}.
-For scheduled monitoring, $p$ is the integer quotient of the checkpointed
-epoch and evaluation cadence. This produces deterministic staggered shape
-choices that rotate across evaluations and remain reproducible after resume.
-The validation \emph{clip list} is fixed; the selected \emph{shape panel}
-changes. Thus successive scores are not repeated measurements on an
-identical set of clip/shape pairs.
+The development corpus contains 150 clips and all 128 body configurations
+(19,200 variants), reserved within the full training split; it is not a
+held-out generalization benchmark. Because compute was limited, architecture
+and reference-processing choices are investigated on this subset with a fixed
+simulation budget, whereas the full-scale run trains on the 18,855 training
+clips (Table~\ref{tab:dataset_counts}). Table~\ref{tab:evidence_populations}
+lists the populations used. Held-out identity is clip-grouped, not a
+demonstrated subject or recording split.
 
-Evaluation uses the mean action, reference initialization, and no gradient
-tracking. It disables training termination and records errors over the
-valid reference horizon, capped at 600 control steps (20\,s at 30\,Hz).
-Success therefore refers to the evaluated horizon, not necessarily the
-entire duration of a longer source clip.
+\begin{table}[t]
+\centering\small
+\caption{Evaluation populations; each unseen panel has 128 bodies.}
+\label{tab:evidence_populations}
+\begin{tabularx}{\linewidth}{@{}lYYr@{}}
+\toprule
+Evaluation & Motion exposure & Body exposure & Pairs \\
+\midrule
+Validation / test & Held-out clips & Trained; one per clip & 1,048 each \\
+Development replay & 150 training clips & All 128 trained & 19,200 \\
+Unseen inside / outside & 233 training clips & All 128 unseen per panel & 29,824 each \\
+Unseen diagnostic subset & 23 val/test clips; seen by full-data & Same unseen panels & 2,944 each \\
+Trained-body control & 150 training clips & All 128 trained & 19,200 \\
+Design comparison & Development clips & Trained bodies & Three refined seeds \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
-Final model comparisons should freeze the checkpoint, clip/shape panel,
-reference version, simulator configuration, and seed. Validation is available
-for model selection and has been repeatedly monitored; it is not an untouched
-test set. The independent test manifest remains outside training and model
-selection; its one-time evaluation is reported in
-Section~\ref{sec:test_results}. The downloaded epoch-28,170
-\texttt{last.ckpt} is distinct from the epoch-28,159 monitoring snapshot
-in Table~\ref{tab:full_results}; the standalone validation and test results
-therefore refer explicitly to the downloaded checkpoint.
+\paragraph{Unseen-body construction and replay.}
+Each unseen panel contains 64 new coefficient vectors instantiated on male and
+female SMPL templates. Inside vectors lie in $[-3,3]^{10}$; outside vectors
+have $\|\beta\|_\infty\in(3,5]$, with 16 vectors (32 bodies) in each of four
+half-unit tiers. Inside denotes membership of the training coefficient box, not
+of the convex hull of trained bodies. Both panels use matching HUMOS references
+and assets, frame-zero offsets, and full reference refinement; the build report
+records zero penetration under its refinement diagnostic but does not certify
+dynamic feasibility. Replay uses mean actions, reference initialization, 32
+environments per asset, and at most 210 control steps (7\,s), with success as
+in Eq.~\eqref{eq:success}. The 233 training-split identities isolate the body
+axis, while the other 23 validation/test identities remain separate. The
+trained-body control uses a different 150-clip panel and refinement run, so only
+within-dataset checkpoint deltas are paired comparisons.
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[>=latex, node distance=0.35cm, every node/.style={font=\small}]
-\node[draw, rounded corners, fill=blue!8, align=center, minimum width=2.05cm, minimum height=0.72cm] (clip) {clip identity\\+ manifest};
-\node[draw, rounded corners, fill=green!10, right=of clip, align=center, minimum width=2.15cm, minimum height=0.72cm] (pick) {SHA-256\\shape pick};
-\node[draw, rounded corners, fill=orange!12, right=of pick, align=center, minimum width=2.15cm, minimum height=0.72cm] (asset) {matching\\SMPLSim asset};
-\node[draw, rounded corners, fill=purple!10, right=of asset, align=center, minimum width=1.9cm, minimum height=0.72cm] (roll) {mean-action\\rollout};
-\node[draw, rounded corners, fill=gray!12, right=of roll, align=center, minimum width=1.75cm, minimum height=0.72cm] (metrics) {per-motion\\metrics};
-\draw[->, thick] (clip) -- (pick);
-\draw[->, thick] (pick) -- (asset);
-\draw[->, thick] (asset) -- (roll);
-\draw[->, thick] (roll) -- (metrics);
-\node[below=0.32cm of pick, align=center] {one body per clip\\(rotating panel)};
-\node[below=0.32cm of roll, align=center] {no gradients\\capped horizon};
-\end{tikzpicture}
-\caption{Standalone evaluation protocol. The clip list is fixed, while a
-reproducible hash-and-panel rule selects one body variant per clip; the
-selected reference and simulation asset therefore always match.}
-\label{fig:evaluation_protocol}
-\end{figure}
+\paragraph{Checkpoints and uncertainty.}
+The original \texttt{refined} checkpoint is epoch 28,170 (distinct from the
+epoch-28,159 monitoring snapshot of Appendix~\ref{app:history}); the
+prespecified \texttt{fulldata} candidate is epoch 34,000 and trained on all
+original motion splits. Both are frozen for replay, and duration and motion
+coverage change together, preventing causal attribution. Each dataset has two
+original-checkpoint runs and one candidate run. Paired 95\% bootstrap intervals
+resample clips with the body panel fixed; they do not resample training seeds
+or unseen bodies. A change is called beyond noise only if its interval excludes
+zero and its magnitude exceeds the original-checkpoint rerun delta, so without
+a checkpoint ladder this measures simulator variability only. Per-body
+intervals are exploratory and unadjusted for multiple testing. On all 256
+clips, identical-checkpoint success labels agree on 99.33\% of inside and
+98.68\% of outside pairs, versus 99.96\% in the control. Pooled success differs
+by at most 0.05 pp, but individual pairs can change by metres in peak error, so
+small pooled changes coexist with local instability.
 
-\subsection{Metrics and aggregation}\label{sec:metrics}
+\subsection{Metrics}\label{sec:metrics}
 
-For each evaluated clip/shape pair $i$, define its per-frame mean body
-position error
+For each evaluated clip/shape pair $i$, the per-frame mean body position error is
 \begin{equation}
     d_{i,t} = \frac{1}{B}\sum_{j=1}^{B}
-                 \|p_{i,t,j}-\hat{p}_{i,t,j}\|_2 .
+                 \|p_{i,t,j}-\hat{p}_{i,t,j}\|_2 ,
 \end{equation}
-The configured success indicator is
+and the configured success indicator is
 \begin{equation}
     S_i = \mathbf{1}\!\left[
              \max_{t<T_i}d_{i,t}\leq 0.5\ \mathrm{m}
@@ -169,89 +89,13 @@ The configured success indicator is
     \label{eq:success}
 \end{equation}
 where $T_i$ is the evaluated horizon. This threshold is deliberately distinct
-from the smoother training reward. Passing it does not imply fine-grained
-pose accuracy or biomechanical realism.
-
-We also report time-averaged mean body-position error, mean global
-body-rotation geodesic error, and the time average of the largest body-position
-error within each frame. The last quantity is the logged
-\emph{mean maximum-joint error}; it is not the maximum over the entire dataset.
-Global body-rotation error is not a local joint-angle/DOF error.
-
-Within an evaluator rank, errors are averaged over valid frames per motion
-and then over motions, including failed rollouts. The distributed training
-logger aggregates scalar summaries across ranks; the monitoring table
-retains those logged values rather than reconstructing exact pooled counts.
-Final offline comparisons should aggregate saved per-motion records over
-unique clip/shape pairs, avoiding unequal weighting of partially filled
-batches or duplicate padded rollouts.
-
-Trajectory smoothness uses the implementation's windowed normalized-jerk
-score, with the definition and numerical regularizers in
-Appendix~\ref{app:smoothness}. Lower scores indicate lower jerk under that
-fixed convention. The accompanying high-jerk statistic is the percentage
-of windows in which any body exceeds threshold 6,500; the logger calls it
-a frame percentage, but it is window-based.
-
-
-\subsection{Research questions, populations, and checkpoint scope}
-Table~\ref{tab:evidence_populations} maps the evidence to the three questions.
-Held-out identity is clip-grouped, not a demonstrated subject/recording split.
-\begin{table}[t]
-\centering\small
-\caption{Evaluation populations and their inference scope. Each unseen panel
-has 128 bodies; the 233-clip and 23-clip subsets partition its 256 clips.}
-\label{tab:evidence_populations}
-\begin{tabularx}{\linewidth}{@{}lYYr@{}}
-\toprule
-Question & Motion exposure & Body exposure & Pairs \\
-\midrule
-RQ1: validation / test & Held-out clips & Trained; one per clip & 1,048 each \\
-RQ1: development replay & 150 training clips & All 128 trained & 19,200 \\
-RQ2: inside / outside & 233 training clips & All 128 unseen per panel & 29,824 each \\
-RQ2: diagnostic subset & 23 val/test clips; seen by full-data & Same unseen panels & 2,944 each \\
-RQ2: trained control & 150 training clips & All 128 trained & 19,200 \\
-RQ3: design comparison & Development clips & Trained bodies & Three refined seeds \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\paragraph{Unseen-body construction and replay.}
-Each panel contains 64 new coefficient vectors instantiated on male and female
-SMPL templates. Inside vectors lie in $[-3,3]^{10}$; outside vectors have
-$\|\beta\|_\infty\in(3,5]$, with 16 vectors (32 bodies) in each of four
-half-unit tiers. Inside denotes membership of the training coefficient box,
-not demonstrated membership of the convex hull of trained bodies. Both
-panels use matching HUMOS references and assets, frame-zero offsets and
-full reference refinement. The build report records finite complete clip/body
-panels and zero penetration under its refinement diagnostic; it does not
-certify dynamic feasibility.
-
-All nine runs completed on an A40 on 9 October 2026. Replay uses mean actions,
-reference initialization, 32 environments per asset (4,096 environments),
-and at most 210 control steps (7\,s). Success follows Eq.~\eqref{eq:success}.
-The 233 training-split identities isolate the body axis; the other 23
-validation/test identities remain separate. The trained-body control uses a
-different 150-clip panel and refinement run, so only within-dataset checkpoint
-deltas are paired comparisons.
-
-\paragraph{Checkpoint and uncertainty controls.}
-The original \texttt{refined} checkpoint is epoch 28,170; the prespecified
-\texttt{fulldata} candidate is epoch 34,000 and trained on all original motion
-splits. Both are frozen for replay. Duration and motion coverage change
-together, preventing causal attribution. Each dataset has two original-checkpoint
-runs and one candidate run. Paired 95\% bootstrap intervals resample clips,
-retaining the full fixed body panel; they do not resample training seeds or
-unseen bodies. The report's ``beyond noise'' rule requires an interval excluding
-zero and a candidate delta larger in magnitude than the original-checkpoint
-rerun delta. With no checkpoint ladder, that comparison measures simulator
-variability only. Per-body regression intervals are exploratory and unadjusted
-for multiple testing.
-
-On all 256 clips, identical-checkpoint success labels agree on 99.33\% of
-inside and 98.68\% of outside pairs, versus 99.96\% in the control. Pooled
-success differs by at most 0.05 pp, but individual pairs can change by metres
-in peak error. Small pooled changes therefore coexist with local instability.
-Checkpoint hashes and the retained report are documented in
-Appendix~\ref{app:provenance}; complete per-body tables are in
-Appendix~\ref{app:unseen_tables}.
+from the smoother training reward, and passing it does not imply fine-grained
+pose accuracy or biomechanical realism. We also report time-averaged mean
+body-position error, mean global body-rotation geodesic error (not a local
+joint-angle error), the time average of the largest body-position error within
+each frame (the logged \emph{mean maximum-joint error}), and the windowed
+normalized jerk of Appendix~\ref{app:smoothness}, whose high-jerk statistic is
+the percentage of windows in which any body exceeds 6,500. Errors are averaged
+over valid frames per motion and then over motions, including failed rollouts;
+offline comparisons aggregate saved per-motion records over unique clip/shape
+pairs.

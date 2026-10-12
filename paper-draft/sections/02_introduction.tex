@@ -1,6 +1,8 @@
 \section{Introduction}\label{sec:introduction}
-A shared physics-based controller must reproduce actions on bodies with
-different proportions and dynamics. Changing limb lengths, collision
+Physics-based character animation should reproduce actions on digital humans
+with different proportions and dynamics. A shared controller offers a way to
+reuse a motion repertoire across those bodies, provided that references and
+simulated assets remain consistent. Changing limb lengths, collision
 geometry, and mass distribution changes both the spatial realization of a
 motion and the actuation needed to track it. The learning problem therefore
 has two coupled axes: variation in motion and variation in body. Good
@@ -9,35 +11,28 @@ a new body, and a high average over bodies can conceal severe failures.
 
 Large motion resources, shape-conditioned reference generation, and scalable
 imitation provide the building blocks~\cite{amass,humanml3d,humos,phc,protomotions}.
-Body-conditioned control is established~\cite{won2019}; PHC also supports
+Body-conditioned control is established~\cite{won2019}. PHC and ASE learn from
+motion collections but report results on a single body shape; PHC supports
 body variation, although its quantitative evaluations use the mean SMPL
-body~\cite{phc}. Our question is how reliably one controller learns and
-transfers across a large corpus of explicitly paired motions and bodies.
-We address it through three research questions:
-\begin{enumerate}
-\item \textbf{RQ1: Can one shared controller learn to track diverse motions
-across different bodies?} We distinguish held-out-motion performance on
-selected bodies from coverage of every trained body.
-\item \textbf{RQ2: How well does that capability generalise to unseen body
-shapes, and where does it fail?} We evaluate inside- and outside-range bodies,
-retain every shape, and examine checkpoint sensitivity.
-\item \textbf{RQ3: Which design choices support that capability, and what
-trade-offs do they introduce?} We compare temporal architectures and audit
-reference refinement, while identifying the missing conditioning control.
-\end{enumerate}
+body~\cite{phc,ase} (Section~\ref{sec:external_comparison}). Our question is
+how reliably one controller learns and transfers across a large corpus of
+explicitly paired motions and bodies.
 
-Our contribution is a paired corpus and learning workflow that preserves
-clip/body identity from HUMOS generation through simulation and replay,
-together with an evaluation that separates motion exposure from body
-exposure. The corpus contains 20,951 clip identities and 128 body
-configurations. A shared temporal slot/type-attention controller trains
-directly on 18,855 clips across those bodies using streamed motion residency.
-We inherit the simulator integration, PPO machinery, and motion-tracking
+We approach it with a paired corpus in which every clip/body identity is
+preserved from HUMOS generation through simulation and replay: 20,951 clip
+identities and 128 body configurations, on which one shared temporal
+slot/type-attention controller trains directly, using streamed motion
+residency, on 18,855 clips. Evaluation separates motion exposure from body
+exposure. The contributions are the paired corpus and workflow, the shared
+controller configuration with streamed residency, exposure-separated
+evaluation of trained and unseen bodies, and three-seed network comparisons
+together with a reference-refinement audit.
+We inherit the simulator integration, proximal policy optimization (PPO), and motion-tracking
 infrastructure from ProtoMotions; we do not claim these or morphology
 conditioning itself as new. HumanML3D captions are metadata, not policy
 inputs: this is reference-conditioned imitation, not text-conditioned control.
 
-The original checkpoint achieves 99.14\% success on 1,048 independent test
+The original checkpoint achieves 99.14\% success on 1,048 clip-disjoint test
 clips, each paired with one selected trained body. On 233 training-split
 clips across 128 unseen inside-range bodies and 128 unseen outside-range
 bodies, success is 97.28\% and 97.15\%. Yet the worst bodies succeed on only
@@ -47,3 +42,15 @@ average transfer to unseen shapes, but uneven robustness across individual
 bodies}. The design evidence explains practical trade-offs; it does not yet
 isolate the benefit of explicit morphology inputs or establish uniform
 held-out-motion performance across all bodies.
+
+The remainder of the paper is structured as follows.
+Section~\ref{sec:related_work} reviews related work;
+Section~\ref{sec:problem} defines the problem and system;
+Section~\ref{sec:dataset} presents the corpus;
+Section~\ref{sec:method} describes the proposed methodology;
+Section~\ref{sec:experiments} specifies evaluation;
+Section~\ref{sec:results} presents the results;
+and Section~\ref{sec:discussion} discusses limitations and concludes.
+The appendices provide reproducibility details,
+training provenance, and additional unseen-body results; the complete per-body
+tables are in the Supplementary Material.
