@@ -1,11 +1,52 @@
-\section{Paired Motion and Body Corpus}\label{sec:dataset}
+\section{Overview}\label{sec:dataset}
 
-MorphMimic learns from references that match each body, so its corpus connects
-every source clip identity to a motion description, 128 generated motion
-variants, and their matching simulation assets. A \emph{clip} denotes a source
-segment, including a mirrored segment when present, and a \emph{variant}
-denotes that clip on one body configuration. Figure~\ref{fig:data_pipeline}
-shows the construction paths.
+A body configuration $b=(g,\boldsymbol{\beta})$ specifies a SMPL template
+and shape coefficients. A \emph{clip} denotes a source segment, including a
+mirrored segment when present, and a \emph{variant} denotes that clip on one
+body configuration. For source clip $c$, HUMOS supplies a shape-specific
+reference $\hat{s}_{c,b}(t)$ and SMPLSim supplies the matching asset, so the
+corpus connects every clip identity to a motion description, 128 generated
+variants, and their matching simulation assets
+(Figure~\ref{fig:data_pipeline}). Changing $b$ changes geometry, reference
+positions, mass/inertia, and mass-scaled actuation even though topology is
+shared, so the task is to track these paired references with one policy rather
+than impose identical world-space paths on all bodies.
+
+MorphMimic learns $\pi_\theta(a_t\mid o_t,b)$ from the present state, history,
+future reference targets, and body information, with the same parameters
+serving every body. Clips can change on reset while each environment retains
+its asset, and evaluation preserves reference/body identity. The flat-ground
+task has no external objects or partners, and captions are metadata, not
+controller input.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.94\linewidth}
+\small
+\begin{tabularx}{\linewidth}{@{}p{0.12\linewidth}Y@{}}
+\textbf{Motion} &
+AMASS $\longrightarrow$ HumanML3D preprocessing and clip extraction
+$\longrightarrow$ HUMOS conditioned on $(g,\boldsymbol{\beta})$
+$\longrightarrow$ MotionLib conversion and reference refinement
+$\longrightarrow$ per-clip motion variants. \\[0.7em]
+\textbf{Body} &
+SMPL with the same $(g,\boldsymbol{\beta})$
+$\longrightarrow$ SMPLSim
+$\longrightarrow$ matching skeleton, collision geometry, mass/inertia,
+and MuJoCo XML (MJCF) asset identity. \\[0.7em]
+\textbf{Text} &
+HumanML3D source descriptions
+$\longrightarrow$ clip-ID lookup associated with the generated variants
+(metadata only; not a policy input).
+\end{tabularx}
+
+\smallskip
+The body assets are used for motion conversion, shape-specific forward
+kinematics, ground-clearance correction, and simulation. Refined reference
+motion and matching simulated state feed one shared policy.
+\end{minipage}}
+\caption{Paired reference and simulation-asset construction.}\label{fig:data_pipeline}
+\end{figure}
 
 \paragraph{Source motion.}
 We use the AMASS-derived motion portion of HumanML3D~\cite{amass,humanml3d},
