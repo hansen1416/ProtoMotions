@@ -337,37 +337,7 @@ training run without them, with the same references, body panel, budget, and
 seeds; inference-time masking or shuffling would introduce distribution shift
 and cannot replace that comparison.
 
-\paragraph{Physical analysis.}\label{sec:physics}
-As a secondary question, we ask whether cross-body variability in control demand
-differs between dynamic and quasi-static motions. The original MorphMimic checkpoint is
-replayed over the 150 development clips and all 128 trained bodies (19,200
-pairs, zero recorded failed episodes under this analysis's own diagnostic).
-Keyword matching on the inherited captions assigns running, jumping, and
-kicking to a dynamic group (25 clips) and standing and sitting to a
-quasi-static group (37 clips); the other 88 clips are excluded, and the labels
-have not been manually validated. After subtracting each clip's across-body
-mean, Table~\ref{tab:physical_analysis} reports the standard deviation of the
-pooled residuals, with 95\% intervals that resample clips as clusters (10,000
-resamples). Torque, power, and jerk describe the simulated controller, not
-calibrated human biomechanics.
-
-\begin{table}[t]
-\centering
-\small
-\caption{Cross-body control-demand variability, dynamic versus quasi-static clips.}\label{tab:physical_analysis}
-\begin{tabularx}{\linewidth}{@{}Yrr@{}}
-\toprule
-Metric & Dynamic std [95\% CI] & Quasi-static std [95\% CI] \\
-\midrule
-Normalized torque (frac.\ effort limit) & $1.93$ [$1.71$, $2.21$] $\times10^{-4}$ & $2.06$ [$1.86$, $2.30$] $\times10^{-4}$ \\
-Mass-normalized power & 0.292 [0.220, 0.370] & 0.259 [0.210, 0.323] \\
-Normalized jerk & 350.2 [283.3, 416.9] & 403.2 [303.3, 513.5] \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-The spreads differ modestly and their separate intervals overlap, which is not
-a test of the class-level difference. A direct dynamic-minus-quasi-static
-contrast with clip-level resampling or permutation has not been estimated, so
-the analysis supports descriptive comparisons only, not a positive or negative
-interaction result.
+\paragraph{Physical analysis.}
+A secondary, exploratory comparison of cross-body variability in control demand
+between dynamic and quasi-static motions was inconclusive and is reported in
+Appendix~\ref{app:physics}.
