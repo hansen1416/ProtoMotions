@@ -1,11 +1,8 @@
-\section{Policy Representation}\label{sec:method}
+\section{Policy}\label{sec:method}
 MorphMimic's controller is the policy $\pi_\theta(a_t\mid o_t,b)$ of
 Section~\ref{sec:dataset}: it maps the present state, history, future reference
 targets, and morphology to joint targets. This section defines its states and
-actions, network, and reward, and Section~\ref{sec:training} describes how it is
-trained.
-
-\subsection{States and actions}\label{sec:observations}
+actions, network, reward, and training.
 
 \paragraph{State.}
 Experiments use the \texttt{smpl\_mor} assets in Isaac Gym through
@@ -76,8 +73,7 @@ in Appendix~\ref{app:control}). This body-level mass scaling is not a single
 scale based on total character mass, and it does not guarantee dynamically
 equivalent actuation across geometrically different bodies.
 
-\subsection{Network}\label{sec:architecture}
-
+\paragraph{Network.}
 MorphMimic uses temporal slot/type attention. Three observation encoders, one
 for the current state, one shared across history slots, and one shared across
 future slots, are multilayer perceptrons (MLPs) with two 256-unit hidden layers,
@@ -149,8 +145,7 @@ critic, all with ReLU activations; they output a Gaussian action mean and a
 scalar value, respectively. PPO samples actions with fixed diagonal log standard
 deviation $-2.9$, and evaluation uses the mean action.
 
-\subsection{Reward}\label{sec:reward}
-
+\paragraph{Reward.}
 The training reward combines global body tracking and root-height tracking. For
 corresponding simulated and reference body positions $p_j,\hat{p}_j$, rotations
 $R_j,\hat{R}_j$, and velocities $v_j,\hat{v}_j$ and $\omega_j,\hat{\omega}_j$,
@@ -179,3 +174,33 @@ reductions. The reward is
 with weights that are not normalized to sum to one. There is no explicit
 effort, action-smoothness, or contact-matching reward in this experiment, and no
 source-dependent switch between canonical and HUMOS reward functions.
+
+\paragraph{Optimization.}
+MorphMimic is trained directly across all bodies on refined HUMOS references,
+with no neutral pretraining stage, using PPO~\cite{ppo}. References are sampled
+only from variants matching the environment's asset.
+Reference-state initialization starts at frame zero with probability 0.2 and
+otherwise at a random valid reference time. Training episodes last at most
+1,000 control steps and terminate on falls (a 0.15\,m height setting, with
+permitted foot-contact bodies), while tracking-error termination is disabled, so
+this rule is distinct from the evaluation failure threshold of
+Section~\ref{sec:metrics}. PPO uses 32-step rollouts, discount 0.99, generalized
+advantage estimation (GAE) parameter 0.95, policy-ratio clipping 0.2, normalized
+advantages, and separate Adam optimizers with learning rates $2\times10^{-5}$ for
+the actor and $10^{-4}$ for the critic. Other settings and the actual run budgets
+are in Appendix~\ref{app:training}.
+
+\paragraph{Streamed motion sampling.}
+The full-scale experiment streams per-clip files through
+\texttt{GlobalClipPool}. The training manifest is deterministically partitioned
+across GPU ranks, and each rank keeps a bounded resident pool containing all 128
+variants of its selected clips, with environment-level motion sampling
+respecting the assigned morphology. The pool is rebuilt every 256 epochs: most
+slots are selected by priority, combining estimated clip difficulty and an
+exploration bonus, and a fraction 0.2 is reserved for uniform random selection
+to maintain rehearsal outside the highest-priority set. This is a training
+curriculum, not uniform sampling of the complete corpus. Validation membership
+is fixed independently of pool rebuilding and does not update sampling weights,
+so resident-pool and validation metrics measure different populations. Sampling
+constants and the pool size actually used are in
+Appendices~\ref{app:reproducibility} and~\ref{app:history}.

@@ -1,4 +1,4 @@
-\section{Results}\label{sec:results}
+\section{Evaluation}\label{sec:results}
 We evaluate MorphMimic on held-out motions, on trained bodies, and on unseen
 bodies, and use per-body failures to delimit the claims. Each reference is
 rolled out only in an environment using its exact asset identity, so a
@@ -66,8 +66,6 @@ over valid frames per motion and then over motions, including failed rollouts;
 offline comparisons aggregate saved per-motion records over unique clip/shape
 pairs.
 
-\subsection{Tracking across motions and bodies}\label{sec:tracking}
-
 \paragraph{Held-out motions on selected trained bodies.}\label{sec:test_results}
 The epoch-28,170 MorphMimic checkpoint was re-evaluated offline with a
 standalone evaluator, once on the validation split and once on the clip-disjoint
@@ -108,7 +106,7 @@ threshold is permissive, so the table also reports stricter thresholds and
 continuous errors: test success falls to 96.28\% at 0.3\,m, 85.97\% at 0.2\,m,
 and 38.55\% at 0.1\,m. Tight thresholds partly measure the references rather
 than the controller, because HUMOS generates them kinematically and they are
-not dynamically validated; the audit in Section~\ref{sec:refinement_results}
+not dynamically validated; the refinement audit below
 finds residual contact artifacts even after refinement. The Wilson
 intervals~\cite{wilson1927} are nominal: they condition on the checkpoint and
 selected body panel and ignore dependence between related recordings or
@@ -131,8 +129,6 @@ an abrupt stop, and a hand-held sparring stick absent from simulation. These
 describe the failed sample rather than mechanical causes or class-specific
 failure rates; diagnosis would need synchronized rollouts and first-crossing
 traces, including successful variants of the same clips.
-
-\subsection{Transfer to unseen bodies}\label{sec:unseen_morphology}
 
 \paragraph{Unseen-body panels.}
 Each panel contains 64 new coefficient vectors instantiated on male and female
@@ -246,8 +242,7 @@ Severe failures remain unresolved: per-asset reference feasibility and
 synchronized contact, root-height, and actuation traces have not been audited, so
 reference, controller, and asset mechanisms cannot be distinguished.
 
-\subsection{Design comparisons}\label{sec:design}
-
+\paragraph{Design comparisons.}\label{sec:design}
 We compare four architectures: A, temporal MLP; B, temporal attention; C,
 attention with slot/type embeddings, the architecture of MorphMimic; and D, C
 with actor-only adaLN-Zero. All retain morphology inputs in actor and critic.
@@ -342,7 +337,7 @@ training run without them, with the same references, body panel, budget, and
 seeds; inference-time masking or shuffling would introduce distribution shift
 and cannot replace that comparison.
 
-\subsection{Physical analysis}\label{sec:physics}
+\paragraph{Physical analysis.}\label{sec:physics}
 As a secondary question, we ask whether cross-body variability in control demand
 differs between dynamic and quasi-static motions. The original MorphMimic checkpoint is
 replayed over the 150 development clips and all 128 trained bodies (19,200

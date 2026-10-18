@@ -36,3 +36,7 @@ unseen_morphology_motionlib/
 paper/main.aux
 paper/main.log
 paper/main.out
+paper-draft/main.aux
+paper-draft/main.log
+paper-draft/main.out
+texput.log
