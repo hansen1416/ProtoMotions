@@ -131,8 +131,10 @@ Splits are by clip identity: all variants of a clip, and original/mirrored
 partners, share a partition (Table~\ref{tab:dataset_counts}), and variants are
 generated combinations rather than independent captures. The split is versioned
 with seed 42 and roughly 90/5/5 proportions; the 150 development clips used for
-design comparisons and the reference audit are reserved within the training
-split (Appendix~\ref{app:provenance}), and the test manifest is never loaded by
+design comparisons and the reference audit ($150\times128=19{,}200$ variants)
+are reserved within the training split together with their mirrored partners,
+286 identities in total, and the partners are not part of the 150-clip analysis
+(Appendix~\ref{app:provenance}); the test manifest is never loaded by
 the training workflow. The splits test held-out clip identities on the trained
 body set. They have not been shown to be disjoint by subject or capture
 recording, which limits claims about broader motion generalization.
