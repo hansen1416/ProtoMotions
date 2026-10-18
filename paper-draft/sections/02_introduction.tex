@@ -9,10 +9,11 @@
 Physics-based character animation should reproduce actions on digital humans
 with different proportions and dynamics, and a shared controller offers a way
 to reuse one motion repertoire across those bodies, provided that references
-and simulated assets stay consistent. Limb lengths, collision geometry, and
-mass distribution change both the spatial realization of a motion and the
-actuation needed to track it, so the learning problem has two coupled axes:
-variation in motion and variation in body. Good tracking of new motions on a
+and simulated assets stay consistent. Changes in limb lengths, mass
+distribution, and collision geometry alter both the reference trajectory and the
+dynamics required to follow it. Learning across body shapes requires a
+consistent relationship between source motion, shape-specific reference, and
+simulated body. Good tracking of new motions on a
 familiar body does not establish transfer to a new body, and a high average
 over bodies can conceal severe failures.
 
