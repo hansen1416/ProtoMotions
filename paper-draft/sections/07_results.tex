@@ -18,7 +18,9 @@ configurations (19,200 variants), reserved within the training split; it is not
 a held-out generalization benchmark. Because compute was limited, architecture
 and reference-processing choices are investigated on this subset with a fixed
 simulation budget, whereas the full-scale run trains on the 18,855 training
-clips (Table~\ref{tab:dataset_counts}). Table~\ref{tab:evidence_populations}
+clips (Table~\ref{tab:dataset_counts}). An exploratory analysis of cross-body
+control demand on the same clips was inconclusive and is reported in
+Appendix~\ref{app:physics}. Table~\ref{tab:evidence_populations}
 lists all populations; held-out identity is clip-grouped, not a demonstrated
 subject or recording split.
 
@@ -336,8 +338,3 @@ explicit coefficients cause it. Attributing it to those inputs needs a matched
 training run without them, with the same references, body panel, budget, and
 seeds; inference-time masking or shuffling would introduce distribution shift
 and cannot replace that comparison.
-
-\paragraph{Physical analysis.}
-A secondary, exploratory comparison of cross-body variability in control demand
-between dynamic and quasi-static motions was inconclusive and is reported in
-Appendix~\ref{app:physics}.
