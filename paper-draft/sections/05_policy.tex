@@ -187,8 +187,9 @@ this rule is distinct from the evaluation failure threshold of
 Section~\ref{sec:metrics}. PPO uses 32-step rollouts, discount 0.99, generalized
 advantage estimation (GAE) parameter 0.95, policy-ratio clipping 0.2, normalized
 advantages, and separate Adam optimizers with learning rates $2\times10^{-5}$ for
-the actor and $10^{-4}$ for the critic. Other settings and the actual run budgets
-are in Appendix~\ref{app:training}.
+the actor and $10^{-4}$ for the critic. The reported full-scale run uses training
+seed 0. Other settings and the actual run budgets are in
+Appendix~\ref{app:training}.
 
 \paragraph{Streamed motion sampling.}
 The full-scale experiment streams per-clip files through
