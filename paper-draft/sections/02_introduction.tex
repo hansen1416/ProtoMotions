@@ -26,10 +26,22 @@ identity is preserved from HUMOS generation through simulation and replay
 (20,951 clip identities and 128 body configurations), and one shared temporal
 slot/type-attention controller that trains directly on 18,855 of those clips
 using streamed motion residency (Figure~\ref{fig:trained_multibody_demo}).
-Evaluation separates motion exposure from body exposure. The contributions are
-the paired corpus and workflow, the shared controller with streamed residency,
-exposure-separated evaluation of trained and unseen bodies, and three-seed
-network comparisons with a reference-refinement audit. We inherit the simulator
+Evaluation separates motion exposure from body exposure. The contributions are:
+\begin{itemize}
+\item the paired corpus and workflow: 20,951 clip identities on 128 body
+configurations (2,681,728 clip/body variants), each identity preserved from
+generation through simulation and replay;
+\item the shared controller with streamed residency, trained directly on 18,855
+clips across all 128 bodies;
+\item exposure-separated evaluation of trained and unseen bodies: 1,048
+clip-disjoint test clips on trained bodies, and 233 training-split clips
+replayed on 128 unseen inside-range and 128 unseen outside-range bodies
+(29,824 clip/body pairs per panel); and
+\item three-seed comparisons of four network architectures, and a
+reference-refinement audit of 19,200 development references (150 clips
+$\times$ 128 bodies).
+\end{itemize}
+We inherit the simulator
 integration, proximal policy optimization (PPO), and motion-tracking
 infrastructure from ProtoMotions and do not claim them, or morphology
 conditioning itself, as new. HumanML3D captions are metadata, not policy
