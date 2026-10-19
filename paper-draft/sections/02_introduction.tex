@@ -1,10 +1,3 @@
-\begin{figure}[!htb]
-\centering
-\includegraphics[width=\linewidth]{figures/rollout_128_bodies.png}
-\caption{One motion tracked by MorphMimic on 128 trained bodies.}
-\label{fig:trained_multibody_demo}
-\end{figure}
-
 \section{Introduction}\label{sec:introduction}
 Physics-based character animation should reproduce actions on digital humans
 with different proportions and dynamics, and a shared controller offers a way
@@ -42,6 +35,13 @@ infrastructure from ProtoMotions and do not claim them, or morphology
 conditioning itself, as new. HumanML3D captions are metadata, not policy
 inputs: MorphMimic is reference-conditioned imitation, not text-conditioned
 control.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\linewidth]{figures/rollout_128_bodies.png}
+\caption{One motion tracked by MorphMimic on 128 trained bodies.}
+\label{fig:trained_multibody_demo}
+\end{figure}
 
 The original MorphMimic checkpoint achieves 99.14\% success on 1,048
 clip-disjoint test clips, each paired with one selected trained body. On 233
