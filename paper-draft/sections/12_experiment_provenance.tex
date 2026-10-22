@@ -17,7 +17,7 @@ difficulty-biased. Values are the stored distributed logging summaries of run
 \texttt{3mvgad6f} at epoch 28,159, and no confidence intervals or all-shape
 coverage are implied.
 
-\begin{table}[t]
+\begin{table}[!htb]
 \centering
 \small
 \caption{Recorded full-scale monitoring snapshot.}\label{tab:full_results}
@@ -118,7 +118,8 @@ conclusion uses the repeated refined runs of Table~\ref{tab:architecture_seeds}
 instead. The columns gt err and gr err are the mean global body-position (m)
 and rotation (rad) errors, Jerk is the windowed normalized jerk, and HJ\% is
 the percentage of high-jerk windows.
-\begin{table}[t]
+
+\begin{table}[!htb]
 \centering
 \small
 \caption{Historical seed-0 development grid.}\label{tab:ablation_results}
@@ -137,6 +138,7 @@ H & slot/type + AdaLN, unrefined & 97.5 $\pm$ 0.9 & 0.091 & 0.207 & 2{,}956 & 34
 \bottomrule
 \end{tabularx}
 \end{table}
+
 \subsection{Full-scale run record}
 The full-scale MorphMimic run shares the architecture of case C exactly (same
 encoder, transformer, and head widths;
@@ -162,7 +164,7 @@ Stance-foot speed drops across almost the whole distribution, while position
 jerk rises across almost the whole distribution.
 
 
-\begin{figure}[t]
+\begin{figure}[!htb]
 \centering
 \begin{tikzpicture}
 \begin{groupplot}[

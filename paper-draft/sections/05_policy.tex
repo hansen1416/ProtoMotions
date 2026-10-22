@@ -29,7 +29,7 @@ Table~\ref{tab:observations} summarizes the inputs of actor and critic, with
 dimensions per slot, positions in metres, linear velocities in m/s, angular
 velocities in rad/s, and dimensionless 6D rotations.
 
-\begin{table}[t]
+\begin{table}[!htb]
 \centering
 \small
 \caption{Observation inputs supplied to both actor and critic.}\label{tab:observations}
@@ -95,7 +95,7 @@ activation. Figure~\ref{fig:network} traces the encoded observations through
 attention and the separate actor and critic heads, which share input categories
 but not parameters.
 
-\begin{figure}[t]
+\begin{figure}[!htb]
 \centering
 \fbox{\begin{minipage}{0.94\linewidth}
 \small
@@ -149,7 +149,7 @@ deviation $-2.9$, and evaluation uses the mean action.
 The training reward combines global body tracking and root-height tracking. For
 corresponding simulated and reference body positions $p_j,\hat{p}_j$, rotations
 $R_j,\hat{R}_j$, and velocities $v_j,\hat{v}_j$ and $\omega_j,\hat{\omega}_j$,
-define
+the errors are defined as follows:
 \begin{align}
     e_p &= \frac{1}{3B}\sum_{j=1}^{B}\|p_j-\hat{p}_j\|_2^2,
     \\
@@ -161,7 +161,7 @@ define
                      \|\omega_j-\hat{\omega}_j\|_2^2, \\
     e_h &= (h-\hat{h})^2,
 \end{align}
-where $d_{\SO(3)}$ is the geodesic rotation angle in radians and the
+Above, $d_{\SO(3)}$ is the geodesic rotation angle in radians, and the
 coordinate-wise means in the position and velocity errors match the implemented
 reductions. The reward is
 \begin{equation}
