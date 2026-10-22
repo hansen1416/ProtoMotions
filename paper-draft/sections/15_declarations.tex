@@ -16,18 +16,25 @@ Longzhen Han conceived the study, developed the methodology and software,
 generated the data, and ran most of the experiments and analysis. Beck
 Farrington-Wheeler contributed substantially to the training
 experiments and the non-software work, with further contributions from Sajjad
-Hussain and Awes Mubarak. Almas Baimagambetov and Nikolaos Polatidis supervised
-the work. All authors approved the final manuscript.
+Hussain. Almas Baimagambetov and Nikolaos Polatidis supervised the work. All authors approved the final manuscript.
 
 \paragraph{Data and code availability}
 The motion corpus derives from AMASS and HumanML3D and remains subject to
-the source datasets' access and licensing conditions. The research code
-repository is \url{https://github.com/hansen1416/morph_mimic}; demonstrations
-are available at \url{https://hansen1416.github.io/morph_mimic/}.
-Evaluation summaries and per-body results used in this manuscript are
-retained with the research records.
-[Authors to specify the archival code version, evaluated checkpoints and
-assets, evaluation-data access location, and any restrictions on derived data.]
+the source datasets' access and licensing conditions; it is not distributed.
+The research code repository is \url{https://github.com/hansen1416/morph_mimic}
+(version \texttt{v1.0}), and demonstrations are available at
+\url{https://hansen1416.github.io/morph_mimic/}. The repository contains the
+experiment files, the data-preparation, evaluation and analysis tools, the
+simulation models of the 128 trained and the $2\times128$ unseen-panel bodies
+(derived from SMPL and released with attribution), their shape coefficients, and
+the clip-identifier lists and split record. The epoch-28,170 MorphMimic checkpoint
+evaluated in this paper (SHA-256 in Appendix~\ref{app:reproducibility}) is available at
+\url{https://huggingface.co/YugoAmaryl/morph-mimic} under a non-commercial licence;
+the epoch-34,000 checkpoint is not released. Reproducing the evaluations requires
+the motion corpus, or references regenerated with the released pipeline.
+Evaluation summaries and per-body results used in this manuscript are in
+Online Resource 1; the per-motion validation and test records are retained with
+the research records.
 
 \paragraph{AI assistance in manuscript preparation}
 An AI assistant was used to help restructure and draft manuscript text and
